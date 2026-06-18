@@ -1,4 +1,5 @@
-import { Engine, Scene, HemisphericLight, Vector3, Color4 } from '@babylonjs/core';
+import { Engine, Scene, HemisphericLight, Vector3, Color4, Matrix } from '@babylonjs/core';
+import { yawTo, rayGroundY0 } from './input/aimMath';
 import { createClock } from './core/clock';
 import { createBus } from './core/events';
 import { createLogger, logConfig } from './core/log';
@@ -13,6 +14,7 @@ import { createProjectilePool } from './combat/projectilePool';
 import { createProjectileView } from './combat/projectileView';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
+import { createFireRecorder } from './debug/fireRecorder';
 import type { TankComposition } from './tank/sockets';
 
 const BIOME_ID = 'steppe';
@@ -99,16 +101,45 @@ function boot(): void {
   const pool = createProjectilePool(PROJECTILE_CAPACITY);
   const projectileView = createProjectileView(scene, pool, PROJECTILE_CAPACITY);
 
-  // Feuern: Richtung aus der Turm-Weltausrichtung ableiten (lokal vorwärts = +Z)
+  // Permanenter Schuss-Rekorder: friert pro Schuss alle Zahlen + Cursor ein.
+  const recorder = createFireRecorder(scene, camera);
+  let simTime = 0; // Sekunden seit Boot (Sim-Uhr), in der Loop akkumuliert
+  let frame = 0;
+  let shotSeq = 0;
+
+  // Feuern: Richtung im KLICK-Augenblick frisch aus dem aktuellen Cursor ableiten —
+  // NICHT die (um einen Frame veraltete) Turm-Ausrichtung lesen. Sonst zielt der
+  // Schuss aufs Ziel vom letzten Frame (bewiesen: aimErr 7-40° beim Bewegen).
   function fire(): void {
     const root = tank.view.root;
     const turret = tank.view.turretNode;
-    turret.computeWorldMatrix(true);
-    const fwd = turret.getDirection(new Vector3(0, 0, 1));
-    const len = Math.hypot(fwd.x, fwd.z) || 1;
-    const dx = fwd.x / len;
-    const dz = fwd.z / len;
     const origin = root.getAbsolutePosition();
+    const ray = scene.createPickingRay(scene.pointerX, scene.pointerY, Matrix.Identity(), camera);
+    const g = rayGroundY0(
+      ray.origin.x,
+      ray.origin.y,
+      ray.origin.z,
+      ray.direction.x,
+      ray.direction.y,
+      ray.direction.z,
+    );
+    // Richtung vom Schuss-Ursprung zum Cursor-Bodenpunkt; Fallback: Turm-Vorwärts.
+    let dx: number;
+    let dz: number;
+    if (g) {
+      const tx = g.x - origin.x;
+      const tz = g.z - origin.z;
+      const tl = Math.hypot(tx, tz) || 1;
+      dx = tx / tl;
+      dz = tz / tl;
+      turret.rotation.y = yawTo(origin.x, origin.z, g.x, g.z); // Optik sofort mitziehen
+    } else {
+      turret.computeWorldMatrix(true);
+      const fwd = turret.getDirection(new Vector3(0, 0, 1));
+      const len = Math.hypot(fwd.x, fwd.z) || 1;
+      dx = fwd.x / len;
+      dz = fwd.z / len;
+    }
     const p = pool.acquire({
       x: origin.x,
       y: 0.5,
@@ -121,6 +152,20 @@ function boot(): void {
     if (p) {
       bus.emit('tank.fired', { tankId: tank.id });
       bus.emit('projectile.spawned', { id: p.id });
+      // Schuss mit Zeitstempel + eingefrorenem Cursor protokollieren.
+      recorder.recordShot({
+        shotId: ++shotSeq,
+        frame,
+        simTime,
+        tankX: root.position.x,
+        tankZ: root.position.z,
+        originX: origin.x,
+        originZ: origin.z,
+        dirX: dx,
+        dirZ: dz,
+        speed: PROJECTILE_SPEED,
+        range: PROJECTILE_SPEED * PROJECTILE_LIFE,
+      });
       log.debug('fired', { tankId: tank.id, projectile: p.id, dx, dz });
     } else {
       log.warn('pool full, shot dropped', { capacity: PROJECTILE_CAPACITY });
@@ -133,10 +178,10 @@ function boot(): void {
   const aimDebug = createAimDebug(scene, camera, tank, () => input.getAimTarget());
 
   // §21.5-Sichtbarkeitszähler periodisch loggen (aktiv == sichtbar)
-  let frame = 0;
 
   // GENAU EIN Loop. Reihenfolge: Steuerung -> Pool-Logik -> Boden-Recenter -> Mesh-Sync.
   startLoop(engine, scene, clock, (simDt) => {
+    simTime += simDt;
     input.update(simDt);
     pool.update(simDt);
     ground.update();
