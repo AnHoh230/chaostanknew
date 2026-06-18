@@ -12,6 +12,7 @@ import { createInput } from './input/input';
 import { createProjectilePool } from './combat/projectilePool';
 import { createProjectileView } from './combat/projectileView';
 import { startLoop } from './core/loop';
+import { createAimDebug } from './debug/aimDebug';
 import type { TankComposition } from './tank/sockets';
 
 const BIOME_ID = 'steppe';
@@ -92,7 +93,7 @@ function boot(): void {
   const ground = createEndlessGround(scene, tank.view.root, BIOME_ID);
 
   // Kamera auf den Panzer-Root
-  createCameraRig(scene, tank.view.root);
+  const camera = createCameraRig(scene, tank.view.root);
 
   // Projektil-Pool (rein logisch) + sichtbare Mesh-Brücke
   const pool = createProjectilePool(PROJECTILE_CAPACITY);
@@ -126,7 +127,10 @@ function boot(): void {
     }
   }
 
-  const input = createInput(scene, tank, TANK_SPEED, fire);
+  const input = createInput(scene, camera, tank, TANK_SPEED, fire);
+
+  // Mess-Overlay (Phase 1 Debugging): macht Cursor-Bodenpunkt, Ziel und Schussrichtung sichtbar.
+  const aimDebug = createAimDebug(scene, camera, tank, () => input.getAimTarget());
 
   // §21.5-Sichtbarkeitszähler periodisch loggen (aktiv == sichtbar)
   let frame = 0;
@@ -137,6 +141,7 @@ function boot(): void {
     pool.update(simDt);
     ground.update();
     projectileView.sync();
+    aimDebug.update();
 
     frame++;
     if (frame % 60 === 0) {
