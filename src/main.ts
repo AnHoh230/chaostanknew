@@ -14,6 +14,7 @@ import { createProjectilePool } from './combat/projectilePool';
 import { createProjectileView } from './combat/projectileView';
 import { createCombatSystem, type Combatant } from './combat/combat';
 import { createEnemyBrain } from './ai/enemyBrain';
+import { MOTIV_LABEL } from './ai/motives';
 import type { AiWorldView } from './ai/aiTypes';
 import { enemyLevelStats, type Enemy } from './enemy/enemy';
 import { createSpawner } from './enemy/spawner';
@@ -52,6 +53,7 @@ const ENEMY_SPEED = 5; // langsamer als der Spieler (8)
 const ENEMY_SIGHT = 60; // Sichtweite auf das Ziel
 const ENEMY_KEEP_DIST = 7; // beim Annähern nicht in den Spieler hineinlaufen
 const ENEMY_FIRE_COOLDOWN = 1.4; // Sekunden zwischen Gegner-Schüssen
+const NAMED_RESPAWN = 6; // Sekunden, bis ein gefallener benannter Rivale zurückkehrt
 const LEBENSSCHUB = 40; // HP-Schub bei Promotion (statt Tod)
 
 const log = createLogger('main');
@@ -212,14 +214,15 @@ function boot(cls: TankClass): void {
         const playerFrac = playerCombatant.hp / playerCombatant.maxHp;
         akteBuch.record(e.id, { ausgang: 'sieg', playerHpFrac: playerFrac });
         if (istKnapperSieg(playerFrac) && !e.named) {
-          const named = generateNamed('knapper_sieg', () => aiRng.next());
+          const named = generateNamed('knapper_sieg', MOTIV_LABEL[e.motiveId] ?? 'Aasgeier', () => aiRng.next());
           akteBuch.promote(e.id, named);
           e.named = named;
+          e.displayName = named.name; // "Panzer N" → "Garfild der Aasgeier"
           e.traits = { ...e.traits, ...named.traitOverlay };
           e.brain = createEnemyBrain(e.traits, () => aiRng.next());
           e.combatant.alive = true;
           e.combatant.hp = LEBENSSCHUB;
-          log.info('PROMOTION: der Rasende erwacht', { id: e.id, name: named.name });
+          log.info('PROMOTION', { id: e.id, name: named.name });
           reveal.triggerReveal(named, e.view.root, akteBuch.get(e.id)!);
           return;
         }
@@ -248,10 +251,18 @@ function boot(cls: TankClass): void {
         log.debug('enemy killed enemy', { tot: e.id, sieger: killerTeam });
       }
 
-      // Gegner aus der Welt entfernen (Nachschub rückt nach).
-      e.view.root.dispose();
-      const idx = roster.indexOf(e);
-      if (idx >= 0) roster.splice(idx, 1);
+      if (e.named) {
+        // Benannter Rivale: stirbt, KEHRT aber zurück (Nemesis) — bleibt im Roster.
+        e.combatant.alive = false;
+        e.view.root.setEnabled(false);
+        e.respawnTimer = NAMED_RESPAWN;
+        log.info('Rivale gefallen — kehrt zurück', { name: e.displayName });
+      } else {
+        // Normaler Gegner: endgültig weg, Nachschub rückt nach.
+        e.view.root.dispose();
+        const idx = roster.indexOf(e);
+        if (idx >= 0) roster.splice(idx, 1);
+      }
     },
   });
 
@@ -460,6 +471,14 @@ function boot(cls: TankClass): void {
       xpToNext: progression.xpToNext(), mk: progression.unlockedMk(),
     }),
     addXp: (n: number) => progression.addXp(n),
+    rosterFull: () =>
+      roster.map((e) => ({ name: e.displayName, alive: e.combatant.alive, respawn: +e.respawnTimer.toFixed(1), named: e.named !== null })),
+    smite: (name: string) => {
+      const e = roster.find((r) => r.displayName === name && r.combatant.alive);
+      if (!e) return 'nicht gefunden';
+      pool.acquire({ x: e.combatant.x, y: 0.5, z: e.combatant.z, dx: 1, dz: 0, speed: 1, life: 0.5, team: 'player', damage: 999999 });
+      return 'smite ' + name;
+    },
   };
 
   // §21.5-Sichtbarkeitszähler periodisch loggen (aktiv == sichtbar)
@@ -482,7 +501,22 @@ function boot(cls: TankClass): void {
     // Gegner-KI (M2): jeder Gegner jagt den lohnendsten Ziel-Panzer (Beutewert).
     const allC = liveCombatants();
     for (const e of roster) {
-      if (!e.combatant.alive) continue;
+      if (!e.combatant.alive) {
+        // Gefallener benannter Rivale: Countdown bis zur Rückkehr (Nemesis).
+        if (e.respawnTimer > 0) {
+          e.respawnTimer -= simDt;
+          if (e.respawnTimer <= 0) {
+            const ang = aiRng.next() * Math.PI * 2;
+            e.view.root.position.set(px + Math.cos(ang) * 46, 0, pz + Math.sin(ang) * 46);
+            e.combatant.hp = e.combatant.maxHp;
+            e.combatant.alive = true;
+            e.view.root.setEnabled(true);
+            e.prevTargetVisible = false; // Wiedererkennungs-Spruch beim nächsten Sichtkontakt
+            log.info('Rivale kehrt zurück', { name: e.displayName });
+          }
+        }
+        continue;
+      }
       const er = e.view.root;
       const ex = er.position.x;
       const ez = er.position.z;
@@ -615,7 +649,8 @@ function boot(cls: TankClass): void {
           x: e.combatant.x,
           z: e.combatant.z,
           hpFrac: e.combatant.hp / e.combatant.maxHp,
-          named: e.named?.name ?? null,
+          name: e.displayName,
+          isNamed: e.named !== null,
         })),
     );
 

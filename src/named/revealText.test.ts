@@ -3,7 +3,7 @@ import { revealLine, recognitionLine, archetypStil } from './revealText';
 import { generateNamed } from './promotion';
 import type { Akte } from './akte';
 
-const named = generateNamed('knapper_sieg', () => 0.3);
+const named = generateNamed('knapper_sieg', 'Aasgeier', () => 0.3);
 const akte: Akte = {
   enemyId: 'e1', begegnungen: 1, siege: 1, niederlagen: 0, knappsterSieg: 0.14, archiviert: false, named,
 };

@@ -23,7 +23,7 @@ describe('createAkteBuch', () => {
   it('promote hängt einen Named an, archive markiert die Akte', () => {
     const buch = createAkteBuch();
     buch.record('e1', { ausgang: 'sieg', playerHpFrac: 0.1 });
-    const named = generateNamed('knapper_sieg', () => 0.5);
+    const named = generateNamed('knapper_sieg', 'Aasgeier', () => 0.5);
     buch.promote('e1', named);
     expect(buch.get('e1')?.named?.archetyp).toBe('der Rasende');
     buch.archive('e1');

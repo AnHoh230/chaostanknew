@@ -5,7 +5,8 @@ export interface EnemyBarInfo {
   x: number;
   z: number;
   hpFrac: number;
-  named: string | null; // gesetzt = Named (roter Balken + Label)
+  name: string; // "Panzer N" oder Named-Name — wird IMMER angezeigt
+  isNamed: boolean; // true = benannter Rivale (rot + fett)
 }
 
 export interface EnemyBars {
@@ -37,8 +38,8 @@ export function createEnemyBars(scene: Scene, camera: Camera, engine: Engine): E
       'width:46px;text-align:center;';
     const label = document.createElement('div');
     label.style.cssText =
-      'font:700 9px/1.2 system-ui,sans-serif;color:#ff8a72;text-shadow:0 1px 2px #000;' +
-      'margin-bottom:2px;white-space:nowrap;display:none;';
+      'font:700 9px/1.2 system-ui,sans-serif;text-shadow:0 1px 2px #000;' +
+      'margin-bottom:2px;white-space:nowrap;';
     const track = document.createElement('div');
     track.style.cssText =
       'width:100%;height:5px;background:rgba(0,0,0,0.6);border:1px solid #0008;border-radius:3px;overflow:hidden;';
@@ -79,9 +80,10 @@ export function createEnemyBars(scene: Scene, camera: Camera, engine: Engine): E
       b.wrap.style.left = p.sx + 'px';
       b.wrap.style.top = p.sy + 'px';
       b.fill.style.width = Math.max(0, Math.min(1, e.hpFrac) * 100) + '%';
-      b.fill.style.background = e.named ? '#ff3b30' : hpColor(e.hpFrac);
-      b.label.textContent = e.named ?? '';
-      b.label.style.display = e.named ? 'block' : 'none';
+      b.fill.style.background = e.isNamed ? '#ff3b30' : hpColor(e.hpFrac);
+      b.label.textContent = e.name;
+      b.label.style.color = e.isNamed ? '#ff8a72' : '#cdd6dd';
+      b.label.style.fontSize = e.isNamed ? '11px' : '9px';
     }
   }
 

@@ -1,5 +1,15 @@
 import type { TraitProfile } from './aiTypes';
 
+/** Anzeigename des Motivs (für Promotion-Namen "Vorname der ‹Motiv›"). */
+export const MOTIV_LABEL: Record<string, string> = {
+  aasgeier: 'Aasgeier',
+  schatzjaeger: 'Schatzjäger',
+  angsthase: 'Angsthase',
+  aufruester: 'Aufrüster',
+  rudelfuehrer: 'Rudelführer',
+  platzhirsch: 'Platzhirsch',
+};
+
 /**
  * Motiv-Archetyp-Voreinstellungen (Spec 7.2). Mischungen entstehen aus den
  * Trait-Werten; das hier sind nur Startpunkte, keine harten Klassen.

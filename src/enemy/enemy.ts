@@ -18,10 +18,12 @@ export interface Enemy {
   fireCd: number;
   action: AiAction | 'idle';
   named: Named | null;
+  displayName: string; // "Panzer N" — bei Promotion der Named-Name
   prevTargetVisible: boolean;
   level: number; // eigenes Level (unabhängig von Spieler-MK)
   credits: number; // verdient durch eigene Kills → Aufrüstung
   shopCd: number; // Sekunden bis zum nächsten Aufrüst-Versuch
+  respawnTimer: number; // >0 = tot, kehrt als benannter Rivale zurück (Nemesis)
 }
 
 export interface EnemySpec {
@@ -31,6 +33,7 @@ export interface EnemySpec {
   comp: TankComposition;
   spawn: { x: number; z: number };
   level: number;
+  displayName: string;
 }
 
 /** Gegner-Stats aus seinem Level (eigene Skala, NICHT an die Spieler-MK gekoppelt). */
@@ -74,9 +77,11 @@ export function createEnemyEntity(
     fireCd: 0,
     action: 'idle',
     named: null,
+    displayName: spec.displayName,
     prevTargetVisible: false,
     level: spec.level,
     credits: 0,
     shopCd: 4 + rng() * 4,
+    respawnTimer: 0,
   };
 }

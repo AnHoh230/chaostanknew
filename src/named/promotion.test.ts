@@ -15,23 +15,23 @@ describe('istKnapperSieg', () => {
 });
 
 describe('generateNamed', () => {
-  it('Origin knapper_sieg → der Rasende, rachsüchtig (flieht nie), Lebensschub-Perk', () => {
-    const named = generateNamed('knapper_sieg', () => 0.5);
+  it('Name = "Vorname der ‹Motiv›", Origin liefert Perks (Lebensschub, flieht nie)', () => {
+    const named = generateNamed('knapper_sieg', 'Aasgeier', () => 0.5);
     expect(named.archetyp).toBe('der Rasende');
-    expect(named.name.endsWith(', der Rasende')).toBe(true);
-    expect(named.name.length).toBeGreaterThan(', der Rasende'.length);
+    expect(named.name.endsWith(' der Aasgeier')).toBe(true);
+    expect(named.name.split(' ')[0]!.length).toBeGreaterThan(0); // hat einen Vornamen
     expect(named.traitOverlay.vorsicht).toBe(0);
     expect(named.perks).toContain('lebensschub_vor_tod');
     expect(named.signaturTeil.length).toBeGreaterThan(0);
   });
 
   it('ist seed-deterministisch (gleicher Seed → gleicher Name)', () => {
-    const a = generateNamed('knapper_sieg', createRng(99).next);
-    const b = generateNamed('knapper_sieg', createRng(99).next);
+    const a = generateNamed('knapper_sieg', 'Schatzjäger', createRng(99).next);
+    const b = generateNamed('knapper_sieg', 'Schatzjäger', createRng(99).next);
     expect(a.name).toBe(b.name);
   });
 
   it('unbekannter Origin wirft laut', () => {
-    expect(() => generateNamed('irgendwas', () => 0.5)).toThrow(/Unbekannter Origin/);
+    expect(() => generateNamed('irgendwas', 'Aasgeier', () => 0.5)).toThrow(/Unbekannter Origin/);
   });
 });

@@ -16,24 +16,26 @@ export interface Named {
   signaturTeil: string;
 }
 
-const SILBEN = ['va', 'rok', 'thar', 'gru', 'mor', 'dak', 'sen', 'val', 'korr', 'zur', 'bran', 'hex'];
+const VORNAMEN = [
+  'Garfild', 'Borek', 'Hilde', 'Ragnar', 'Knut', 'Olga', 'Sven', 'Brunhild',
+  'Egon', 'Mathilda', 'Torsten', 'Gudrun', 'Helmar', 'Sieglinde', 'Falko', 'Roswita',
+];
 
-function silbe(rng: () => number): string {
-  return SILBEN[Math.floor(rng() * SILBEN.length)] ?? 'rok';
+function vorname(rng: () => number): string {
+  return VORNAMEN[Math.floor(rng() * VORNAMEN.length)] ?? 'Garfild';
 }
 
 /**
- * Origin → Generator → Ergebnis-Paket. Slice kennt EINEN Origin: 'knapper_sieg'
- * → "der Rasende" (rachsüchtig, flieht nie, Lebensschub kurz vorm Tod).
+ * Origin → Generator → Ergebnis-Paket. Der Name kombiniert einen Vornamen mit dem
+ * MOTIV des Gegners ("Garfild der Aasgeier"); der Origin 'knapper_sieg' liefert
+ * Perks/Trait-Verbiegung (rachsüchtig, flieht nie, Lebensschub).
  * Unbekannter Origin = lauter Fehler (kein stiller Fallback).
  */
-export function generateNamed(origin: string, rng: () => number): Named {
+export function generateNamed(origin: string, motivLabel: string, rng: () => number): Named {
   if (origin !== 'knapper_sieg') throw new Error('Unbekannter Origin: ' + origin);
-  const eigenname = silbe(rng) + silbe(rng);
-  const name = eigenname.charAt(0).toUpperCase() + eigenname.slice(1) + ', der Rasende';
   return {
-    archetyp: 'der Rasende',
-    name,
+    archetyp: 'der Rasende', // Origin-Archetyp steuert Reveal-Stil + Perks
+    name: `${vorname(rng)} der ${motivLabel}`,
     traitOverlay: { vorsicht: 0, stolz: 1, mut: 1 }, // rachsüchtig, flieht nie
     perks: ['lebensschub_vor_tod'],
     signaturTeil: 'turm_rasend',

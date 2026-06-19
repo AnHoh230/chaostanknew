@@ -35,6 +35,7 @@ export function createSpawner(
 ): Spawner {
   let cd = 1.0; // erste Welle kommt schnell
   let seq = 0;
+  let nameSeq = 0; // fortlaufende "Panzer N"-Nummer
 
   function update(simDt: number, px: number, pz: number, aliveCount: number): Enemy | null {
     cd -= simDt;
@@ -56,6 +57,7 @@ export function createSpawner(
       comp: MOTIVE_COMP[motiveId] ?? MOTIVE_COMP.aasgeier!,
       spawn: { x, z },
       level,
+      displayName: 'Panzer ' + ++nameSeq,
     };
     return createEnemyEntity(scene, spec, tankRadius, rng);
   }
