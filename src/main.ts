@@ -24,6 +24,8 @@ import { createReveal } from './reveal/reveal';
 import { createHud } from './ui/hud';
 import { createMinimap } from './ui/minimap';
 import { TANK_CLASSES, type TankClass } from './game/classes';
+import { createPickupField } from './loot/pickups';
+import { getPart, type Part } from './loot/parts';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
 import { createFireRecorder } from './debug/fireRecorder';
@@ -182,6 +184,19 @@ function boot(cls: TankClass): void {
   // Duell-Gedächtnis (vor dem Kampf-System: dessen Tod-Handler nutzt es).
   const akteBuch = createAkteBuch();
 
+  // Veränderbare Spieler-Stats (Loot kann sie heben). Start aus der Klasse.
+  let playerDamage = cls.damage;
+
+  // Welches Teil droppt welcher Gegner (M3).
+  const DROP_BY_ENEMY: Record<string, string> = {
+    aasgeier: 'ketten',
+    angsthase: 'breite_wanne',
+    platzhirsch: 'schwerer_turm',
+    schatzjaeger: 'lange_kanone',
+  };
+  const pickups = createPickupField(scene);
+  const PICKUP_REACH = TANK_RADIUS + 0.8;
+
   const combat = createCombatSystem(pool, () => combatants, {
     damage: HIT_DAMAGE,
     projectileRadius: PROJECTILE_RADIUS,
@@ -213,7 +228,10 @@ function boot(cls: TankClass): void {
         akteBuch.archive(e.id);
         e.view.root.setEnabled(false);
         bus.emit('tank.died', { tankId: e.id });
-        log.info('enemy died', { id: e.id, signaturTeilDrop: e.named?.signaturTeil ?? null });
+        // Beute droppen (M3): an der Todesposition ein Teil ablegen.
+        const partId = DROP_BY_ENEMY[e.id] ?? 'ketten';
+        pickups.spawn(getPart(partId), e.combatant.x, e.combatant.z);
+        log.info('enemy died', { id: e.id, drop: partId });
       }
     },
   });
@@ -266,7 +284,7 @@ function boot(cls: TankClass): void {
       speed: PROJECTILE_SPEED,
       life: PROJECTILE_LIFE,
       team: 'player',
-      damage: cls.damage,
+      damage: playerDamage,
     });
     if (p) {
       bus.emit('tank.fired', { tankId: tank.id });
@@ -314,6 +332,33 @@ function boot(cls: TankClass): void {
   const hud = createHud();
   const minimap = createMinimap();
 
+  // Loot-Toast: kurze Einblendung beim Aufsammeln eines Teils.
+  const toast = document.createElement('div');
+  toast.id = 'loot-toast';
+  toast.style.cssText =
+    'position:fixed;left:50%;bottom:64px;transform:translateX(-50%);z-index:22;pointer-events:none;' +
+    'font:700 16px system-ui,sans-serif;color:#ffe08a;background:rgba(8,10,12,0.72);' +
+    'padding:8px 16px;border-radius:8px;opacity:0;transition:opacity 0.2s;text-shadow:0 1px 3px #000;';
+  document.body.appendChild(toast);
+  function showToast(msg: string): void {
+    toast.textContent = msg;
+    toast.style.opacity = '1';
+    setTimeout(() => (toast.style.opacity = '0'), 1600);
+  }
+
+  // Teil anlegen (M3): Variante sichtbar tauschen + Stat-Wirkung + heilen.
+  function equip(part: Part): void {
+    tank.view.setVariant(part.socket, part.variantId);
+    if (part.damage) playerDamage += part.damage;
+    if (part.maxHp) {
+      playerCombatant.maxHp += part.maxHp;
+      playerCombatant.hp = Math.min(playerCombatant.maxHp, playerCombatant.hp + part.maxHp);
+    }
+    playerCombatant.lootValue = (playerCombatant.lootValue ?? 0) + 0.2; // saftigeres Ziel
+    showToast('Angebaut: ' + part.label);
+    log.info('part equipped', { part: part.id, dmg: playerDamage, maxHp: playerCombatant.maxHp });
+  }
+
   // Mess-Overlay (Phase 1 Debugging): macht Cursor-Bodenpunkt, Ziel und Schussrichtung sichtbar.
   const aimDebug = createAimDebug(scene, camera, tank, () => input.getAimTarget());
 
@@ -329,6 +374,9 @@ function boot(cls: TankClass): void {
         named: e.named?.name ?? null,
       })),
     akte: () => akteBuch.all(),
+    playerDamage: () => playerDamage,
+    pickupCount: () => pickups.count(),
+    equip,
   };
 
   // §21.5-Sichtbarkeitszähler periodisch loggen (aktiv == sichtbar)
@@ -418,6 +466,9 @@ function boot(cls: TankClass): void {
     playerCombatant.x = px;
     playerCombatant.z = pz;
     combat.update();
+
+    // Beute einsammeln: fährt der Spieler über ein Teil → anlegen.
+    pickups.update(px, pz, PICKUP_REACH, equip);
 
     ground.update();
     projectileView.sync();
