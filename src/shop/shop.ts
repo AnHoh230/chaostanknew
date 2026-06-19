@@ -1,4 +1,4 @@
-import type { ShopItem } from './catalog';
+import type { ShopItem, Slot } from './catalog';
 import { sellValue } from './buyLogic';
 
 export interface ShopHooks {
@@ -18,7 +18,11 @@ export interface Shop {
   refresh(): void;
 }
 
-const SLOT_ORDER = ['waffe', 'wanne', 'turm', 'raeder', 'ruestung'];
+const SLOT_ORDER: Slot[] = ['waffe', 'wanne', 'turm', 'raeder', 'ruestung'];
+const SLOT_LABELS: Record<Slot, string> = {
+  waffe: 'Waffe', wanne: 'Wanne', turm: 'Turm', raeder: 'Räder', ruestung: 'Rüstung',
+};
+type SlotFilter = Slot | 'alle';
 
 function statText(it: ShopItem): string {
   if (it.damage) return `+${it.damage} Schaden`;
@@ -58,6 +62,7 @@ export function createShop(h: ShopHooks): Shop {
   document.body.appendChild(panel);
 
   let open = false;
+  let slotFilter: SlotFilter = 'alle';
 
   function row(label: string, sub: string, right: string, enabled: boolean, color: string, onClick?: () => void): HTMLElement {
     const b = document.createElement('button');
@@ -80,6 +85,7 @@ export function createShop(h: ShopHooks): Shop {
 
     const buyable = h.items
       .filter((it) => it.rarity === 'normal' && it.mk <= mk && !h.isEquipped(it.id))
+      .filter((it) => slotFilter === 'alle' || it.slot === slotFilter)
       .sort((a, b) => SLOT_ORDER.indexOf(a.slot) - SLOT_ORDER.indexOf(b.slot) || a.mk - b.mk);
     const equipped = h.getEquipped();
 
@@ -92,6 +98,25 @@ export function createShop(h: ShopHooks): Shop {
       `</div>`;
     const buyCol = inner.querySelector('#shop-buy')!;
     const sellCol = inner.querySelector('#shop-sell')!;
+
+    // Slot-Filter-Leiste.
+    const bar = document.createElement('div');
+    bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;';
+    const filters: SlotFilter[] = ['alle', ...SLOT_ORDER];
+    for (const f of filters) {
+      const active = slotFilter === f;
+      const fb = document.createElement('button');
+      fb.textContent = f === 'alle' ? 'Alle' : SLOT_LABELS[f];
+      fb.style.cssText =
+        'padding:5px 11px;border-radius:6px;border:1px solid #2a343b;cursor:pointer;font:600 12px system-ui;' +
+        (active ? 'background:#d8b04a;color:#1a1d22;' : 'background:#1a1f25;color:#cdd6dd;');
+      fb.addEventListener('click', () => {
+        slotFilter = f;
+        refresh();
+      });
+      bar.appendChild(fb);
+    }
+    buyCol.appendChild(bar);
 
     for (const it of buyable) {
       const afford = h.getMoney() >= it.cost;
