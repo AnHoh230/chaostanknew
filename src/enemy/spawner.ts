@@ -19,7 +19,7 @@ export interface SpawnerOptions {
   interval: number; // Sekunden zwischen Spawns
   radiusMin: number; // Spawn-Abstand zum Spieler (außer Sicht)
   radiusMax: number;
-  baseHp: number;
+  maxLevel: number; // höchstes Spawn-Level (Gegner leveln im Spiel weiter hoch)
 }
 
 export interface Spawner {
@@ -48,14 +48,14 @@ export function createSpawner(
     const z = pz + Math.sin(ang) * r;
 
     const motiveId = MOTIVE_IDS[Math.floor(rng() * MOTIVE_IDS.length)]!;
+    const level = 1 + Math.floor(rng() * opts.maxLevel);
     const spec: EnemySpec = {
       id: 'e' + seq++,
       motiveId,
       traits: MOTIVE_PRESETS[motiveId]!,
       comp: MOTIVE_COMP[motiveId] ?? MOTIVE_COMP.aasgeier!,
       spawn: { x, z },
-      hp: Math.round(opts.baseHp * (0.85 + rng() * 0.4)),
-      lootValue: 0.3 + rng() * 0.4,
+      level,
     };
     return createEnemyEntity(scene, spec, tankRadius, rng);
   }

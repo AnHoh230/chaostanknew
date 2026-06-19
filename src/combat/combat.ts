@@ -36,7 +36,7 @@ export interface CombatOptions {
   damage: number; // Schaden pro Treffer
   projectileRadius: number;
   onHit?: (h: HitInfo) => void;
-  onDeath?: (target: Combatant) => void;
+  onDeath?: (target: Combatant, killerTeam: string) => void;
 }
 
 export interface CombatSystem {
@@ -70,7 +70,7 @@ export function createCombatSystem(
           }
           pool.deactivate(p);
           opts.onHit?.({ projectile: p, target: t, damage: dmg, lethal });
-          if (lethal) opts.onDeath?.(t);
+          if (lethal) opts.onDeath?.(t, p.team);
           return; // dieses Projektil ist verbraucht
         }
       }

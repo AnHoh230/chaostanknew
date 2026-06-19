@@ -6,7 +6,7 @@ import type { TraitProfile, AiAction } from '../ai/aiTypes';
 import type { Combatant } from '../combat/combat';
 import type { Named } from '../named/promotion';
 
-/** Ein lebender Gegner: Optik + Trefferdaten + Gehirn + Promotion-Zustand. */
+/** Ein lebender Gegner: Optik + Trefferdaten + Gehirn + Level/Credits + Promotion. */
 export interface Enemy {
   id: string;
   motiveId: string;
@@ -19,6 +19,9 @@ export interface Enemy {
   action: AiAction | 'idle';
   named: Named | null;
   prevTargetVisible: boolean;
+  level: number; // eigenes Level (unabhängig von Spieler-MK)
+  credits: number; // verdient durch eigene Kills → Aufrüstung
+  shopCd: number; // Sekunden bis zum nächsten Aufrüst-Versuch
 }
 
 export interface EnemySpec {
@@ -27,8 +30,16 @@ export interface EnemySpec {
   traits: TraitProfile;
   comp: TankComposition;
   spawn: { x: number; z: number };
-  hp: number;
-  lootValue: number;
+  level: number;
+}
+
+/** Gegner-Stats aus seinem Level (eigene Skala, NICHT an die Spieler-MK gekoppelt). */
+export function enemyLevelStats(level: number): { hp: number; damage: number; lootValue: number } {
+  return {
+    hp: Math.round(60 + level * 40),
+    damage: Math.round(4 + level * 2),
+    lootValue: +(0.3 + level * 0.18).toFixed(2),
+  };
 }
 
 /** Erzeugt einen Gegner inkl. Mesh, Combatant und frischem Gehirn. */
@@ -40,16 +51,17 @@ export function createEnemyEntity(
 ): Enemy {
   const view = createTankView(scene, spec.comp);
   view.root.position.set(spec.spawn.x, 0, spec.spawn.z);
+  const st = enemyLevelStats(spec.level);
   const combatant: Combatant = {
     id: spec.id,
-    team: 'enemy',
+    team: spec.id, // jeder Gegner = eigene Fraktion → kann andere treffen
     x: spec.spawn.x,
     z: spec.spawn.z,
     radius,
-    hp: spec.hp,
-    maxHp: spec.hp,
+    hp: st.hp,
+    maxHp: st.hp,
     alive: true,
-    lootValue: spec.lootValue,
+    lootValue: st.lootValue,
   };
   return {
     id: spec.id,
@@ -63,5 +75,8 @@ export function createEnemyEntity(
     action: 'idle',
     named: null,
     prevTargetVisible: false,
+    level: spec.level,
+    credits: 0,
+    shopCd: 4 + rng() * 4,
   };
 }

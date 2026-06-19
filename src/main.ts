@@ -15,7 +15,7 @@ import { createProjectileView } from './combat/projectileView';
 import { createCombatSystem, type Combatant } from './combat/combat';
 import { createEnemyBrain } from './ai/enemyBrain';
 import type { AiWorldView } from './ai/aiTypes';
-import { type Enemy } from './enemy/enemy';
+import { enemyLevelStats, type Enemy } from './enemy/enemy';
 import { createSpawner } from './enemy/spawner';
 import { pickTarget, type TargetInfo } from './enemy/targeting';
 import { createAkteBuch } from './named/akte';
@@ -47,7 +47,6 @@ const HIT_DAMAGE = 20; // Schaden pro Treffer (100 HP -> 5 Treffer)
 const ENEMY_SPEED = 5; // langsamer als der Spieler (8)
 const ENEMY_SIGHT = 60; // Sichtweite auf das Ziel
 const ENEMY_KEEP_DIST = 7; // beim Annähern nicht in den Spieler hineinlaufen
-const ENEMY_DAMAGE = 6; // Schaden eines Gegner-Treffers am Spieler
 const ENEMY_FIRE_COOLDOWN = 1.4; // Sekunden zwischen Gegner-Schüssen
 const LEBENSSCHUB = 40; // HP-Schub bei Promotion (statt Tod)
 
@@ -164,11 +163,11 @@ function boot(cls: TankClass): void {
   const aiRng = createRng(SEED + 7);
   const roster: Enemy[] = []; // lebende + frisch promotete Gegner (dynamisch)
   const spawner = createSpawner(scene, TANK_RADIUS, () => aiRng.next(), {
-    maxAlive: 5,
+    maxAlive: 6,
     interval: 2.5,
     radiusMin: 40,
     radiusMax: 55,
-    baseHp: 110,
+    maxLevel: 3,
   });
 
   // Combatant des Spielers (Gegner-Combatants liefert der Roster dynamisch).
@@ -194,7 +193,7 @@ function boot(cls: TankClass): void {
     damage: HIT_DAMAGE,
     projectileRadius: PROJECTILE_RADIUS,
     onHit: (h) => log.debug('hit', { target: h.target.id, hp: h.target.hp, lethal: h.lethal }),
-    onDeath: (t) => {
+    onDeath: (t, killerTeam) => {
       if (t.id === 'player') {
         log.warn('player died', {});
         bus.emit('tank.died', { tankId: 'player' });
@@ -202,45 +201,53 @@ function boot(cls: TankClass): void {
       }
       const e = roster.find((r) => r.id === t.id);
       if (!e) return;
-      // Gegner würde sterben: bei knappem Spieler-Sieg PROMOTION statt Tod.
-      const playerFrac = playerCombatant.hp / playerCombatant.maxHp;
-      akteBuch.record(e.id, { ausgang: 'sieg', playerHpFrac: playerFrac });
-      if (istKnapperSieg(playerFrac) && !e.named) {
-        const named = generateNamed('knapper_sieg', () => aiRng.next());
-        akteBuch.promote(e.id, named);
-        e.named = named;
-        e.traits = { ...e.traits, ...named.traitOverlay }; // rachsüchtig, flieht nie
-        e.brain = createEnemyBrain(e.traits, () => aiRng.next());
-        e.combatant.alive = true; // Lebensschub statt Tod
-        e.combatant.hp = LEBENSSCHUB;
-        log.info('PROMOTION: der Rasende erwacht', {
-          id: e.id, name: named.name, atPlayerHp: +playerFrac.toFixed(2),
-        });
-        reveal.triggerReveal(named, e.view.root, akteBuch.get(e.id)!);
-      } else {
-        akteBuch.archive(e.id);
-        bus.emit('tank.died', { tankId: e.id });
-        // Beute droppen (P5): zufälliges Katalog-Item (normal ODER selten),
-        // level-nah (bis MK freigeschaltet+1) — Drops können alles sein.
-        const dropPool = CATALOG.filter((it) => it.mk <= progression.unlockedMk() + 1);
-        const part = dropPool[Math.floor(aiRng.next() * dropPool.length)]!;
-        pickups.spawn(part, e.combatant.x, e.combatant.z);
-        // Spielgeld (M4): Belohnung nach Beutewert.
-        const reward = Math.round((e.combatant.lootValue ?? 0.4) * 120);
+      const byPlayer = killerTeam === 'player';
+
+      // PROMOTION nur bei knappem SPIELER-Sieg (Lebensschub statt Tod).
+      if (byPlayer) {
+        const playerFrac = playerCombatant.hp / playerCombatant.maxHp;
+        akteBuch.record(e.id, { ausgang: 'sieg', playerHpFrac: playerFrac });
+        if (istKnapperSieg(playerFrac) && !e.named) {
+          const named = generateNamed('knapper_sieg', () => aiRng.next());
+          akteBuch.promote(e.id, named);
+          e.named = named;
+          e.traits = { ...e.traits, ...named.traitOverlay };
+          e.brain = createEnemyBrain(e.traits, () => aiRng.next());
+          e.combatant.alive = true;
+          e.combatant.hp = LEBENSSCHUB;
+          log.info('PROMOTION: der Rasende erwacht', { id: e.id, name: named.name });
+          reveal.triggerReveal(named, e.view.root, akteBuch.get(e.id)!);
+          return;
+        }
+      }
+
+      // Normaler Tod: Beute droppen (kann jeder aufsammeln).
+      bus.emit('tank.died', { tankId: e.id });
+      const dropPool = CATALOG.filter((it) => it.mk <= progression.unlockedMk() + 1);
+      const part = dropPool[Math.floor(aiRng.next() * dropPool.length)]!;
+      pickups.spawn(part, e.combatant.x, e.combatant.z);
+      const reward = Math.round((e.combatant.lootValue ?? 0.4) * 120);
+
+      if (byPlayer) {
+        // Spieler-Kill: Geld + XP.
         geld += reward;
-        // EXP (P2): Level/MK steigen mit Kills.
-        const xpReward = Math.round(18 + (e.combatant.lootValue ?? 0.4) * 60);
-        const up = progression.addXp(xpReward);
+        const up = progression.addXp(Math.round(18 + (e.combatant.lootValue ?? 0.4) * 60));
         if (up.gained > 0) {
           const mkNote = up.newMkUnlocks.length ? ` — MK${up.newMkUnlocks[up.newMkUnlocks.length - 1]} frei!` : '';
           showToast(`Level ${progression.level}${mkNote}`);
         }
-        log.info('enemy died', { id: e.id, drop: part.id, reward, xp: xpReward, lvl: progression.level });
-        // Gegner aus der Welt entfernen (P1: Platz für Nachschub).
-        e.view.root.dispose();
-        const idx = roster.indexOf(e);
-        if (idx >= 0) roster.splice(idx, 1);
+        log.info('enemy died (Spieler)', { id: e.id, drop: part.id, reward });
+      } else {
+        // Gegner-killt-Gegner: der Sieger bekommt Credits (→ Aufrüstung), kein Spieler-Gewinn.
+        const killer = roster.find((r) => r.id === killerTeam);
+        if (killer) killer.credits += reward;
+        log.debug('enemy killed enemy', { tot: e.id, sieger: killerTeam });
       }
+
+      // Gegner aus der Welt entfernen (Nachschub rückt nach).
+      e.view.root.dispose();
+      const idx = roster.indexOf(e);
+      if (idx >= 0) roster.splice(idx, 1);
     },
   });
 
@@ -317,14 +324,14 @@ function boot(cls: TankClass): void {
     }
   }
 
-  // Gegner feuert auf sein Ziel (team 'enemy', eigener Schaden).
-  function enemyFire(ox: number, oz: number, tx: number, tz: number): void {
+  // Gegner feuert auf sein Ziel — eigene Fraktion (team = Gegner-id) + Level-Schaden.
+  function enemyFire(ox: number, oz: number, tx: number, tz: number, team: string, damage: number): void {
     const dx = tx - ox;
     const dz = tz - oz;
     const l = Math.hypot(dx, dz) || 1;
     const p = pool.acquire({
       x: ox, y: 0.5, z: oz, dx: dx / l, dz: dz / l,
-      speed: PROJECTILE_SPEED, life: PROJECTILE_LIFE, team: 'enemy', damage: ENEMY_DAMAGE,
+      speed: PROJECTILE_SPEED, life: PROJECTILE_LIFE, team, damage,
     });
     if (p) bus.emit('projectile.spawned', { id: p.id });
   }
@@ -416,8 +423,9 @@ function boot(cls: TankClass): void {
     enemies: roster.map((e) => e.combatant),
     roster: () =>
       roster.map((e) => ({
-        id: e.id, motive: e.motiveId, action: e.action,
-        hp: e.combatant.hp, alive: e.combatant.alive,
+        id: e.id, motive: e.motiveId, action: e.action, level: e.level,
+        credits: e.credits, hp: e.combatant.hp, alive: e.combatant.alive,
+        loot: e.combatant.lootValue, team: e.combatant.team,
         x: +e.combatant.x.toFixed(1), z: +e.combatant.z.toFixed(1),
         named: e.named?.name ?? null,
       })),
@@ -466,7 +474,7 @@ function boot(cls: TankClass): void {
         if (c.id === e.id) continue;
         cands.push({ id: c.id, team: c.team, x: c.x, z: c.z, lootValue: c.lootValue ?? 0, alive: c.alive });
       }
-      const target = pickTarget(ex, ez, 'enemy', ENEMY_SIGHT, cands);
+      const target = pickTarget(ex, ez, e.combatant.team, ENEMY_SIGHT, cands);
       const tvis = target !== null;
       const tx = target ? target.x : ex;
       const tz = target ? target.z : ez;
@@ -508,11 +516,26 @@ function boot(cls: TankClass): void {
         e.view.turretNode.rotation.y = yaw - er.rotation.y;
       }
 
-      // Auf Sicht feuern (so kann Spieler-HP fallen → knapper Sieg → Promotion).
+      // Auf Sicht feuern — eigene Fraktion + Level-Schaden (trifft Spieler UND Gegner).
       e.fireCd -= simDt;
       if (tvis && e.fireCd <= 0) {
-        enemyFire(er.position.x, er.position.z, tx, tz);
+        enemyFire(er.position.x, er.position.z, tx, tz, e.combatant.team, enemyLevelStats(e.level).damage);
         e.fireCd = ENEMY_FIRE_COOLDOWN;
+      }
+
+      // Gegner-Shop (E4): verdiente Credits autonom in ein Level investieren.
+      e.shopCd -= simDt;
+      if (e.shopCd <= 0) {
+        e.shopCd = 5;
+        const upgradeCost = 40 + e.level * 30;
+        if (e.credits >= upgradeCost && e.level < 10) {
+          e.credits -= upgradeCost;
+          e.level += 1;
+          const st = enemyLevelStats(e.level);
+          e.combatant.maxHp = st.hp;
+          e.combatant.hp = st.hp; // frisch aufgerüstet = repariert
+          e.combatant.lootValue = st.lootValue; // wertvoller → wird selbst zum Ziel
+        }
       }
 
       // Wiedererkennung: Spieler erneut in Sicht NACH Reveal → anderer Spruch, kein Reveal.
