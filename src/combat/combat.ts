@@ -33,8 +33,8 @@ export interface CombatSystem {
 
 /**
  * Treffer-Auflösung pro Frame: jedes aktive Projektil gegen jeden lebenden
- * Combatant testen, dessen Team NICHT 'player' ist (im Slice feuert nur der
- * Spieler). Treffer = Schaden + Projektil verbraucht; HP<=0 = Tod (einmalig).
+ * Combatant des GEGNERISCHEN Teams testen (kein Eigen-/Freundfeuer). Treffer =
+ * Schaden + Projektil verbraucht; HP<=0 = Tod (einmalig).
  */
 export function createCombatSystem(
   pool: ProjectilePool,
@@ -46,16 +46,17 @@ export function createCombatSystem(
     pool.forEachActive((p) => {
       for (let i = 0; i < targets.length; i++) {
         const t = targets[i]!;
-        if (!t.alive || t.team === 'player') continue;
+        if (!t.alive || t.team === p.team) continue;
         if (circleOverlap(p.x, p.z, opts.projectileRadius, t.x, t.z, t.radius)) {
-          t.hp -= opts.damage;
+          const dmg = p.damage > 0 ? p.damage : opts.damage;
+          t.hp -= dmg;
           const lethal = t.hp <= 0;
           if (lethal) {
             t.hp = 0;
             t.alive = false;
           }
           pool.deactivate(p);
-          opts.onHit?.({ projectile: p, target: t, damage: opts.damage, lethal });
+          opts.onHit?.({ projectile: p, target: t, damage: dmg, lethal });
           if (lethal) opts.onDeath?.(t);
           return; // dieses Projektil ist verbraucht
         }

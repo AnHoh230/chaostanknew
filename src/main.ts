@@ -15,7 +15,9 @@ import { createProjectileView } from './combat/projectileView';
 import { createCombatSystem, type Combatant } from './combat/combat';
 import { createEnemyBrain } from './ai/enemyBrain';
 import { MOTIVE_PRESETS } from './ai/motives';
-import type { AiWorldView } from './ai/aiTypes';
+import type { AiWorldView, TraitProfile } from './ai/aiTypes';
+import { createAkteBuch } from './named/akte';
+import { generateNamed, istKnapperSieg, type Named } from './named/promotion';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
 import { createFireRecorder } from './debug/fireRecorder';
@@ -35,6 +37,9 @@ const ENEMY_SPAWN = { x: 14, z: 10 };
 const ENEMY_SPEED = 5; // langsamer als der Spieler (8)
 const ENEMY_SIGHT = 60; // Sichtweite auf das Ziel
 const ENEMY_KEEP_DIST = 7; // beim Annähern nicht in den Spieler hineinlaufen
+const ENEMY_DAMAGE = 8; // Schaden eines Gegner-Treffers am Spieler
+const ENEMY_FIRE_COOLDOWN = 1.1; // Sekunden zwischen Gegner-Schüssen
+const LEBENSSCHUB = 40; // HP-Schub bei Promotion (statt Tod)
 
 const log = createLogger('main');
 
@@ -134,22 +139,46 @@ function boot(): void {
   };
   const combatants: Combatant[] = [playerCombatant, enemyCombatant];
 
+  // Motiv-KI + Duell-Gedächtnis (vor dem Kampf-System: dessen Tod-Handler nutzt beides).
+  const aiRng = createRng(SEED + 7);
+  let enemyTraits: TraitProfile = { ...MOTIVE_PRESETS.aasgeier! };
+  let enemyBrain = createEnemyBrain(enemyTraits, () => aiRng.next());
+  let enemyAction = 'idle';
+  const akteBuch = createAkteBuch();
+  let enemyNamed: Named | null = null;
+
   const combat = createCombatSystem(pool, () => combatants, {
     damage: HIT_DAMAGE,
     projectileRadius: PROJECTILE_RADIUS,
     onHit: (h) => log.debug('hit', { target: h.target.id, hp: h.target.hp, lethal: h.lethal }),
     onDeath: (t) => {
-      log.info('tank died', { id: t.id });
-      bus.emit('tank.died', { tankId: t.id });
-      if (t.id === 'enemy') enemyView.root.setEnabled(false);
+      if (t.id === 'player') {
+        log.warn('player died', {});
+        bus.emit('tank.died', { tankId: 'player' });
+        return;
+      }
+      // Gegner würde sterben: bei knappem Spieler-Sieg PROMOTION statt Tod.
+      const playerFrac = playerCombatant.hp / playerCombatant.maxHp;
+      akteBuch.record('enemy', { ausgang: 'sieg', playerHpFrac: playerFrac });
+      if (istKnapperSieg(playerFrac) && !enemyNamed) {
+        const named = generateNamed('knapper_sieg', () => aiRng.next());
+        akteBuch.promote('enemy', named);
+        enemyNamed = named;
+        enemyTraits = { ...enemyTraits, ...named.traitOverlay }; // rachsüchtig, flieht nie
+        enemyBrain = createEnemyBrain(enemyTraits, () => aiRng.next());
+        enemyCombatant.alive = true; // Lebensschub statt Tod
+        enemyCombatant.hp = LEBENSSCHUB;
+        log.info('PROMOTION: der Rasende erwacht', {
+          name: named.name, perks: named.perks, atPlayerHp: +playerFrac.toFixed(2),
+        });
+      } else {
+        akteBuch.archive('enemy');
+        enemyView.root.setEnabled(false);
+        bus.emit('tank.died', { tankId: 'enemy' });
+        log.info('enemy died', { signaturTeilDrop: enemyNamed?.signaturTeil ?? null });
+      }
     },
   });
-
-  // Motiv-KI des Gegners (Slice 1b-2): Aasgeier. Eigener Seed, damit die Wahl
-  // reproduzierbar bleibt und nicht mit anderen RNG-Verbrauchern kollidiert.
-  const aiRng = createRng(SEED + 7);
-  const enemyBrain = createEnemyBrain(MOTIVE_PRESETS.aasgeier!, () => aiRng.next());
-  let enemyAction = 'idle';
 
   // Permanenter Schuss-Rekorder: friert pro Schuss alle Zahlen + Cursor ein.
   const recorder = createFireRecorder(scene, camera);
@@ -198,6 +227,8 @@ function boot(): void {
       dz,
       speed: PROJECTILE_SPEED,
       life: PROJECTILE_LIFE,
+      team: 'player',
+      damage: HIT_DAMAGE,
     });
     if (p) {
       bus.emit('tank.fired', { tankId: tank.id });
@@ -222,6 +253,19 @@ function boot(): void {
     }
   }
 
+  // Gegner feuert auf den Spieler (team 'enemy', eigener Schaden).
+  let enemyFireCd = ENEMY_FIRE_COOLDOWN;
+  function enemyFire(ox: number, oz: number, tx: number, tz: number): void {
+    const dx = tx - ox;
+    const dz = tz - oz;
+    const l = Math.hypot(dx, dz) || 1;
+    const p = pool.acquire({
+      x: ox, y: 0.5, z: oz, dx: dx / l, dz: dz / l,
+      speed: PROJECTILE_SPEED, life: PROJECTILE_LIFE, team: 'enemy', damage: ENEMY_DAMAGE,
+    });
+    if (p) bus.emit('projectile.spawned', { id: p.id });
+  }
+
   const input = createInput(scene, camera, tank, TANK_SPEED, fire);
 
   // OS-Mauszeiger über dem Canvas ausblenden — das Spiel zeichnet sein eigenes
@@ -231,6 +275,14 @@ function boot(): void {
 
   // Mess-Overlay (Phase 1 Debugging): macht Cursor-Bodenpunkt, Ziel und Schussrichtung sichtbar.
   const aimDebug = createAimDebug(scene, camera, tank, () => input.getAimTarget());
+
+  // Debug-Hooks für deterministische Verifikation (Promotion etc.).
+  (window as unknown as { __dbg: unknown }).__dbg = {
+    player: playerCombatant,
+    enemy: enemyCombatant,
+    akte: () => akteBuch.all(),
+    named: () => enemyNamed,
+  };
 
   // §21.5-Sichtbarkeitszähler periodisch loggen (aktiv == sichtbar)
 
@@ -278,6 +330,13 @@ function boot(): void {
         er.position.z += mz * step;
         er.rotation.y = Math.atan2(mx, mz); // in Laufrichtung drehen
       }
+
+      // Auf Sicht zurückfeuern (so kann die Spieler-HP fallen → knapper Sieg).
+      enemyFireCd -= simDt;
+      if (world.targetVisible && enemyFireCd <= 0) {
+        enemyFire(er.position.x, er.position.z, px, pz);
+        enemyFireCd = ENEMY_FIRE_COOLDOWN;
+      }
     }
 
     // Combatant-Positionen aus den Panzer-Roots spiegeln, dann Treffer auflösen.
@@ -303,8 +362,11 @@ function boot(): void {
       turretYawDeg: +((tank.view.turretNode.rotation.y * 180) / Math.PI).toFixed(2),
       tankX: +tank.view.root.position.x.toFixed(3),
       tankZ: +tank.view.root.position.z.toFixed(3),
+      playerHp: playerCombatant.hp,
+      playerAlive: playerCombatant.alive,
       enemyHp: enemyCombatant.hp,
       enemyAlive: enemyCombatant.alive,
+      enemyNamed: enemyNamed ? enemyNamed.name : null,
       enemyAction,
       enemyX: +enemyTank.view.root.position.x.toFixed(2),
       enemyZ: +enemyTank.view.root.position.z.toFixed(2),

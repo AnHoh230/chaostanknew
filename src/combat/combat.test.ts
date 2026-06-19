@@ -55,17 +55,31 @@ describe('createCombatSystem', () => {
     expect(pool.activeCount()).toBe(1);
   });
 
-  it('Spieler-Team wird nicht getroffen (nur der Spieler feuert im Slice)', () => {
+  it('eigenes Team wird nicht getroffen (Spieler-Projektil verschont Spieler)', () => {
     const pool = createProjectilePool(8);
     const player: Combatant = {
       id: 'player', team: 'player', x: 0, z: 0, radius: 1.5, hp: 100, maxHp: 100, alive: true,
     };
     const combat = createCombatSystem(pool, () => [player], { damage: 20, projectileRadius: 0.3 });
 
-    pool.acquire({ x: 0, y: 0.5, z: 0, dx: 1, dz: 0, speed: 30, life: 3 });
+    pool.acquire({ x: 0, y: 0.5, z: 0, dx: 1, dz: 0, speed: 30, life: 3 }); // default team 'player'
     combat.update();
 
     expect(player.hp).toBe(100);
     expect(pool.activeCount()).toBe(1);
+  });
+
+  it('Gegner-Projektil (team enemy) trifft den Spieler', () => {
+    const pool = createProjectilePool(8);
+    const player: Combatant = {
+      id: 'player', team: 'player', x: 0, z: 0, radius: 1.5, hp: 100, maxHp: 100, alive: true,
+    };
+    const combat = createCombatSystem(pool, () => [player], { damage: 10, projectileRadius: 0.3 });
+
+    pool.acquire({ x: 0, y: 0.5, z: 0, dx: 1, dz: 0, speed: 30, life: 3, team: 'enemy' });
+    combat.update();
+
+    expect(player.hp).toBe(90);
+    expect(pool.activeCount()).toBe(0);
   });
 });

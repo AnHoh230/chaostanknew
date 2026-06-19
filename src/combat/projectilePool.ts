@@ -3,6 +3,8 @@ export type ProjectileState = 'inactive' | 'inflight' | 'consumed';
 export interface Projectile {
   id: string;
   state: ProjectileState;
+  team: string; // wer gefeuert hat ('player' | 'enemy' | ...)
+  damage: number; // Schaden dieses Schusses (0 = Pool-Default des Kampfsystems)
   x: number;
   y: number;
   z: number;
@@ -20,6 +22,8 @@ export interface SpawnArgs {
   dz: number;
   speed: number;
   life: number;
+  team?: string; // Default 'player' (Slice 1a war nur Spieler)
+  damage?: number; // Default 0 (Kampfsystem nutzt dann seinen Pool-Default)
 }
 
 export interface ProjectilePool {
@@ -37,6 +41,8 @@ export function createProjectilePool(capacity: number): ProjectilePool {
     items.push({
       id: 'proj_' + i,
       state: 'inactive',
+      team: 'player',
+      damage: 0,
       x: 0,
       y: 0,
       z: 0,
@@ -58,6 +64,8 @@ export function createProjectilePool(capacity: number): ProjectilePool {
         p.dz = s.dz;
         p.speed = s.speed;
         p.life = s.life;
+        p.team = s.team ?? 'player';
+        p.damage = s.damage ?? 0;
         p.state = 'inflight';
         return p;
       }
