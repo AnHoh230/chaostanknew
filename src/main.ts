@@ -29,6 +29,7 @@ import { createEnemyBars } from './ui/enemyBars';
 import { createCameraPanel } from './ui/cameraPanel';
 import { TANK_CLASSES, type TankClass } from './game/classes';
 import { createPickupField } from './loot/pickups';
+import { createShopField } from './world/shopTiles';
 import { CATALOG, SLOT_SOCKET, type ShopItem, type Slot } from './shop/catalog';
 import { createShop } from './shop/shop';
 import { sellValue } from './shop/buyLogic';
@@ -196,6 +197,10 @@ function boot(cls: TankClass): void {
   const pickups = createPickupField(scene);
   const PICKUP_REACH = TANK_RADIUS + 0.8;
   const lastDrops: string[] = []; // Verifikation: tatsächlich gedroppte Item-IDs
+
+  // Shop-Felder (S2): leuchtende Felder in der Welt. Shop nur dort, Welt läuft
+  // weiter, auf dem Feld ist man unverwundbar.
+  const shopField = createShopField(scene);
 
   const combat = createCombatSystem(pool, liveCombatants, {
     damage: HIT_DAMAGE,
@@ -444,9 +449,8 @@ function boot(cls: TankClass): void {
     onEquip: (item) => equip(item),
     onUnequip: (slot) => unequipSlot(slot),
     onSell: (item) => sellAny(item),
-    onToggle: (o) => {
-      clock.simSpeed = o ? 0 : 1; // Werkstatt friert die Welt ein
-    },
+    // S2: Werkstatt NUR auf einem Shop-Feld öffenbar; die Welt pausiert NICHT.
+    canOpen: () => shopField.isOnTile(playerCombatant.x, playerCombatant.z),
   });
 
   // Mess-Overlay (Phase 1 Debugging): macht Cursor-Bodenpunkt, Ziel und Schussrichtung sichtbar.
@@ -473,6 +477,33 @@ function boot(cls: TankClass): void {
     enemyBag: (id: string) => roster.find((r) => r.id === id)?.bag.map((i) => i.id) ?? null,
     lastDrops: () => [...lastDrops],
     pickupCount: () => pickups.count(),
+    shopTiles: () => shopField.positions.map((t) => ({ x: t.x, z: t.z })),
+    onShopTile: () => shopField.isOnTile(playerCombatant.x, playerCombatant.z),
+    playerInvuln: () => playerCombatant.invulnerable === true,
+    shopOpen: () => shop.isOpen(),
+    nearestTile: () => shopField.nearest(playerCombatant.x, playerCombatant.z),
+    teleportToTile: () => {
+      const t = shopField.positions[0]!;
+      tank.view.root.position.set(t.x, 0, t.z);
+      playerCombatant.x = t.x;
+      playerCombatant.z = t.z;
+      return { x: t.x, z: t.z };
+    },
+    teleportTo: (x: number, z: number) => {
+      tank.view.root.position.set(x, 0, z);
+      playerCombatant.x = x;
+      playerCombatant.z = z;
+      return { x, z };
+    },
+    enemyVolley: (shots = 5, dmg = 30) => {
+      for (let i = 0; i < shots; i++) {
+        pool.acquire({
+          x: playerCombatant.x, y: 0.5, z: playerCombatant.z,
+          dx: 1, dz: 0, speed: 0.05, life: 0.6, team: 'enemy', damage: dmg,
+        });
+      }
+      return 'volley ' + shots + 'x' + dmg;
+    },
     equip,
     collectLoot,
     geld: () => geld,
@@ -613,12 +644,16 @@ function boot(cls: TankClass): void {
       e.combatant.z = er.position.z;
     }
 
-    // Spieler-Combatant spiegeln, dann Treffer auflösen.
+    // Spieler-Combatant spiegeln. Schutzzone: auf einem Shop-Feld unverwundbar.
     playerCombatant.x = px;
     playerCombatant.z = pz;
+    const onShopTile = shopField.isOnTile(px, pz);
+    playerCombatant.invulnerable = onShopTile;
+    if (shop.isOpen() && !onShopTile) shop.close(); // Feld verlassen → Shop schließt
     combat.update();
 
     // Beute einsammeln: fährt der Spieler über ein Teil → ins Inventar (Tasche).
+    shopField.update();
     pickups.update(px, pz, PICKUP_REACH, collectLoot);
     shop.updateMoney(); // nur die Geld-Anzeige (NICHT das Panel neu bauen → Klicks bleiben heil)
 
@@ -646,13 +681,12 @@ function boot(cls: TankClass): void {
       level: progression.level,
       mk: progression.unlockedMk(),
     });
-    minimap.update(
-      playerCombatant.x,
-      playerCombatant.z,
-      roster
+    minimap.update(playerCombatant.x, playerCombatant.z, [
+      ...shopField.positions.map((t) => ({ x: t.x, z: t.z, color: '#22b0e6', r: 4.5 })),
+      ...roster
         .filter((e) => e.combatant.alive)
         .map((e) => ({ x: e.combatant.x, z: e.combatant.z, color: e.named ? '#ff3b30' : '#e8a23c' })),
-    );
+    ]);
     // HP-Balken schweben über den Gegnern.
     enemyBars.update(
       roster

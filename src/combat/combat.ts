@@ -15,6 +15,8 @@ export interface Combatant {
   lootValue?: number;
   /** Rüstung: reduziert eingehenden Schaden über abnehmende Ausbeute; fehlt = 0. */
   armor?: number;
+  /** Schutzzone (z. B. Shop-Feld): nimmt keinen Schaden, Projektile fliegen durch. */
+  invulnerable?: boolean;
 }
 
 const ARMOR_K = 300; // Rüstungs-Skala: Reduktion = armor/(armor+K)
@@ -58,7 +60,7 @@ export function createCombatSystem(
     pool.forEachActive((p) => {
       for (let i = 0; i < targets.length; i++) {
         const t = targets[i]!;
-        if (!t.alive || t.team === p.team) continue;
+        if (!t.alive || t.team === p.team || t.invulnerable) continue;
         if (circleOverlap(p.x, p.z, opts.projectileRadius, t.x, t.z, t.radius)) {
           const raw = p.damage > 0 ? p.damage : opts.damage;
           const dmg = effectiveDamage(raw, t.armor ?? 0);

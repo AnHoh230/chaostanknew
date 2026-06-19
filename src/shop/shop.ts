@@ -12,11 +12,13 @@ export interface ShopHooks {
   onUnequip: (slot: Slot) => void; // Slot → Tasche
   onSell: (item: ShopItem) => void;
   onToggle?: (open: boolean) => void;
+  canOpen?: () => boolean; // nur öffnen, wenn erlaubt (z. B. auf einem Shop-Feld)
 }
 
 export interface Shop {
   toggle(): void;
   isOpen(): boolean;
+  close(): void; // erzwingt Schließen (z. B. wenn der Spieler das Feld verlässt)
   refresh(): void; // baut das Panel neu (nur bei Bedarf!)
   updateMoney(): void; // nur die Geld-Anzeige (pro Frame ok)
 }
@@ -97,6 +99,13 @@ export function createShop(h: ShopHooks): Shop {
 
   function updateMoney(): void {
     money.textContent = `💰 ${h.getMoney()}   ·   MK ${h.getUnlockedMk()}`;
+    const allowed = h.canOpen ? h.canOpen() : true;
+    hint.textContent = open
+      ? '[B] Werkstatt schließen'
+      : allowed
+        ? '🛒 [B] Werkstatt öffnen'
+        : '🛒 Shop nur auf einem Shop-Feld';
+    hint.style.color = allowed || open ? '#7fd1c0' : '#8fa3a0';
   }
 
   function refresh(): void {
@@ -235,10 +244,28 @@ export function createShop(h: ShopHooks): Shop {
     refresh();
   }
 
+  function requestToggle(): void {
+    if (open) {
+      setOpen(false);
+    } else if (!h.canOpen || h.canOpen()) {
+      setOpen(true);
+    } else {
+      // Nicht auf einem Feld: kurzer Hinweis statt Öffnen.
+      hint.textContent = '🛒 Kein Shop-Feld — fahre auf ein leuchtendes Feld';
+      hint.style.color = '#e0a85a';
+    }
+  }
+
   window.addEventListener('keydown', (ev) => {
-    if (ev.key.toLowerCase() === 'b') setOpen(!open);
+    if (ev.key.toLowerCase() === 'b') requestToggle();
   });
 
   refresh();
-  return { toggle: () => setOpen(!open), isOpen: () => open, refresh, updateMoney };
+  return {
+    toggle: requestToggle,
+    isOpen: () => open,
+    close: () => setOpen(false),
+    refresh,
+    updateMoney,
+  };
 }
