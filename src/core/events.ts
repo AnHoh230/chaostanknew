@@ -2,6 +2,7 @@ export interface GameEvents {
   'tank.fired': { tankId: string };
   'projectile.spawned': { id: string };
   'projectile.consumed': { id: string };
+  'tank.died': { tankId: string };
 }
 
 export interface Bus {

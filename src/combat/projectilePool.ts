@@ -27,6 +27,8 @@ export interface ProjectilePool {
   update(simDt: number): void;
   activeCount(): number;
   forEachActive(fn: (p: Projectile) => void): void;
+  /** Projektil sofort verbrauchen (z. B. bei Treffer) — wird nicht mehr aktiv. */
+  deactivate(p: Projectile): void;
 }
 
 export function createProjectilePool(capacity: number): ProjectilePool {
@@ -92,5 +94,10 @@ export function createProjectilePool(capacity: number): ProjectilePool {
     }
   }
 
-  return { acquire, update, activeCount, forEachActive };
+  function deactivate(p: Projectile): void {
+    p.state = 'inactive';
+    p.life = 0;
+  }
+
+  return { acquire, update, activeCount, forEachActive, deactivate };
 }

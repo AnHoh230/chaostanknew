@@ -12,6 +12,7 @@ import { createTank } from './tank/tank';
 import { createInput } from './input/input';
 import { createProjectilePool } from './combat/projectilePool';
 import { createProjectileView } from './combat/projectileView';
+import { createCombatSystem, type Combatant } from './combat/combat';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
 import { createFireRecorder } from './debug/fireRecorder';
@@ -24,6 +25,10 @@ const PROJECTILE_CAPACITY = 64;
 const PROJECTILE_SPEED = 30;
 const PROJECTILE_LIFE = 3; // Sekunden
 const SEED = 1337;
+const TANK_RADIUS = 1.5; // Treffer-Radius eines Panzers (XZ)
+const PROJECTILE_RADIUS = 0.3;
+const HIT_DAMAGE = 20; // Schaden pro Treffer (100 HP -> 5 Treffer)
+const ENEMY_SPAWN = { x: 14, z: 10 };
 
 const log = createLogger('main');
 
@@ -101,6 +106,38 @@ function boot(): void {
   // Projektil-Pool (rein logisch) + sichtbare Mesh-Brücke
   const pool = createProjectilePool(PROJECTILE_CAPACITY);
   const projectileView = createProjectileView(scene, pool, PROJECTILE_CAPACITY);
+
+  // Gegner-Panzer (Slice 1b-1: steht, ist treffbar, stirbt).
+  const enemyComp: TankComposition = {
+    chassis: 'c_box',
+    wheels: 'w_round',
+    turret: 't_small',
+    weapon: 'g_short',
+  };
+  const enemyView = createTankView(scene, enemyComp);
+  enemyView.root.position.set(ENEMY_SPAWN.x, 0, ENEMY_SPAWN.z);
+  const enemyTank = createTank('enemy', enemyView, 100);
+
+  // Combatants: Datenmodell für Treffer/HP (Position pro Frame aus den Roots gespiegelt).
+  const playerCombatant: Combatant = {
+    id: 'player', team: 'player', x: 0, z: 0, radius: TANK_RADIUS, hp: tank.hp, maxHp: 100, alive: true,
+  };
+  const enemyCombatant: Combatant = {
+    id: 'enemy', team: 'enemy', x: ENEMY_SPAWN.x, z: ENEMY_SPAWN.z, radius: TANK_RADIUS,
+    hp: enemyTank.hp, maxHp: 100, alive: true,
+  };
+  const combatants: Combatant[] = [playerCombatant, enemyCombatant];
+
+  const combat = createCombatSystem(pool, () => combatants, {
+    damage: HIT_DAMAGE,
+    projectileRadius: PROJECTILE_RADIUS,
+    onHit: (h) => log.debug('hit', { target: h.target.id, hp: h.target.hp, lethal: h.lethal }),
+    onDeath: (t) => {
+      log.info('tank died', { id: t.id });
+      bus.emit('tank.died', { tankId: t.id });
+      if (t.id === 'enemy') enemyView.root.setEnabled(false);
+    },
+  });
 
   // Permanenter Schuss-Rekorder: friert pro Schuss alle Zahlen + Cursor ein.
   const recorder = createFireRecorder(scene, camera);
@@ -191,6 +228,14 @@ function boot(): void {
     input.update(simDt);
     reticle.update(input.getAimTarget()); // gleicher Frame wie der Turm
     pool.update(simDt);
+
+    // Combatant-Positionen aus den Panzer-Roots spiegeln, dann Treffer auflösen.
+    playerCombatant.x = tank.view.root.position.x;
+    playerCombatant.z = tank.view.root.position.z;
+    enemyCombatant.x = enemyTank.view.root.position.x;
+    enemyCombatant.z = enemyTank.view.root.position.z;
+    combat.update();
+
     ground.update();
     projectileView.sync();
     aimDebug.update();
@@ -207,6 +252,17 @@ function boot(): void {
       turretYawDeg: +((tank.view.turretNode.rotation.y * 180) / Math.PI).toFixed(2),
       tankX: +tank.view.root.position.x.toFixed(3),
       tankZ: +tank.view.root.position.z.toFixed(3),
+      enemyHp: enemyCombatant.hp,
+      enemyAlive: enemyCombatant.alive,
+      enemyScreen: (() => {
+        const s = Vector3.Project(
+          enemyTank.view.root.getAbsolutePosition(),
+          Matrix.IdentityReadOnly,
+          scene.getTransformMatrix(),
+          camera.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight()),
+        );
+        return { x: Math.round(s.x), y: Math.round(s.y) };
+      })(),
     };
 
     if (frame % 60 === 0) {
