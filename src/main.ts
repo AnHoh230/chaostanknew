@@ -25,7 +25,9 @@ import { createHud } from './ui/hud';
 import { createMinimap } from './ui/minimap';
 import { TANK_CLASSES, type TankClass } from './game/classes';
 import { createPickupField } from './loot/pickups';
-import { getPart, type Part } from './loot/parts';
+import { getPart, PARTS, type Part } from './loot/parts';
+import { createShop } from './shop/shop';
+import { evaluateBuy } from './shop/buyLogic';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
 import { createFireRecorder } from './debug/fireRecorder';
@@ -184,8 +186,10 @@ function boot(cls: TankClass): void {
   // Duell-Gedächtnis (vor dem Kampf-System: dessen Tod-Handler nutzt es).
   const akteBuch = createAkteBuch();
 
-  // Veränderbare Spieler-Stats (Loot kann sie heben). Start aus der Klasse.
+  // Veränderbare Spieler-Stats (Loot/Shop kann sie heben). Start aus der Klasse.
   let playerDamage = cls.damage;
+  let geld = 0; // Spielgeld, verdient durch Kills
+  const owned = new Set<string>(); // bereits verbaute Teile (kein Doppelkauf)
 
   // Welches Teil droppt welcher Gegner (M3).
   const DROP_BY_ENEMY: Record<string, string> = {
@@ -231,7 +235,10 @@ function boot(cls: TankClass): void {
         // Beute droppen (M3): an der Todesposition ein Teil ablegen.
         const partId = DROP_BY_ENEMY[e.id] ?? 'ketten';
         pickups.spawn(getPart(partId), e.combatant.x, e.combatant.z);
-        log.info('enemy died', { id: e.id, drop: partId });
+        // Spielgeld (M4): Belohnung nach Beutewert.
+        const reward = Math.round((e.combatant.lootValue ?? 0.4) * 120);
+        geld += reward;
+        log.info('enemy died', { id: e.id, drop: partId, reward, geld });
       }
     },
   });
@@ -349,6 +356,7 @@ function boot(cls: TankClass): void {
   // Teil anlegen (M3): Variante sichtbar tauschen + Stat-Wirkung + heilen.
   function equip(part: Part): void {
     tank.view.setVariant(part.socket, part.variantId);
+    owned.add(part.id); // verbaut → im Shop nicht erneut kaufbar
     if (part.damage) playerDamage += part.damage;
     if (part.maxHp) {
       playerCombatant.maxHp += part.maxHp;
@@ -358,6 +366,24 @@ function boot(cls: TankClass): void {
     showToast('Angebaut: ' + part.label);
     log.info('part equipped', { part: part.id, dmg: playerDamage, maxHp: playerCombatant.maxHp });
   }
+
+  // Shop (M4): Geld-Anzeige + Werkstatt (Taste B pausiert die Sim).
+  const shop = createShop({
+    parts: PARTS,
+    getMoney: () => geld,
+    isOwned: (id) => owned.has(id),
+    onBuy: (part) => {
+      const r = evaluateBuy(geld, part, owned);
+      if (r.ok) {
+        geld -= part.cost;
+        equip(part);
+        showToast('Gekauft: ' + part.label);
+      }
+    },
+    onToggle: (o) => {
+      clock.simSpeed = o ? 0 : 1; // Werkstatt friert die Welt ein
+    },
+  });
 
   // Mess-Overlay (Phase 1 Debugging): macht Cursor-Bodenpunkt, Ziel und Schussrichtung sichtbar.
   const aimDebug = createAimDebug(scene, camera, tank, () => input.getAimTarget());
@@ -377,6 +403,9 @@ function boot(cls: TankClass): void {
     playerDamage: () => playerDamage,
     pickupCount: () => pickups.count(),
     equip,
+    geld: () => geld,
+    owned: () => [...owned],
+    shop,
   };
 
   // §21.5-Sichtbarkeitszähler periodisch loggen (aktiv == sichtbar)
@@ -469,6 +498,7 @@ function boot(cls: TankClass): void {
 
     // Beute einsammeln: fährt der Spieler über ein Teil → anlegen.
     pickups.update(px, pz, PICKUP_REACH, equip);
+    shop.refresh(); // Geld-Anzeige aktuell halten
 
     ground.update();
     projectileView.sync();

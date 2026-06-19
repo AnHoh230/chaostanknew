@@ -6,16 +6,17 @@ export interface Part {
   label: string;
   socket: SocketName;
   variantId: string;
+  cost: number; // Kaufpreis im Shop (Spielgeld)
   damage?: number; // additiver Schadens-Bonus
   maxHp?: number; // additiver HP-Bonus
 }
 
-/** Teile-Katalog. Jedes Teil ist sichtbar (Variante) + spürbar (Stat). */
+/** Teile-Katalog. Jedes Teil ist sichtbar (Variante) + spürbar (Stat) + kaufbar. */
 export const PARTS: readonly Part[] = [
-  { id: 'lange_kanone', label: 'Lange Kanone', socket: 'weapon', variantId: 'g_long', damage: 10 },
-  { id: 'schwerer_turm', label: 'Schwerer Turm', socket: 'turret', variantId: 't_big', maxHp: 30 },
-  { id: 'breite_wanne', label: 'Breite Wanne', socket: 'chassis', variantId: 'c_wide', maxHp: 40 },
-  { id: 'ketten', label: 'Ketten', socket: 'wheels', variantId: 'w_tread', maxHp: 15 },
+  { id: 'lange_kanone', label: 'Lange Kanone', socket: 'weapon', variantId: 'g_long', cost: 120, damage: 10 },
+  { id: 'schwerer_turm', label: 'Schwerer Turm', socket: 'turret', variantId: 't_big', cost: 90, maxHp: 30 },
+  { id: 'breite_wanne', label: 'Breite Wanne', socket: 'chassis', variantId: 'c_wide', cost: 110, maxHp: 40 },
+  { id: 'ketten', label: 'Ketten', socket: 'wheels', variantId: 'w_tread', cost: 50, maxHp: 15 },
 ];
 
 export function getPart(id: string): Part {
