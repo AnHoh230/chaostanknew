@@ -1,18 +1,18 @@
 import { MeshBuilder, StandardMaterial, Color3 } from '@babylonjs/core';
 import type { Scene, Mesh } from '@babylonjs/core';
 import { circleOverlap } from '../combat/hitMath';
-import type { Part } from './parts';
+import type { ShopItem } from '../shop/catalog';
 
 interface Pickup {
-  part: Part;
+  part: ShopItem;
   x: number;
   z: number;
   mesh: Mesh;
 }
 
 export interface PickupField {
-  spawn(part: Part, x: number, z: number): void;
-  update(playerX: number, playerZ: number, radius: number, onCollect: (part: Part) => void): void;
+  spawn(part: ShopItem, x: number, z: number): void;
+  update(playerX: number, playerZ: number, radius: number, onCollect: (part: ShopItem) => void): void;
   count(): number;
 }
 
@@ -28,7 +28,7 @@ export function createPickupField(scene: Scene): PickupField {
   let spin = 0;
   let seq = 0;
 
-  function spawn(part: Part, x: number, z: number): void {
+  function spawn(part: ShopItem, x: number, z: number): void {
     const mesh = MeshBuilder.CreateBox('pickup_' + part.id + '_' + seq++, { size: 0.9 }, scene);
     mesh.material = mat;
     mesh.isPickable = false;
@@ -40,7 +40,7 @@ export function createPickupField(scene: Scene): PickupField {
     playerX: number,
     playerZ: number,
     radius: number,
-    onCollect: (part: Part) => void,
+    onCollect: (part: ShopItem) => void,
   ): void {
     spin += 0.03;
     for (let i = items.length - 1; i >= 0; i--) {

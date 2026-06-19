@@ -13,6 +13,16 @@ export interface Combatant {
   alive: boolean;
   /** Beutewert für die Jagd-KI (0..1+); fehlt = 0. Steigt später mit verbauten Teilen. */
   lootValue?: number;
+  /** Rüstung: reduziert eingehenden Schaden über abnehmende Ausbeute; fehlt = 0. */
+  armor?: number;
+}
+
+const ARMOR_K = 300; // Rüstungs-Skala: Reduktion = armor/(armor+K)
+
+/** Effektiver Schaden nach Rüstung (mind. 1). */
+export function effectiveDamage(dmg: number, armor: number): number {
+  if (armor <= 0) return dmg;
+  return Math.max(1, Math.round(dmg * (1 - armor / (armor + ARMOR_K))));
 }
 
 export interface HitInfo {
@@ -50,7 +60,8 @@ export function createCombatSystem(
         const t = targets[i]!;
         if (!t.alive || t.team === p.team) continue;
         if (circleOverlap(p.x, p.z, opts.projectileRadius, t.x, t.z, t.radius)) {
-          const dmg = p.damage > 0 ? p.damage : opts.damage;
+          const raw = p.damage > 0 ? p.damage : opts.damage;
+          const dmg = effectiveDamage(raw, t.armor ?? 0);
           t.hp -= dmg;
           const lethal = t.hp <= 0;
           if (lethal) {

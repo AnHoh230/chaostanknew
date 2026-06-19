@@ -1,11 +1,15 @@
-import type { Part } from '../loot/parts';
+import type { ShopItem } from './catalog';
+import { sellValue } from './buyLogic';
 
 export interface ShopHooks {
-  parts: readonly Part[];
+  items: readonly ShopItem[]; // voller Katalog
   getMoney: () => number;
-  isOwned: (id: string) => boolean;
-  onBuy: (part: Part) => void;
-  onToggle?: (open: boolean) => void; // z. B. Sim pausieren
+  getUnlockedMk: () => number;
+  isEquipped: (id: string) => boolean;
+  getEquipped: () => ShopItem[];
+  onBuy: (item: ShopItem) => void;
+  onSell: (item: ShopItem) => void;
+  onToggle?: (open: boolean) => void;
 }
 
 export interface Shop {
@@ -14,7 +18,17 @@ export interface Shop {
   refresh(): void;
 }
 
-/** Geld-Anzeige (immer) + Werkstatt-Overlay (Taste B). Kauf ruft onBuy. */
+const SLOT_ORDER = ['waffe', 'wanne', 'turm', 'raeder', 'ruestung'];
+
+function statText(it: ShopItem): string {
+  if (it.damage) return `+${it.damage} Schaden`;
+  if (it.hp) return `+${it.hp} HP`;
+  if (it.armor) return `+${it.armor} Rüstung`;
+  if (it.speed) return `+${it.speed} Tempo`;
+  return '';
+}
+
+/** Geld/MK-Anzeige + Werkstatt: Kaufen (nur Normale ≤ MK) und Verkaufen (verbaut). */
 export function createShop(h: ShopHooks): Shop {
   const money = document.createElement('div');
   money.id = 'money';
@@ -35,43 +49,72 @@ export function createShop(h: ShopHooks): Shop {
   panel.id = 'shop';
   panel.style.cssText =
     'position:fixed;inset:0;display:none;align-items:center;justify-content:center;' +
-    'background:rgba(6,8,10,0.8);z-index:25;font-family:system-ui,sans-serif;';
+    'background:rgba(6,8,10,0.82);z-index:25;font-family:system-ui,sans-serif;';
   const inner = document.createElement('div');
   inner.style.cssText =
-    'background:#13171c;border:2px solid #2a343b;border-radius:12px;padding:22px;min-width:440px;';
+    'background:#13171c;border:2px solid #2a343b;border-radius:12px;padding:20px;' +
+    'width:760px;max-width:92vw;max-height:84vh;overflow:auto;';
   panel.appendChild(inner);
   document.body.appendChild(panel);
 
   let open = false;
 
+  function row(label: string, sub: string, right: string, enabled: boolean, color: string, onClick?: () => void): HTMLElement {
+    const b = document.createElement('button');
+    b.disabled = !enabled;
+    b.style.cssText =
+      'display:flex;justify-content:space-between;align-items:center;width:100%;margin:5px 0;' +
+      'padding:9px 12px;border-radius:8px;border:1px solid #2a343b;text-align:left;color:#e8e0c8;' +
+      `background:#1a1f25;${enabled ? 'cursor:pointer;' : 'opacity:0.5;cursor:not-allowed;'}`;
+    b.innerHTML =
+      `<span><b>${label}</b> <span style="color:#9aa">— ${sub}</span></span>` +
+      `<span style="color:${color}">${right}</span>`;
+    if (enabled && onClick) b.addEventListener('click', onClick);
+    return b;
+  }
+
   function refresh(): void {
-    money.textContent = '💰 ' + h.getMoney();
+    const mk = h.getUnlockedMk();
+    money.textContent = `💰 ${h.getMoney()}   ·   MK ${mk}`;
     if (!open) return;
+
+    const buyable = h.items
+      .filter((it) => it.rarity === 'normal' && it.mk <= mk && !h.isEquipped(it.id))
+      .sort((a, b) => SLOT_ORDER.indexOf(a.slot) - SLOT_ORDER.indexOf(b.slot) || a.mk - b.mk);
+    const equipped = h.getEquipped();
+
     inner.innerHTML =
-      '<div style="font-size:20px;font-weight:700;color:#f0e6cc;margin-bottom:14px">' +
-      'Werkstatt — [B] schließen</div>';
-    for (const p of h.parts) {
-      const owned = h.isOwned(p.id);
-      const afford = h.getMoney() >= p.cost;
-      const stat = p.damage ? `+${p.damage} Schaden` : p.maxHp ? `+${p.maxHp} HP` : '';
-      const row = document.createElement('button');
-      row.disabled = owned || !afford;
-      row.style.cssText =
-        'display:flex;justify-content:space-between;align-items:center;width:100%;margin:6px 0;' +
-        'padding:12px 14px;border-radius:8px;border:1px solid #2a343b;text-align:left;' +
-        `background:${owned ? '#10240f' : '#1a1f25'};color:#e8e0c8;` +
-        (owned || !afford ? 'opacity:0.55;cursor:not-allowed;' : 'cursor:pointer;');
-      row.innerHTML =
-        `<span><b>${p.label}</b> <span style="color:#9aa">— ${stat}</span></span>` +
-        `<span style="color:${owned ? '#5fd06a' : afford ? '#ffe08a' : '#c66'}">` +
-        `${owned ? 'besitzt' : '💰 ' + p.cost}</span>`;
-      if (!owned && afford) {
-        row.addEventListener('click', () => {
-          h.onBuy(p);
+      `<div style="font-size:20px;font-weight:700;color:#f0e6cc;margin-bottom:6px">` +
+      `Werkstatt — MK ${mk} freigeschaltet — [B] schließen</div>` +
+      `<div style="display:flex;gap:18px">` +
+      `<div style="flex:1" id="shop-buy"><div style="color:#9aa;margin:6px 0">Kaufen (nur Normale ≤ MK${mk})</div></div>` +
+      `<div style="flex:1" id="shop-sell"><div style="color:#9aa;margin:6px 0">Verkaufen (verbaut)</div></div>` +
+      `</div>`;
+    const buyCol = inner.querySelector('#shop-buy')!;
+    const sellCol = inner.querySelector('#shop-sell')!;
+
+    for (const it of buyable) {
+      const afford = h.getMoney() >= it.cost;
+      buyCol.appendChild(
+        row(it.name, statText(it), `💰 ${it.cost}`, afford, afford ? '#ffe08a' : '#c66', () => {
+          h.onBuy(it);
           refresh();
-        });
-      }
-      inner.appendChild(row);
+        }),
+      );
+    }
+    if (!equipped.length) {
+      const empty = document.createElement('div');
+      empty.textContent = 'Noch nichts verbaut.';
+      empty.style.cssText = 'color:#778;padding:8px';
+      sellCol.appendChild(empty);
+    }
+    for (const it of equipped) {
+      sellCol.appendChild(
+        row(it.name, statText(it), `+💰 ${sellValue(it)}`, true, '#5fd06a', () => {
+          h.onSell(it);
+          refresh();
+        }),
+      );
     }
   }
 

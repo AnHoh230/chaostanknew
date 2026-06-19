@@ -8,9 +8,10 @@ export function createInput(
   scene: Scene,
   camera: Camera,
   tank: Tank,
-  speed: number,
+  speed: number | (() => number),
   onFire: () => void,
 ): { update(simDt: number): void; getAimTarget(): Vector3 | null } {
+  const speedOf = (): number => (typeof speed === 'function' ? speed() : speed);
   const log = createLogger('input');
 
   const keys: Record<string, boolean> = Object.create(null);
@@ -48,7 +49,7 @@ export function createInput(
     if (keys['d']) mx += 1;
     if (mx !== 0 || mz !== 0) {
       const len = Math.hypot(mx, mz);
-      const step = speed * simDt;
+      const step = speedOf() * simDt;
       root.position.addInPlace(new Vector3((mx / len) * step, 0, (mz / len) * step));
     }
 

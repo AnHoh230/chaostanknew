@@ -25,9 +25,10 @@ import { createHud } from './ui/hud';
 import { createMinimap } from './ui/minimap';
 import { TANK_CLASSES, type TankClass } from './game/classes';
 import { createPickupField } from './loot/pickups';
-import { PARTS, type Part } from './loot/parts';
+import { CATALOG, SLOT_SOCKET, type ShopItem } from './shop/catalog';
 import { createShop } from './shop/shop';
-import { evaluateBuy } from './shop/buyLogic';
+import { evaluateBuy, sellValue } from './shop/buyLogic';
+import { createLoadout } from './player/loadout';
 import { createProgression } from './progression/progression';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
@@ -180,10 +181,10 @@ function boot(cls: TankClass): void {
   // Duell-Gedächtnis (vor dem Kampf-System: dessen Tod-Handler nutzt es).
   const akteBuch = createAkteBuch();
 
-  // Veränderbare Spieler-Stats (Loot/Shop kann sie heben). Start aus der Klasse.
-  let playerDamage = cls.damage;
+  // Loadout (P4): ein Item je Slot, Stats = Klassen-Basis + bestückte Slots.
+  const loadout = createLoadout({ damage: cls.damage, maxHp: cls.maxHp, speed: cls.speed, armor: 0 });
   let geld = 0; // Spielgeld, verdient durch Kills
-  const owned = new Set<string>(); // bereits verbaute Teile (kein Doppelkauf)
+  let playerSpeed = cls.speed; // aus loadout.stats() abgeleitet (Räder)
   const progression = createProgression(); // Level/XP/MK (P2)
 
   const pickups = createPickupField(scene);
@@ -219,8 +220,10 @@ function boot(cls: TankClass): void {
       } else {
         akteBuch.archive(e.id);
         bus.emit('tank.died', { tankId: e.id });
-        // Beute droppen (M3): zufälliges Teil an der Todesposition.
-        const part = PARTS[Math.floor(aiRng.next() * PARTS.length)]!;
+        // Beute droppen (P5): zufälliges Katalog-Item (normal ODER selten),
+        // level-nah (bis MK freigeschaltet+1) — Drops können alles sein.
+        const dropPool = CATALOG.filter((it) => it.mk <= progression.unlockedMk() + 1);
+        const part = dropPool[Math.floor(aiRng.next() * dropPool.length)]!;
         pickups.spawn(part, e.combatant.x, e.combatant.z);
         // Spielgeld (M4): Belohnung nach Beutewert.
         const reward = Math.round((e.combatant.lootValue ?? 0.4) * 120);
@@ -289,7 +292,7 @@ function boot(cls: TankClass): void {
       speed: PROJECTILE_SPEED,
       life: PROJECTILE_LIFE,
       team: 'player',
-      damage: playerDamage,
+      damage: loadout.stats().damage,
     });
     if (p) {
       bus.emit('tank.fired', { tankId: tank.id });
@@ -326,7 +329,7 @@ function boot(cls: TankClass): void {
     if (p) bus.emit('projectile.spawned', { id: p.id });
   }
 
-  const input = createInput(scene, camera, tank, cls.speed, fire);
+  const input = createInput(scene, camera, tank, () => playerSpeed, fire);
 
   // OS-Mauszeiger über dem Canvas ausblenden — das Spiel zeichnet sein eigenes
   // Fadenkreuz, das frame-synchron mit dem Turm läuft (kein Render-Weg-Versatz).
@@ -351,33 +354,54 @@ function boot(cls: TankClass): void {
     setTimeout(() => (toast.style.opacity = '0'), 1600);
   }
 
-  // Teil anlegen (M3): Variante sichtbar tauschen + Stat-Wirkung + heilen.
-  function equip(part: Part): void {
-    tank.view.setVariant(part.socket, part.variantId);
-    owned.add(part.id); // verbaut → im Shop nicht erneut kaufbar
-    if (part.damage) playerDamage += part.damage;
-    if (part.maxHp) {
-      playerCombatant.maxHp += part.maxHp;
-      playerCombatant.hp = Math.min(playerCombatant.maxHp, playerCombatant.hp + part.maxHp);
-    }
-    playerCombatant.lootValue = (playerCombatant.lootValue ?? 0) + 0.2; // saftigeres Ziel
-    showToast('Angebaut: ' + part.label);
-    log.info('part equipped', { part: part.id, dmg: playerDamage, maxHp: playerCombatant.maxHp });
+  // Stats nach Loadout-Änderung neu ableiten; HP folgt der maxHP-Änderung.
+  function applyStats(prevMaxHp: number): void {
+    const st = loadout.stats();
+    playerSpeed = st.speed;
+    playerCombatant.maxHp = st.maxHp;
+    playerCombatant.armor = st.armor;
+    playerCombatant.hp = Math.min(st.maxHp, Math.max(1, playerCombatant.hp + (st.maxHp - prevMaxHp)));
   }
 
-  // Shop (M4): Geld-Anzeige + Werkstatt (Taste B pausiert die Sim).
+  // Teil anlegen (P3/P4): Slot-Item setzen, Variante sichtbar tauschen, Stats neu.
+  function equip(item: ShopItem): void {
+    const prevMax = loadout.stats().maxHp;
+    loadout.equip(item);
+    const map = SLOT_SOCKET[item.slot];
+    if (map) tank.view.setVariant(map.socket, map.variant);
+    applyStats(prevMax);
+    playerCombatant.lootValue = 1 + loadout.all().length * 0.2; // mehr Teile = saftiger
+    showToast('Angebaut: ' + item.name);
+    const st = loadout.stats();
+    log.info('equip', { item: item.id, dmg: st.damage, hp: st.maxHp, armor: st.armor, speed: +st.speed.toFixed(1) });
+  }
+
+  function sellItem(item: ShopItem): void {
+    const prevMax = loadout.stats().maxHp;
+    loadout.unequip(item.slot);
+    const map = SLOT_SOCKET[item.slot];
+    if (map) tank.view.setVariant(map.socket, cls.composition[map.socket]); // zurück zur Klassen-Optik
+    applyStats(prevMax);
+    geld += sellValue(item);
+    showToast('Verkauft: ' + item.name);
+  }
+
+  // Shop (P3): MK-Werkstatt auf den Katalog (Taste B pausiert die Sim).
   const shop = createShop({
-    parts: PARTS,
+    items: CATALOG,
     getMoney: () => geld,
-    isOwned: (id) => owned.has(id),
-    onBuy: (part) => {
-      const r = evaluateBuy(geld, part, owned);
+    getUnlockedMk: () => progression.unlockedMk(),
+    isEquipped: (id) => loadout.owns(id),
+    getEquipped: () => loadout.all(),
+    onBuy: (item) => {
+      const r = evaluateBuy(geld, item, progression.unlockedMk(), (id) => loadout.owns(id));
       if (r.ok) {
-        geld -= part.cost;
-        equip(part);
-        showToast('Gekauft: ' + part.label);
+        geld -= item.cost;
+        equip(item);
+        showToast('Gekauft: ' + item.name);
       }
     },
+    onSell: (item) => sellItem(item),
     onToggle: (o) => {
       clock.simSpeed = o ? 0 : 1; // Werkstatt friert die Welt ein
     },
@@ -398,11 +422,11 @@ function boot(cls: TankClass): void {
         named: e.named?.name ?? null,
       })),
     akte: () => akteBuch.all(),
-    playerDamage: () => playerDamage,
+    stats: () => loadout.stats(),
+    loadout: () => loadout.all().map((it) => it.id),
     pickupCount: () => pickups.count(),
     equip,
     geld: () => geld,
-    owned: () => [...owned],
     shop,
     progression: () => ({
       level: progression.level, xp: progression.xp,
