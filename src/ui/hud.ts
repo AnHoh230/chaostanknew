@@ -5,6 +5,9 @@ export interface HudState {
   enemyMaxHp: number;
   enemyAlive: boolean;
   enemyName: string | null; // gesetzt = Named (z. B. "der Rasende")
+  level: number;
+  mk: number; // freigeschaltete MK-Stufe
+  xpFrac: number; // 0..1 Fortschritt zum nächsten Level
 }
 
 export interface Hud {
@@ -43,12 +46,17 @@ export function createHud(): Hud {
 
   const player = makeBar(box, 'Du');
   const enemy = makeBar(box, 'Gegner');
+  const xp = makeBar(box, 'Level');
+  xp.fill.style.background = '#6aa6ff';
 
   function update(s: HudState): void {
     const pf = s.playerHp / s.playerMaxHp;
     player.fill.style.width = Math.max(0, pf * 100) + '%';
     player.fill.style.background = hpColor(pf);
     player.label.textContent = `Du — ${Math.max(0, Math.round(s.playerHp))} HP`;
+
+    xp.fill.style.width = Math.max(0, Math.min(1, s.xpFrac) * 100) + '%';
+    xp.label.textContent = `Level ${s.level} · MK ${s.mk}`;
 
     if (s.enemyAlive) {
       enemy.root.style.display = 'block';

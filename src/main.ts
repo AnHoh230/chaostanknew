@@ -28,6 +28,7 @@ import { createPickupField } from './loot/pickups';
 import { PARTS, type Part } from './loot/parts';
 import { createShop } from './shop/shop';
 import { evaluateBuy } from './shop/buyLogic';
+import { createProgression } from './progression/progression';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
 import { createFireRecorder } from './debug/fireRecorder';
@@ -183,6 +184,7 @@ function boot(cls: TankClass): void {
   let playerDamage = cls.damage;
   let geld = 0; // Spielgeld, verdient durch Kills
   const owned = new Set<string>(); // bereits verbaute Teile (kein Doppelkauf)
+  const progression = createProgression(); // Level/XP/MK (P2)
 
   const pickups = createPickupField(scene);
   const PICKUP_REACH = TANK_RADIUS + 0.8;
@@ -223,7 +225,14 @@ function boot(cls: TankClass): void {
         // Spielgeld (M4): Belohnung nach Beutewert.
         const reward = Math.round((e.combatant.lootValue ?? 0.4) * 120);
         geld += reward;
-        log.info('enemy died', { id: e.id, drop: part.id, reward, geld });
+        // EXP (P2): Level/MK steigen mit Kills.
+        const xpReward = Math.round(18 + (e.combatant.lootValue ?? 0.4) * 60);
+        const up = progression.addXp(xpReward);
+        if (up.gained > 0) {
+          const mkNote = up.newMkUnlocks.length ? ` — MK${up.newMkUnlocks[up.newMkUnlocks.length - 1]} frei!` : '';
+          showToast(`Level ${progression.level}${mkNote}`);
+        }
+        log.info('enemy died', { id: e.id, drop: part.id, reward, xp: xpReward, lvl: progression.level });
         // Gegner aus der Welt entfernen (P1: Platz für Nachschub).
         e.view.root.dispose();
         const idx = roster.indexOf(e);
@@ -395,6 +404,11 @@ function boot(cls: TankClass): void {
     geld: () => geld,
     owned: () => [...owned],
     shop,
+    progression: () => ({
+      level: progression.level, xp: progression.xp,
+      xpToNext: progression.xpToNext(), mk: progression.unlockedMk(),
+    }),
+    addXp: (n: number) => progression.addXp(n),
   };
 
   // §21.5-Sichtbarkeitszähler periodisch loggen (aktiv == sichtbar)
@@ -519,6 +533,9 @@ function boot(cls: TankClass): void {
       enemyMaxHp: hudEnemy ? hudEnemy.combatant.maxHp : 1,
       enemyAlive: hudEnemy !== null,
       enemyName: hudEnemy?.named?.name ?? null,
+      level: progression.level,
+      mk: progression.unlockedMk(),
+      xpFrac: progression.xpToNext() > 0 ? progression.xp / progression.xpToNext() : 1,
     });
     minimap.update(
       playerCombatant.x,
