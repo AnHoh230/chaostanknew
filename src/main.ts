@@ -18,6 +18,7 @@ import { MOTIVE_PRESETS } from './ai/motives';
 import type { AiWorldView, TraitProfile } from './ai/aiTypes';
 import { createAkteBuch } from './named/akte';
 import { generateNamed, istKnapperSieg, type Named } from './named/promotion';
+import { createReveal } from './reveal/reveal';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
 import { createFireRecorder } from './debug/fireRecorder';
@@ -114,6 +115,11 @@ function boot(): void {
   // Kamera auf den Panzer-Root
   const camera = createCameraRig(scene, tank.view.root);
 
+  // Reveal-Inszenierung (Slowmo + Highlight + Spruch) für Promotions.
+  const reveal = createReveal(scene, camera, engine, clock);
+  let revealShown = false;
+  let prevEnemyVisible = false;
+
   // Projektil-Pool (rein logisch) + sichtbare Mesh-Brücke
   const pool = createProjectilePool(PROJECTILE_CAPACITY);
   const projectileView = createProjectileView(scene, pool, PROJECTILE_CAPACITY);
@@ -171,6 +177,8 @@ function boot(): void {
         log.info('PROMOTION: der Rasende erwacht', {
           name: named.name, perks: named.perks, atPlayerHp: +playerFrac.toFixed(2),
         });
+        reveal.triggerReveal(named, enemyView.root, akteBuch.get('enemy')!);
+        revealShown = true;
       } else {
         akteBuch.archive('enemy');
         enemyView.root.setEnabled(false);
@@ -344,6 +352,12 @@ function boot(): void {
         enemyFire(er.position.x, er.position.z, px, pz);
         enemyFireCd = ENEMY_FIRE_COOLDOWN;
       }
+
+      // Wiedererkennung: erneut in Sicht NACH erfolgtem Reveal → anderer Spruch, kein Reveal.
+      if (revealShown && enemyNamed && world.targetVisible && !prevEnemyVisible && !reveal.active()) {
+        reveal.triggerRecognition(enemyNamed, er, akteBuch.get('enemy')!);
+      }
+      prevEnemyVisible = world.targetVisible;
     }
 
     // Combatant-Positionen aus den Panzer-Roots spiegeln, dann Treffer auflösen.
@@ -356,6 +370,7 @@ function boot(): void {
     ground.update();
     projectileView.sync();
     aimDebug.update();
+    reveal.update(engine.getDeltaTime() / 1000); // Echtzeit (HUD/Slowmo-Fade läuft real)
 
     frame++;
 
