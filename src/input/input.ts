@@ -3,6 +3,27 @@ import type { Scene, Camera } from '@babylonjs/core';
 import type { Tank } from '../tank/tank';
 import { createLogger } from '../core/log';
 import { yawTo, rayGroundY0 } from './aimMath';
+import { stepChassis, chassisForward, type ChassisConfig, type ChassisState } from './chassis';
+
+/** Chassis-Konfig aus dem aktuellen Tempo (Räder speisen maxForward). */
+function chassisCfgFor(speed: number): ChassisConfig {
+  return {
+    maxForward: speed,
+    maxReverse: speed * 0.45,
+    accel: speed * 2.4,
+    reverseAccel: speed * 1.5,
+    brake: speed * 4,
+    friction: speed * 1.6,
+    deadzone: 0.4,
+    turnStanding: 2.6,
+    turnSlow: 1.9,
+    turnFast: 0.9,
+    reverseTurnMod: 0.6,
+    brakeTurnMod: 0.45,
+    slowSpeed: speed * 0.35,
+    fastSpeed: speed * 0.7,
+  };
+}
 
 export function createInput(
   scene: Scene,
@@ -16,6 +37,7 @@ export function createInput(
 
   const keys: Record<string, boolean> = Object.create(null);
   let aimTarget: Vector3 | null = null;
+  const chassis: ChassisState = { heading: tank.view.root.rotation.y, velocity: 0 };
 
   const onKeyDown = (ev: KeyboardEvent): void => {
     const k = ev.key.toLowerCase();
@@ -40,17 +62,22 @@ export function createInput(
   function update(simDt: number): void {
     const root = tank.view.root;
 
-    // WASD: Bewegung in der X/Z-Ebene, framerate-unabhängig (speed * simDt).
-    let mx = 0;
-    let mz = 0;
-    if (keys['w']) mz += 1;
-    if (keys['s']) mz -= 1;
-    if (keys['a']) mx -= 1;
-    if (keys['d']) mx += 1;
-    if (mx !== 0 || mz !== 0) {
-      const len = Math.hypot(mx, mz);
-      const step = speedOf() * simDt;
-      root.position.addInPlace(new Vector3((mx / len) * step, 0, (mz / len) * step));
+    // WASD steuert die WANNE (schweres Fahrzeug): W/S = vor/zurück entlang Heading,
+    // A/D = Wanne drehen. Trägheit + kein Sofort-Richtungswechsel (siehe chassis.ts).
+    let throttle = 0;
+    if (keys['w']) throttle += 1;
+    if (keys['s']) throttle -= 1; // W+S = 0 (bremsen über Reibung)
+    let steer = 0;
+    if (keys['d']) steer += 1;
+    if (keys['a']) steer -= 1; // A+D = 0
+    const next = stepChassis(chassis, { throttle, steer }, chassisCfgFor(speedOf()), simDt);
+    chassis.heading = next.heading;
+    chassis.velocity = next.velocity;
+    root.rotation.y = chassis.heading; // Wanne zeigt in Fahrtrichtung
+    if (chassis.velocity !== 0) {
+      const fwd = chassisForward(chassis.heading);
+      root.position.x += fwd.x * chassis.velocity * simDt;
+      root.position.z += fwd.z * chassis.velocity * simDt;
     }
 
     // Zielen: JEDEN Frame den AKTUELLEN Cursor frisch auf die Bodenebene (y=0)
@@ -70,7 +97,8 @@ export function createInput(
       const turret = tank.view.turretNode;
       turret.computeWorldMatrix(true);
       const tp = turret.getAbsolutePosition();
-      turret.rotation.y = yawTo(tp.x, tp.z, g.x, g.z);
+      // Turm zeigt unabhängig vom Chassis auf den Cursor: Welt-Yaw minus Wannen-Heading.
+      turret.rotation.y = yawTo(tp.x, tp.z, g.x, g.z) - root.rotation.y;
     }
   }
 

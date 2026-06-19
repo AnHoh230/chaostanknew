@@ -283,7 +283,7 @@ function boot(cls: TankClass): void {
       const tl = Math.hypot(tx, tz) || 1;
       dx = tx / tl;
       dz = tz / tl;
-      turret.rotation.y = yawTo(origin.x, origin.z, g.x, g.z); // Optik sofort mitziehen
+      turret.rotation.y = yawTo(origin.x, origin.z, g.x, g.z) - root.rotation.y; // Optik, Chassis kompensiert
     } else {
       turret.computeWorldMatrix(true);
       const fwd = turret.getDirection(new Vector3(0, 0, 1));
@@ -614,6 +614,7 @@ function boot(cls: TankClass): void {
       turretYawDeg: +((tank.view.turretNode.rotation.y * 180) / Math.PI).toFixed(2),
       tankX: +tank.view.root.position.x.toFixed(3),
       tankZ: +tank.view.root.position.z.toFixed(3),
+      heading: +tank.view.root.rotation.y.toFixed(3),
       playerHp: playerCombatant.hp,
       playerAlive: playerCombatant.alive,
       enemyCount: roster.filter((e) => e.combatant.alive).length,
