@@ -47,6 +47,70 @@ const SLOTS: SlotDef[] = [
     prices: [118, 286, 497, 747, 1037, 1366, 1732, 2137, 2579, 3059] },
 ];
 
+/** Flavor-Namen aus der Item-Datei: je MK ein Paar [normal, selten] (Index 0 = MK1). */
+const NAMES: Record<Slot, [string, string][]> = {
+  ruestung: [
+    ['MK1 Feldblech', 'MK1 Geätztes Feldblech'],
+    ['MK2 Stahlmantel', 'MK2 Verdichteter Stahlmantel'],
+    ['MK3 Frontplatte', 'MK3 Rückprall-Frontplatte'],
+    ['MK4 Grabenpanzerung', 'MK4 Granitkern-Grabenpanzerung'],
+    ['MK5 Bollwerkplatten', 'MK5 Bollwerkplatten des Widerstands'],
+    ['MK6 Eisenwall', 'MK6 Eisenwall mit Reaktivkern'],
+    ['MK7 Schildmantel', 'MK7 Schildmantel der Abweisung'],
+    ['MK8 Sturmbastion', 'MK8 Sturmbastion mit Schockschicht'],
+    ['MK9 Titanfront', 'MK9 Titanfront der Härte'],
+    ['MK10 Festungsstahl', 'MK10 Festungsstahl Primus'],
+  ],
+  raeder: [
+    ['MK1 Werkstattrollen', 'MK1 Werkstattrollen mit Schnellkupplung'],
+    ['MK2 Spurläufer', 'MK2 Spurläufer mit Zugkern'],
+    ['MK3 Staubräder', 'MK3 Staubräder der Eile'],
+    ['MK4 Geländekranz', 'MK4 Geländekranz mit Boostventil'],
+    ['MK5 Kettenläufer', 'MK5 Kettenläufer mit Turboschub'],
+    ['MK6 Sprintachsen', 'MK6 Sprintachsen des Durchbruchs'],
+    ['MK7 Wüstenlaufwerk', 'MK7 Wüstenlaufwerk mit Driftkern'],
+    ['MK8 Sturmrollen', 'MK8 Sturmrollen mit Nachbrenner'],
+    ['MK9 Blitzkranz', 'MK9 Blitzkranz der Überfahrt'],
+    ['MK10 Hyperlaufwerk', 'MK10 Hyperlaufwerk Nullspur'],
+  ],
+  waffe: [
+    ['MK1 Kurzrohr 37', 'MK1 Kurzrohr 37 Präzision'],
+    ['MK2 Grabenkanone', 'MK2 Grabenkanone mit Tiefschlag'],
+    ['MK3 Stahlzahn', 'MK3 Stahlzahn Splitterkern'],
+    ['MK4 Brecherrohr', 'MK4 Brecherrohr Durchschlag'],
+    ['MK5 Donnerlanze', 'MK5 Donnerlanze Überdruck'],
+    ['MK6 Belagerer', 'MK6 Belagerer mit Glutladung'],
+    ['MK7 Schwerer Richter', 'MK7 Schwerer Richter Richtkern'],
+    ['MK8 Vulkanrohr', 'MK8 Vulkanrohr Brandherz'],
+    ['MK9 Titanbrecher', 'MK9 Titanbrecher Hohlladung'],
+    ['MK10 Endkaliber', 'MK10 Endkaliber Omega'],
+  ],
+  wanne: [
+    ['MK1 Spähwanne', 'MK1 Spähwanne mit Notdichtung'],
+    ['MK2 Gusswanne', 'MK2 Gusswanne mit Innenstreben'],
+    ['MK3 Frontwanne', 'MK3 Frontwanne Verbundkern'],
+    ['MK4 Trägerwanne', 'MK4 Trägerwanne Stabil'],
+    ['MK5 Bunkerwanne', 'MK5 Bunkerwanne mit Panzerzellen'],
+    ['MK6 Mammutwanne', 'MK6 Mammutwanne Lebensader'],
+    ['MK7 Kommandowanne', 'MK7 Kommandowanne Sicherraum'],
+    ['MK8 Stahlkoloss', 'MK8 Stahlkoloss mit Notsystem'],
+    ['MK9 Titanrumpf', 'MK9 Titanrumpf Autodichtung'],
+    ['MK10 Kriegsarche', 'MK10 Kriegsarche Letzter Halt'],
+  ],
+  turm: [
+    ['MK1 Wachturm', 'MK1 Wachturm mit Schnellring'],
+    ['MK2 Drehkranz', 'MK2 Drehkranz Präzise'],
+    ['MK3 Schützenturm', 'MK3 Schützenturm Adlerblick'],
+    ['MK4 Kuppelturm', 'MK4 Kuppelturm Stabilisiert'],
+    ['MK5 Sturmturm', 'MK5 Sturmturm Richtfokus'],
+    ['MK6 Kommandoturm', 'MK6 Kommandoturm Signalnetz'],
+    ['MK7 Falkenturm', 'MK7 Falkenturm Zielblick'],
+    ['MK8 Belagerungsturm', 'MK8 Belagerungsturm Ruhige Hand'],
+    ['MK9 Titanhaube', 'MK9 Titanhaube Fokuslinse'],
+    ['MK10 Zitadellenturm', 'MK10 Zitadellenturm Vollvisier'],
+  ],
+};
+
 function buildCatalog(): ShopItem[] {
   const items: ShopItem[] = [];
   for (const s of SLOTS) {
@@ -62,7 +126,7 @@ function buildCatalog(): ShopItem[] {
           slot: s.slot,
           rarity,
           mk,
-          name: `MK${mk} ${s.label}${rarity === 'selten' ? ' · selten' : ''}`,
+          name: NAMES[s.slot][mk - 1]![rarity === 'normal' ? 0 : 1],
           cost,
           damage: s.stat === 'damage' ? val : 0,
           hp: s.stat === 'hp' ? val : 0,
