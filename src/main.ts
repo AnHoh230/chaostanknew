@@ -24,6 +24,7 @@ import { createReveal } from './reveal/reveal';
 import { createPlayerBar } from './ui/playerBar';
 import { createMinimap } from './ui/minimap';
 import { createEnemyBars } from './ui/enemyBars';
+import { createCameraPanel } from './ui/cameraPanel';
 import { TANK_CLASSES, type TankClass } from './game/classes';
 import { createPickupField } from './loot/pickups';
 import { CATALOG, SLOT_SOCKET, type ShopItem } from './shop/catalog';
@@ -348,6 +349,7 @@ function boot(cls: TankClass): void {
   const playerBar = createPlayerBar(scene, camera, engine); // HP+EP über dem eigenen Panzer
   const minimap = createMinimap();
   const enemyBars = createEnemyBars(scene, camera, engine); // HP-Balken über den Gegnern
+  createCameraPanel(); // Kamera-Regler (Taste K)
 
   // Loot-Toast: kurze Einblendung beim Aufsammeln eines Teils.
   const toast = document.createElement('div');
