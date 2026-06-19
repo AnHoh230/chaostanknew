@@ -13,6 +13,9 @@ import { createInput } from './input/input';
 import { createProjectilePool } from './combat/projectilePool';
 import { createProjectileView } from './combat/projectileView';
 import { createCombatSystem, type Combatant } from './combat/combat';
+import { createEnemyBrain } from './ai/enemyBrain';
+import { MOTIVE_PRESETS } from './ai/motives';
+import type { AiWorldView } from './ai/aiTypes';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
 import { createFireRecorder } from './debug/fireRecorder';
@@ -29,6 +32,9 @@ const TANK_RADIUS = 1.5; // Treffer-Radius eines Panzers (XZ)
 const PROJECTILE_RADIUS = 0.3;
 const HIT_DAMAGE = 20; // Schaden pro Treffer (100 HP -> 5 Treffer)
 const ENEMY_SPAWN = { x: 14, z: 10 };
+const ENEMY_SPEED = 5; // langsamer als der Spieler (8)
+const ENEMY_SIGHT = 60; // Sichtweite auf das Ziel
+const ENEMY_KEEP_DIST = 7; // beim Annähern nicht in den Spieler hineinlaufen
 
 const log = createLogger('main');
 
@@ -139,6 +145,12 @@ function boot(): void {
     },
   });
 
+  // Motiv-KI des Gegners (Slice 1b-2): Aasgeier. Eigener Seed, damit die Wahl
+  // reproduzierbar bleibt und nicht mit anderen RNG-Verbrauchern kollidiert.
+  const aiRng = createRng(SEED + 7);
+  const enemyBrain = createEnemyBrain(MOTIVE_PRESETS.aasgeier!, () => aiRng.next());
+  let enemyAction = 'idle';
+
   // Permanenter Schuss-Rekorder: friert pro Schuss alle Zahlen + Cursor ein.
   const recorder = createFireRecorder(scene, camera);
   let simTime = 0; // Sekunden seit Boot (Sim-Uhr), in der Loop akkumuliert
@@ -229,6 +241,45 @@ function boot(): void {
     reticle.update(input.getAimTarget()); // gleicher Frame wie der Turm
     pool.update(simDt);
 
+    // Gegner-KI (Slice 1b-2): Welt lesen → Aktion wählen → danach bewegen.
+    if (enemyCombatant.alive) {
+      const er = enemyTank.view.root;
+      const ex = er.position.x;
+      const ez = er.position.z;
+      const px = tank.view.root.position.x;
+      const pz = tank.view.root.position.z;
+      const dPlayer = Math.hypot(px - ex, pz - ez) || 1;
+      const dHome = Math.hypot(ENEMY_SPAWN.x - ex, ENEMY_SPAWN.z - ez) || 0;
+      const world: AiWorldView = {
+        selfHpFrac: enemyCombatant.hp / enemyCombatant.maxHp,
+        targetVisible: dPlayer < ENEMY_SIGHT,
+        distance: dPlayer,
+        homeDistance: dHome,
+        groupSize: 0,
+        lootValue: 0.4,
+      };
+      enemyAction = enemyBrain.update(world, simDt);
+
+      let mx = 0;
+      let mz = 0;
+      if (enemyAction === 'annähern' && dPlayer > ENEMY_KEEP_DIST) {
+        mx = (px - ex) / dPlayer;
+        mz = (pz - ez) / dPlayer;
+      } else if (enemyAction === 'fliehen') {
+        mx = (ex - px) / dPlayer;
+        mz = (ez - pz) / dPlayer;
+      } else if (enemyAction === 'Revier_halten' && dHome > 1) {
+        mx = (ENEMY_SPAWN.x - ex) / dHome;
+        mz = (ENEMY_SPAWN.z - ez) / dHome;
+      }
+      if (mx !== 0 || mz !== 0) {
+        const step = ENEMY_SPEED * simDt;
+        er.position.x += mx * step;
+        er.position.z += mz * step;
+        er.rotation.y = Math.atan2(mx, mz); // in Laufrichtung drehen
+      }
+    }
+
     // Combatant-Positionen aus den Panzer-Roots spiegeln, dann Treffer auflösen.
     playerCombatant.x = tank.view.root.position.x;
     playerCombatant.z = tank.view.root.position.z;
@@ -254,6 +305,9 @@ function boot(): void {
       tankZ: +tank.view.root.position.z.toFixed(3),
       enemyHp: enemyCombatant.hp,
       enemyAlive: enemyCombatant.alive,
+      enemyAction,
+      enemyX: +enemyTank.view.root.position.x.toFixed(2),
+      enemyZ: +enemyTank.view.root.position.z.toFixed(2),
       enemyScreen: (() => {
         const s = Vector3.Project(
           enemyTank.view.root.getAbsolutePosition(),
