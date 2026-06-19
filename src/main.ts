@@ -21,8 +21,9 @@ import { pickTarget, type TargetInfo } from './enemy/targeting';
 import { createAkteBuch } from './named/akte';
 import { generateNamed, istKnapperSieg } from './named/promotion';
 import { createReveal } from './reveal/reveal';
-import { createHud } from './ui/hud';
+import { createPlayerBar } from './ui/playerBar';
 import { createMinimap } from './ui/minimap';
+import { createEnemyBars } from './ui/enemyBars';
 import { TANK_CLASSES, type TankClass } from './game/classes';
 import { createPickupField } from './loot/pickups';
 import { CATALOG, SLOT_SOCKET, type ShopItem } from './shop/catalog';
@@ -344,8 +345,9 @@ function boot(cls: TankClass): void {
   const reticle = createReticle(scene);
 
   // HUD (Spieler/Gegner-HP) + Minimap (Named = roter Punkt = Wiedererkennung auf der Karte).
-  const hud = createHud();
+  const playerBar = createPlayerBar(scene, camera, engine); // HP+EP über dem eigenen Panzer
   const minimap = createMinimap();
+  const enemyBars = createEnemyBars(scene, camera, engine); // HP-Balken über den Gegnern
 
   // Loot-Toast: kurze Einblendung beim Aufsammeln eines Teils.
   const toast = document.createElement('div');
@@ -573,16 +575,13 @@ function boot(cls: TankClass): void {
         hudEnemy = e;
       }
     }
-    hud.update({
-      playerHp: playerCombatant.hp,
-      playerMaxHp: playerCombatant.maxHp,
-      enemyHp: hudEnemy ? hudEnemy.combatant.hp : 0,
-      enemyMaxHp: hudEnemy ? hudEnemy.combatant.maxHp : 1,
-      enemyAlive: hudEnemy !== null,
-      enemyName: hudEnemy?.named?.name ?? null,
+    playerBar.update({
+      x: px,
+      z: pz,
+      hpFrac: playerCombatant.hp / playerCombatant.maxHp,
+      xpFrac: progression.xpToNext() > 0 ? progression.xp / progression.xpToNext() : 1,
       level: progression.level,
       mk: progression.unlockedMk(),
-      xpFrac: progression.xpToNext() > 0 ? progression.xp / progression.xpToNext() : 1,
     });
     minimap.update(
       playerCombatant.x,
@@ -590,6 +589,17 @@ function boot(cls: TankClass): void {
       roster
         .filter((e) => e.combatant.alive)
         .map((e) => ({ x: e.combatant.x, z: e.combatant.z, color: e.named ? '#ff3b30' : '#e8a23c' })),
+    );
+    // HP-Balken schweben über den Gegnern.
+    enemyBars.update(
+      roster
+        .filter((e) => e.combatant.alive)
+        .map((e) => ({
+          x: e.combatant.x,
+          z: e.combatant.z,
+          hpFrac: e.combatant.hp / e.combatant.maxHp,
+          named: e.named?.name ?? null,
+        })),
     );
 
     frame++;
