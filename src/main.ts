@@ -15,9 +15,11 @@ import { createProjectileView } from './combat/projectileView';
 import { createCombatSystem, type Combatant } from './combat/combat';
 import { createEnemyBrain } from './ai/enemyBrain';
 import { MOTIVE_PRESETS } from './ai/motives';
-import type { AiWorldView, TraitProfile } from './ai/aiTypes';
+import type { AiWorldView } from './ai/aiTypes';
+import { createEnemyEntity, type Enemy, type EnemySpec } from './enemy/enemy';
+import { pickTarget, type TargetInfo } from './enemy/targeting';
 import { createAkteBuch } from './named/akte';
-import { generateNamed, istKnapperSieg, type Named } from './named/promotion';
+import { generateNamed, istKnapperSieg } from './named/promotion';
 import { createReveal } from './reveal/reveal';
 import { createHud } from './ui/hud';
 import { createMinimap } from './ui/minimap';
@@ -36,12 +38,11 @@ const SEED = 1337;
 const TANK_RADIUS = 1.5; // Treffer-Radius eines Panzers (XZ)
 const PROJECTILE_RADIUS = 0.3;
 const HIT_DAMAGE = 20; // Schaden pro Treffer (100 HP -> 5 Treffer)
-const ENEMY_SPAWN = { x: 14, z: 10 };
 const ENEMY_SPEED = 5; // langsamer als der Spieler (8)
 const ENEMY_SIGHT = 60; // Sichtweite auf das Ziel
 const ENEMY_KEEP_DIST = 7; // beim Annähern nicht in den Spieler hineinlaufen
-const ENEMY_DAMAGE = 8; // Schaden eines Gegner-Treffers am Spieler
-const ENEMY_FIRE_COOLDOWN = 1.1; // Sekunden zwischen Gegner-Schüssen
+const ENEMY_DAMAGE = 6; // Schaden eines Gegner-Treffers am Spieler
+const ENEMY_FIRE_COOLDOWN = 1.4; // Sekunden zwischen Gegner-Schüssen
 const LEBENSSCHUB = 40; // HP-Schub bei Promotion (statt Tod)
 
 const log = createLogger('main');
@@ -148,41 +149,38 @@ function boot(cls: TankClass): void {
 
   // Reveal-Inszenierung (Slowmo + Highlight + Spruch) für Promotions.
   const reveal = createReveal(scene, camera, engine, clock);
-  let revealShown = false;
-  let prevEnemyVisible = false;
 
   // Projektil-Pool (rein logisch) + sichtbare Mesh-Brücke
   const pool = createProjectilePool(PROJECTILE_CAPACITY);
   const projectileView = createProjectileView(scene, pool, PROJECTILE_CAPACITY);
 
-  // Gegner-Panzer (Slice 1b-1: steht, ist treffbar, stirbt).
-  const enemyComp: TankComposition = {
-    chassis: 'c_box',
-    wheels: 'w_round',
-    turret: 't_small',
-    weapon: 'g_short',
-  };
-  const enemyView = createTankView(scene, enemyComp);
-  enemyView.root.position.set(ENEMY_SPAWN.x, 0, ENEMY_SPAWN.z);
-  const enemyTank = createTank('enemy', enemyView, 100);
-
-  // Combatants: Datenmodell für Treffer/HP (Position pro Frame aus den Roots gespiegelt).
-  const playerCombatant: Combatant = {
-    id: 'player', team: 'player', x: 0, z: 0, radius: TANK_RADIUS, hp: tank.hp, maxHp: cls.maxHp, alive: true,
-  };
-  const enemyCombatant: Combatant = {
-    id: 'enemy', team: 'enemy', x: ENEMY_SPAWN.x, z: ENEMY_SPAWN.z, radius: TANK_RADIUS,
-    hp: enemyTank.hp, maxHp: 100, alive: true,
-  };
-  const combatants: Combatant[] = [playerCombatant, enemyCombatant];
-
-  // Motiv-KI + Duell-Gedächtnis (vor dem Kampf-System: dessen Tod-Handler nutzt beides).
+  // Gegner-Roster (M2): mehrere Motive, sichtbar verschiedene Teile, eigener Beutewert.
   const aiRng = createRng(SEED + 7);
-  let enemyTraits: TraitProfile = { ...MOTIVE_PRESETS.aasgeier! };
-  let enemyBrain = createEnemyBrain(enemyTraits, () => aiRng.next());
-  let enemyAction = 'idle';
+  const ROSTER: EnemySpec[] = [
+    { id: 'aasgeier', motiveId: 'aasgeier', traits: MOTIVE_PRESETS.aasgeier!, lootValue: 0.4,
+      spawn: { x: 16, z: 12 }, hp: 100, comp: { chassis: 'c_box', wheels: 'w_round', turret: 't_small', weapon: 'g_short' } },
+    { id: 'angsthase', motiveId: 'angsthase', traits: MOTIVE_PRESETS.angsthase!, lootValue: 0.3,
+      spawn: { x: -18, z: 9 }, hp: 120, comp: { chassis: 'c_wide', wheels: 'w_tread', turret: 't_small', weapon: 'g_short' } },
+    { id: 'platzhirsch', motiveId: 'platzhirsch', traits: MOTIVE_PRESETS.platzhirsch!, lootValue: 0.5,
+      spawn: { x: 12, z: -16 }, hp: 130, comp: { chassis: 'c_box', wheels: 'w_tread', turret: 't_big', weapon: 'g_short' } },
+    { id: 'schatzjaeger', motiveId: 'schatzjaeger', traits: MOTIVE_PRESETS.schatzjaeger!, lootValue: 0.6,
+      spawn: { x: -14, z: -13 }, hp: 90, comp: { chassis: 'c_box', wheels: 'w_round', turret: 't_small', weapon: 'g_long' } },
+  ];
+  const roster: Enemy[] = ROSTER.map((spec, i) => {
+    const e = createEnemyEntity(scene, spec, TANK_RADIUS, () => aiRng.next());
+    e.fireCd = i * 0.6; // Schüsse entzerren, kein synchroner Alpha-Strike
+    return e;
+  });
+
+  // Combatants: Spieler + alle Gegner (Position pro Frame aus den Roots gespiegelt).
+  const playerCombatant: Combatant = {
+    id: 'player', team: 'player', x: 0, z: 0, radius: TANK_RADIUS, hp: tank.hp, maxHp: cls.maxHp,
+    alive: true, lootValue: 1.0,
+  };
+  const combatants: Combatant[] = [playerCombatant, ...roster.map((e) => e.combatant)];
+
+  // Duell-Gedächtnis (vor dem Kampf-System: dessen Tod-Handler nutzt es).
   const akteBuch = createAkteBuch();
-  let enemyNamed: Named | null = null;
 
   const combat = createCombatSystem(pool, () => combatants, {
     damage: HIT_DAMAGE,
@@ -194,27 +192,28 @@ function boot(cls: TankClass): void {
         bus.emit('tank.died', { tankId: 'player' });
         return;
       }
+      const e = roster.find((r) => r.id === t.id);
+      if (!e) return;
       // Gegner würde sterben: bei knappem Spieler-Sieg PROMOTION statt Tod.
       const playerFrac = playerCombatant.hp / playerCombatant.maxHp;
-      akteBuch.record('enemy', { ausgang: 'sieg', playerHpFrac: playerFrac });
-      if (istKnapperSieg(playerFrac) && !enemyNamed) {
+      akteBuch.record(e.id, { ausgang: 'sieg', playerHpFrac: playerFrac });
+      if (istKnapperSieg(playerFrac) && !e.named) {
         const named = generateNamed('knapper_sieg', () => aiRng.next());
-        akteBuch.promote('enemy', named);
-        enemyNamed = named;
-        enemyTraits = { ...enemyTraits, ...named.traitOverlay }; // rachsüchtig, flieht nie
-        enemyBrain = createEnemyBrain(enemyTraits, () => aiRng.next());
-        enemyCombatant.alive = true; // Lebensschub statt Tod
-        enemyCombatant.hp = LEBENSSCHUB;
+        akteBuch.promote(e.id, named);
+        e.named = named;
+        e.traits = { ...e.traits, ...named.traitOverlay }; // rachsüchtig, flieht nie
+        e.brain = createEnemyBrain(e.traits, () => aiRng.next());
+        e.combatant.alive = true; // Lebensschub statt Tod
+        e.combatant.hp = LEBENSSCHUB;
         log.info('PROMOTION: der Rasende erwacht', {
-          name: named.name, perks: named.perks, atPlayerHp: +playerFrac.toFixed(2),
+          id: e.id, name: named.name, atPlayerHp: +playerFrac.toFixed(2),
         });
-        reveal.triggerReveal(named, enemyView.root, akteBuch.get('enemy')!);
-        revealShown = true;
+        reveal.triggerReveal(named, e.view.root, akteBuch.get(e.id)!);
       } else {
-        akteBuch.archive('enemy');
-        enemyView.root.setEnabled(false);
-        bus.emit('tank.died', { tankId: 'enemy' });
-        log.info('enemy died', { signaturTeilDrop: enemyNamed?.signaturTeil ?? null });
+        akteBuch.archive(e.id);
+        e.view.root.setEnabled(false);
+        bus.emit('tank.died', { tankId: e.id });
+        log.info('enemy died', { id: e.id, signaturTeilDrop: e.named?.signaturTeil ?? null });
       }
     },
   });
@@ -292,8 +291,7 @@ function boot(cls: TankClass): void {
     }
   }
 
-  // Gegner feuert auf den Spieler (team 'enemy', eigener Schaden).
-  let enemyFireCd = ENEMY_FIRE_COOLDOWN;
+  // Gegner feuert auf sein Ziel (team 'enemy', eigener Schaden).
   function enemyFire(ox: number, oz: number, tx: number, tz: number): void {
     const dx = tx - ox;
     const dz = tz - oz;
@@ -322,9 +320,15 @@ function boot(cls: TankClass): void {
   // Debug-Hooks für deterministische Verifikation (Promotion etc.).
   (window as unknown as { __dbg: unknown }).__dbg = {
     player: playerCombatant,
-    enemy: enemyCombatant,
+    enemies: roster.map((e) => e.combatant),
+    roster: () =>
+      roster.map((e) => ({
+        id: e.id, motive: e.motiveId, action: e.action,
+        hp: e.combatant.hp, alive: e.combatant.alive,
+        x: +e.combatant.x.toFixed(1), z: +e.combatant.z.toFixed(1),
+        named: e.named?.name ?? null,
+      })),
     akte: () => akteBuch.all(),
-    named: () => enemyNamed,
   };
 
   // §21.5-Sichtbarkeitszähler periodisch loggen (aktiv == sichtbar)
@@ -336,36 +340,49 @@ function boot(cls: TankClass): void {
     reticle.update(input.getAimTarget()); // gleicher Frame wie der Turm
     pool.update(simDt);
 
-    // Gegner-KI (Slice 1b-2): Welt lesen → Aktion wählen → danach bewegen.
-    if (enemyCombatant.alive) {
-      const er = enemyTank.view.root;
+    // Gegner-KI (M2): jeder Gegner jagt den lohnendsten Ziel-Panzer (Beutewert).
+    const px = tank.view.root.position.x;
+    const pz = tank.view.root.position.z;
+    for (const e of roster) {
+      if (!e.combatant.alive) continue;
+      const er = e.view.root;
       const ex = er.position.x;
       const ez = er.position.z;
-      const px = tank.view.root.position.x;
-      const pz = tank.view.root.position.z;
-      const dPlayer = Math.hypot(px - ex, pz - ez) || 1;
-      const dHome = Math.hypot(ENEMY_SPAWN.x - ex, ENEMY_SPAWN.z - ez) || 0;
+
+      // Beutewert-Jagd: Ziel unter allen anderen Combatants wählen.
+      const cands: TargetInfo[] = [];
+      for (const c of combatants) {
+        if (c.id === e.id) continue;
+        cands.push({ id: c.id, team: c.team, x: c.x, z: c.z, lootValue: c.lootValue ?? 0, alive: c.alive });
+      }
+      const target = pickTarget(ex, ez, 'enemy', ENEMY_SIGHT, cands);
+      const tvis = target !== null;
+      const tx = target ? target.x : ex;
+      const tz = target ? target.z : ez;
+      const dTarget = Math.hypot(tx - ex, tz - ez) || 1;
+      const dHome = Math.hypot(e.home.x - ex, e.home.z - ez) || 0;
+
       const world: AiWorldView = {
-        selfHpFrac: enemyCombatant.hp / enemyCombatant.maxHp,
-        targetVisible: dPlayer < ENEMY_SIGHT,
-        distance: dPlayer,
+        selfHpFrac: e.combatant.hp / e.combatant.maxHp,
+        targetVisible: tvis,
+        distance: dTarget,
         homeDistance: dHome,
         groupSize: 0,
-        lootValue: 0.4,
+        lootValue: target ? target.lootValue : 0,
       };
-      enemyAction = enemyBrain.update(world, simDt);
+      e.action = e.brain.update(world, simDt);
 
       let mx = 0;
       let mz = 0;
-      if (enemyAction === 'annähern' && dPlayer > ENEMY_KEEP_DIST) {
-        mx = (px - ex) / dPlayer;
-        mz = (pz - ez) / dPlayer;
-      } else if (enemyAction === 'fliehen') {
-        mx = (ex - px) / dPlayer;
-        mz = (ez - pz) / dPlayer;
-      } else if (enemyAction === 'Revier_halten' && dHome > 1) {
-        mx = (ENEMY_SPAWN.x - ex) / dHome;
-        mz = (ENEMY_SPAWN.z - ez) / dHome;
+      if (e.action === 'annähern' && tvis && dTarget > ENEMY_KEEP_DIST) {
+        mx = (tx - ex) / dTarget;
+        mz = (tz - ez) / dTarget;
+      } else if (e.action === 'fliehen' && tvis) {
+        mx = (ex - tx) / dTarget;
+        mz = (ez - tz) / dTarget;
+      } else if (e.action === 'Revier_halten' && dHome > 1) {
+        mx = (e.home.x - ex) / dHome;
+        mz = (e.home.z - ez) / dHome;
       }
       if (mx !== 0 || mz !== 0) {
         const step = ENEMY_SPEED * simDt;
@@ -374,32 +391,32 @@ function boot(cls: TankClass): void {
         er.rotation.y = Math.atan2(mx, mz); // Chassis in Laufrichtung drehen
       }
 
-      // Turm IMMER auf den Spieler richten (Rohr = Schussrichtung). Turm ist Kind
-      // des Roots, deshalb die Chassis-Drehung herausrechnen.
-      if (world.targetVisible) {
-        const turretWorldYaw = Math.atan2(px - er.position.x, pz - er.position.z);
-        enemyTank.view.turretNode.rotation.y = turretWorldYaw - er.rotation.y;
+      // Turm auf das Ziel richten (Rohr = Schussrichtung; Chassis-Drehung herausgerechnet).
+      if (tvis) {
+        const yaw = Math.atan2(tx - er.position.x, tz - er.position.z);
+        e.view.turretNode.rotation.y = yaw - er.rotation.y;
       }
 
-      // Auf Sicht zurückfeuern (so kann die Spieler-HP fallen → knapper Sieg).
-      enemyFireCd -= simDt;
-      if (world.targetVisible && enemyFireCd <= 0) {
-        enemyFire(er.position.x, er.position.z, px, pz);
-        enemyFireCd = ENEMY_FIRE_COOLDOWN;
+      // Auf Sicht feuern (so kann Spieler-HP fallen → knapper Sieg → Promotion).
+      e.fireCd -= simDt;
+      if (tvis && e.fireCd <= 0) {
+        enemyFire(er.position.x, er.position.z, tx, tz);
+        e.fireCd = ENEMY_FIRE_COOLDOWN;
       }
 
-      // Wiedererkennung: erneut in Sicht NACH erfolgtem Reveal → anderer Spruch, kein Reveal.
-      if (revealShown && enemyNamed && world.targetVisible && !prevEnemyVisible && !reveal.active()) {
-        reveal.triggerRecognition(enemyNamed, er, akteBuch.get('enemy')!);
+      // Wiedererkennung: Spieler erneut in Sicht NACH Reveal → anderer Spruch, kein Reveal.
+      if (e.named && tvis && target?.id === 'player' && !e.prevTargetVisible && !reveal.active()) {
+        reveal.triggerRecognition(e.named, er, akteBuch.get(e.id)!);
       }
-      prevEnemyVisible = world.targetVisible;
+      e.prevTargetVisible = tvis;
+
+      e.combatant.x = er.position.x;
+      e.combatant.z = er.position.z;
     }
 
-    // Combatant-Positionen aus den Panzer-Roots spiegeln, dann Treffer auflösen.
-    playerCombatant.x = tank.view.root.position.x;
-    playerCombatant.z = tank.view.root.position.z;
-    enemyCombatant.x = enemyTank.view.root.position.x;
-    enemyCombatant.z = enemyTank.view.root.position.z;
+    // Spieler-Combatant spiegeln, dann Treffer auflösen.
+    playerCombatant.x = px;
+    playerCombatant.z = pz;
     combat.update();
 
     ground.update();
@@ -407,21 +424,31 @@ function boot(cls: TankClass): void {
     aimDebug.update();
     reveal.update(engine.getDeltaTime() / 1000); // Echtzeit (HUD/Slowmo-Fade läuft real)
 
-    // HUD + Minimap (Echtzeit). Named-Gegner = roter Punkt/Balken.
+    // HUD zeigt den nächsten lebenden Gegner; Minimap zeigt ALLE.
+    let hudEnemy: Enemy | null = null;
+    let hudBest = Infinity;
+    for (const e of roster) {
+      if (!e.combatant.alive) continue;
+      const d = Math.hypot(e.combatant.x - px, e.combatant.z - pz);
+      if (d < hudBest) {
+        hudBest = d;
+        hudEnemy = e;
+      }
+    }
     hud.update({
       playerHp: playerCombatant.hp,
       playerMaxHp: playerCombatant.maxHp,
-      enemyHp: enemyCombatant.hp,
-      enemyMaxHp: enemyCombatant.maxHp,
-      enemyAlive: enemyCombatant.alive,
-      enemyName: enemyNamed ? enemyNamed.name : null,
+      enemyHp: hudEnemy ? hudEnemy.combatant.hp : 0,
+      enemyMaxHp: hudEnemy ? hudEnemy.combatant.maxHp : 1,
+      enemyAlive: hudEnemy !== null,
+      enemyName: hudEnemy?.named?.name ?? null,
     });
     minimap.update(
       playerCombatant.x,
       playerCombatant.z,
-      enemyCombatant.alive
-        ? [{ x: enemyCombatant.x, z: enemyCombatant.z, color: enemyNamed ? '#ff3b30' : '#e8a23c' }]
-        : [],
+      roster
+        .filter((e) => e.combatant.alive)
+        .map((e) => ({ x: e.combatant.x, z: e.combatant.z, color: e.named ? '#ff3b30' : '#e8a23c' })),
     );
 
     frame++;
@@ -438,15 +465,18 @@ function boot(cls: TankClass): void {
       tankZ: +tank.view.root.position.z.toFixed(3),
       playerHp: playerCombatant.hp,
       playerAlive: playerCombatant.alive,
-      enemyHp: enemyCombatant.hp,
-      enemyAlive: enemyCombatant.alive,
-      enemyNamed: enemyNamed ? enemyNamed.name : null,
-      enemyAction,
-      enemyX: +enemyTank.view.root.position.x.toFixed(2),
-      enemyZ: +enemyTank.view.root.position.z.toFixed(2),
+      enemyCount: roster.filter((e) => e.combatant.alive).length,
+      nearestEnemyId: hudEnemy?.id ?? null,
+      enemyHp: hudEnemy ? hudEnemy.combatant.hp : 0,
+      enemyAlive: hudEnemy !== null,
+      enemyNamed: hudEnemy?.named?.name ?? null,
+      enemyAction: hudEnemy?.action ?? 'none',
+      enemyX: hudEnemy ? +hudEnemy.combatant.x.toFixed(2) : 0,
+      enemyZ: hudEnemy ? +hudEnemy.combatant.z.toFixed(2) : 0,
       enemyScreen: (() => {
+        if (!hudEnemy) return { x: 0, y: 0 };
         const s = Vector3.Project(
-          enemyTank.view.root.getAbsolutePosition(),
+          hudEnemy.view.root.getAbsolutePosition(),
           Matrix.IdentityReadOnly,
           scene.getTransformMatrix(),
           camera.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight()),

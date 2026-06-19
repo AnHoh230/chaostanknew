@@ -11,6 +11,8 @@ export interface Combatant {
   hp: number;
   maxHp: number;
   alive: boolean;
+  /** Beutewert für die Jagd-KI (0..1+); fehlt = 0. Steigt später mit verbauten Teilen. */
+  lootValue?: number;
 }
 
 export interface HitInfo {
