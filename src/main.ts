@@ -14,9 +14,9 @@ import { createProjectilePool } from './combat/projectilePool';
 import { createProjectileView } from './combat/projectileView';
 import { createCombatSystem, type Combatant } from './combat/combat';
 import { createEnemyBrain } from './ai/enemyBrain';
-import { MOTIVE_PRESETS } from './ai/motives';
 import type { AiWorldView } from './ai/aiTypes';
-import { createEnemyEntity, type Enemy, type EnemySpec } from './enemy/enemy';
+import { type Enemy } from './enemy/enemy';
+import { createSpawner } from './enemy/spawner';
 import { pickTarget, type TargetInfo } from './enemy/targeting';
 import { createAkteBuch } from './named/akte';
 import { generateNamed, istKnapperSieg } from './named/promotion';
@@ -25,7 +25,7 @@ import { createHud } from './ui/hud';
 import { createMinimap } from './ui/minimap';
 import { TANK_CLASSES, type TankClass } from './game/classes';
 import { createPickupField } from './loot/pickups';
-import { getPart, PARTS, type Part } from './loot/parts';
+import { PARTS, type Part } from './loot/parts';
 import { createShop } from './shop/shop';
 import { evaluateBuy } from './shop/buyLogic';
 import { startLoop } from './core/loop';
@@ -158,30 +158,23 @@ function boot(cls: TankClass): void {
   const pool = createProjectilePool(PROJECTILE_CAPACITY);
   const projectileView = createProjectileView(scene, pool, PROJECTILE_CAPACITY);
 
-  // Gegner-Roster (M2): mehrere Motive, sichtbar verschiedene Teile, eigener Beutewert.
+  // Gegner werden NICHT mehr fest gesetzt, sondern dauerhaft nachgespawnt (P1).
   const aiRng = createRng(SEED + 7);
-  const ROSTER: EnemySpec[] = [
-    { id: 'aasgeier', motiveId: 'aasgeier', traits: MOTIVE_PRESETS.aasgeier!, lootValue: 0.4,
-      spawn: { x: 16, z: 12 }, hp: 100, comp: { chassis: 'c_box', wheels: 'w_round', turret: 't_small', weapon: 'g_short' } },
-    { id: 'angsthase', motiveId: 'angsthase', traits: MOTIVE_PRESETS.angsthase!, lootValue: 0.3,
-      spawn: { x: -18, z: 9 }, hp: 120, comp: { chassis: 'c_wide', wheels: 'w_tread', turret: 't_small', weapon: 'g_short' } },
-    { id: 'platzhirsch', motiveId: 'platzhirsch', traits: MOTIVE_PRESETS.platzhirsch!, lootValue: 0.5,
-      spawn: { x: 12, z: -16 }, hp: 130, comp: { chassis: 'c_box', wheels: 'w_tread', turret: 't_big', weapon: 'g_short' } },
-    { id: 'schatzjaeger', motiveId: 'schatzjaeger', traits: MOTIVE_PRESETS.schatzjaeger!, lootValue: 0.6,
-      spawn: { x: -14, z: -13 }, hp: 90, comp: { chassis: 'c_box', wheels: 'w_round', turret: 't_small', weapon: 'g_long' } },
-  ];
-  const roster: Enemy[] = ROSTER.map((spec, i) => {
-    const e = createEnemyEntity(scene, spec, TANK_RADIUS, () => aiRng.next());
-    e.fireCd = i * 0.6; // Schüsse entzerren, kein synchroner Alpha-Strike
-    return e;
+  const roster: Enemy[] = []; // lebende + frisch promotete Gegner (dynamisch)
+  const spawner = createSpawner(scene, TANK_RADIUS, () => aiRng.next(), {
+    maxAlive: 5,
+    interval: 2.5,
+    radiusMin: 40,
+    radiusMax: 55,
+    baseHp: 110,
   });
 
-  // Combatants: Spieler + alle Gegner (Position pro Frame aus den Roots gespiegelt).
+  // Combatant des Spielers (Gegner-Combatants liefert der Roster dynamisch).
   const playerCombatant: Combatant = {
     id: 'player', team: 'player', x: 0, z: 0, radius: TANK_RADIUS, hp: tank.hp, maxHp: cls.maxHp,
     alive: true, lootValue: 1.0,
   };
-  const combatants: Combatant[] = [playerCombatant, ...roster.map((e) => e.combatant)];
+  const liveCombatants = (): Combatant[] => [playerCombatant, ...roster.map((e) => e.combatant)];
 
   // Duell-Gedächtnis (vor dem Kampf-System: dessen Tod-Handler nutzt es).
   const akteBuch = createAkteBuch();
@@ -191,17 +184,10 @@ function boot(cls: TankClass): void {
   let geld = 0; // Spielgeld, verdient durch Kills
   const owned = new Set<string>(); // bereits verbaute Teile (kein Doppelkauf)
 
-  // Welches Teil droppt welcher Gegner (M3).
-  const DROP_BY_ENEMY: Record<string, string> = {
-    aasgeier: 'ketten',
-    angsthase: 'breite_wanne',
-    platzhirsch: 'schwerer_turm',
-    schatzjaeger: 'lange_kanone',
-  };
   const pickups = createPickupField(scene);
   const PICKUP_REACH = TANK_RADIUS + 0.8;
 
-  const combat = createCombatSystem(pool, () => combatants, {
+  const combat = createCombatSystem(pool, liveCombatants, {
     damage: HIT_DAMAGE,
     projectileRadius: PROJECTILE_RADIUS,
     onHit: (h) => log.debug('hit', { target: h.target.id, hp: h.target.hp, lethal: h.lethal }),
@@ -230,15 +216,18 @@ function boot(cls: TankClass): void {
         reveal.triggerReveal(named, e.view.root, akteBuch.get(e.id)!);
       } else {
         akteBuch.archive(e.id);
-        e.view.root.setEnabled(false);
         bus.emit('tank.died', { tankId: e.id });
-        // Beute droppen (M3): an der Todesposition ein Teil ablegen.
-        const partId = DROP_BY_ENEMY[e.id] ?? 'ketten';
-        pickups.spawn(getPart(partId), e.combatant.x, e.combatant.z);
+        // Beute droppen (M3): zufälliges Teil an der Todesposition.
+        const part = PARTS[Math.floor(aiRng.next() * PARTS.length)]!;
+        pickups.spawn(part, e.combatant.x, e.combatant.z);
         // Spielgeld (M4): Belohnung nach Beutewert.
         const reward = Math.round((e.combatant.lootValue ?? 0.4) * 120);
         geld += reward;
-        log.info('enemy died', { id: e.id, drop: partId, reward, geld });
+        log.info('enemy died', { id: e.id, drop: part.id, reward, geld });
+        // Gegner aus der Welt entfernen (P1: Platz für Nachschub).
+        e.view.root.dispose();
+        const idx = roster.indexOf(e);
+        if (idx >= 0) roster.splice(idx, 1);
       }
     },
   });
@@ -417,9 +406,16 @@ function boot(cls: TankClass): void {
     reticle.update(input.getAimTarget()); // gleicher Frame wie der Turm
     pool.update(simDt);
 
-    // Gegner-KI (M2): jeder Gegner jagt den lohnendsten Ziel-Panzer (Beutewert).
     const px = tank.view.root.position.x;
     const pz = tank.view.root.position.z;
+
+    // Permanenter Nachschub (P1): VOR dem KI-/Promotion-Teil.
+    const aliveCount = roster.reduce((n, e) => n + (e.combatant.alive ? 1 : 0), 0);
+    const spawned = spawner.update(simDt, px, pz, aliveCount);
+    if (spawned) roster.push(spawned);
+
+    // Gegner-KI (M2): jeder Gegner jagt den lohnendsten Ziel-Panzer (Beutewert).
+    const allC = liveCombatants();
     for (const e of roster) {
       if (!e.combatant.alive) continue;
       const er = e.view.root;
@@ -428,7 +424,7 @@ function boot(cls: TankClass): void {
 
       // Beutewert-Jagd: Ziel unter allen anderen Combatants wählen.
       const cands: TargetInfo[] = [];
-      for (const c of combatants) {
+      for (const c of allC) {
         if (c.id === e.id) continue;
         cands.push({ id: c.id, team: c.team, x: c.x, z: c.z, lootValue: c.lootValue ?? 0, alive: c.alive });
       }
