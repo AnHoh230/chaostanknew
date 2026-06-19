@@ -27,9 +27,11 @@ import { createEnemyBars } from './ui/enemyBars';
 import { createCameraPanel } from './ui/cameraPanel';
 import { TANK_CLASSES, type TankClass } from './game/classes';
 import { createPickupField } from './loot/pickups';
-import { CATALOG, SLOT_SOCKET, type ShopItem } from './shop/catalog';
+import { CATALOG, SLOT_SOCKET, type ShopItem, type Slot } from './shop/catalog';
 import { createShop } from './shop/shop';
-import { evaluateBuy, sellValue } from './shop/buyLogic';
+import { sellValue } from './shop/buyLogic';
+
+const SLOTS: Slot[] = ['waffe', 'wanne', 'turm', 'raeder', 'ruestung'];
 import { createLoadout } from './player/loadout';
 import { createProgression } from './progression/progression';
 import { startLoop } from './core/loop';
@@ -365,54 +367,64 @@ function boot(cls: TankClass): void {
     setTimeout(() => (toast.style.opacity = '0'), 1600);
   }
 
-  // Stats nach Loadout-Änderung neu ableiten; HP folgt der maxHP-Änderung.
-  function applyStats(prevMaxHp: number): void {
+  // Optik + Stats nach JEDER Loadout-Änderung synchron halten (Slots ↔ Tasche).
+  function syncTank(prevMaxHp: number): void {
+    for (const slot of SLOTS) {
+      const map = SLOT_SOCKET[slot];
+      if (!map) continue;
+      const it = loadout.get(slot);
+      tank.view.setVariant(map.socket, it ? map.variant : cls.composition[map.socket]);
+    }
     const st = loadout.stats();
     playerSpeed = st.speed;
     playerCombatant.maxHp = st.maxHp;
     playerCombatant.armor = st.armor;
     playerCombatant.hp = Math.min(st.maxHp, Math.max(1, playerCombatant.hp + (st.maxHp - prevMaxHp)));
+    playerCombatant.lootValue = 1 + (loadout.equippedList().length + loadout.bag().length) * 0.15;
   }
 
-  // Teil anlegen (P3/P4): Slot-Item setzen, Variante sichtbar tauschen, Stats neu.
+  // Anlegen (aus Tasche/Kauf): neues Item in den Slot, altes → Tasche.
   function equip(item: ShopItem): void {
     const prevMax = loadout.stats().maxHp;
     loadout.equip(item);
-    const map = SLOT_SOCKET[item.slot];
-    if (map) tank.view.setVariant(map.socket, map.variant);
-    applyStats(prevMax);
-    playerCombatant.lootValue = 1 + loadout.all().length * 0.2; // mehr Teile = saftiger
-    showToast('Angebaut: ' + item.name);
-    const st = loadout.stats();
-    log.info('equip', { item: item.id, dmg: st.damage, hp: st.maxHp, armor: st.armor, speed: +st.speed.toFixed(1) });
+    syncTank(prevMax);
+    showToast('Angelegt: ' + item.name);
   }
-
-  function sellItem(item: ShopItem): void {
+  function unequipSlot(slot: Slot): void {
     const prevMax = loadout.stats().maxHp;
-    loadout.unequip(item.slot);
-    const map = SLOT_SOCKET[item.slot];
-    if (map) tank.view.setVariant(map.socket, cls.composition[map.socket]); // zurück zur Klassen-Optik
-    applyStats(prevMax);
+    loadout.unequip(slot);
+    syncTank(prevMax);
+    showToast('Abgelegt → Inventar');
+  }
+  function sellAny(item: ShopItem): void {
+    const prevMax = loadout.stats().maxHp;
+    loadout.remove(item);
     geld += sellValue(item);
-    showToast('Verkauft: ' + item.name);
+    syncTank(prevMax);
+    showToast(`Verkauft: ${item.name} (+💰 ${sellValue(item)})`);
+  }
+  // Loot landet im INVENTAR (Tasche), nicht automatisch im Slot.
+  function collectLoot(item: ShopItem): void {
+    loadout.addToBag(item);
+    showToast('Eingesammelt: ' + item.name + ' → Inventar');
   }
 
-  // Shop (P3): MK-Werkstatt auf den Katalog (Taste B pausiert die Sim).
+  // Werkstatt (Taste B pausiert die Sim): Ausrüstung · Inventar · Kaufen.
   const shop = createShop({
     items: CATALOG,
     getMoney: () => geld,
     getUnlockedMk: () => progression.unlockedMk(),
-    isEquipped: (id) => loadout.owns(id),
-    getEquipped: () => loadout.all(),
+    getSlot: (slot) => loadout.get(slot),
+    getBag: () => loadout.bag(),
     onBuy: (item) => {
-      const r = evaluateBuy(geld, item, progression.unlockedMk(), (id) => loadout.owns(id));
-      if (r.ok) {
-        geld -= item.cost;
-        equip(item);
-        showToast('Gekauft: ' + item.name);
-      }
+      if (item.rarity !== 'normal' || item.mk > progression.unlockedMk() || geld < item.cost) return;
+      geld -= item.cost;
+      equip(item); // gekauftes Item in den Slot, altes → Tasche
+      showToast('Gekauft & angelegt: ' + item.name);
     },
-    onSell: (item) => sellItem(item),
+    onEquip: (item) => equip(item),
+    onUnequip: (slot) => unequipSlot(slot),
+    onSell: (item) => sellAny(item),
     onToggle: (o) => {
       clock.simSpeed = o ? 0 : 1; // Werkstatt friert die Welt ein
     },
@@ -435,9 +447,12 @@ function boot(cls: TankClass): void {
       })),
     akte: () => akteBuch.all(),
     stats: () => loadout.stats(),
-    loadout: () => loadout.all().map((it) => it.id),
+    loadout: () => loadout.equippedList().map((it) => it.id),
+    bag: () => loadout.bag().map((it) => it.id),
+    equippedBySlot: () => Object.fromEntries(SLOTS.map((s) => [s, loadout.get(s)?.id ?? null])),
     pickupCount: () => pickups.count(),
     equip,
+    collectLoot,
     geld: () => geld,
     shop,
     progression: () => ({
@@ -557,8 +572,8 @@ function boot(cls: TankClass): void {
     playerCombatant.z = pz;
     combat.update();
 
-    // Beute einsammeln: fährt der Spieler über ein Teil → anlegen.
-    pickups.update(px, pz, PICKUP_REACH, equip);
+    // Beute einsammeln: fährt der Spieler über ein Teil → ins Inventar (Tasche).
+    pickups.update(px, pz, PICKUP_REACH, collectLoot);
     shop.refresh(); // Geld-Anzeige aktuell halten
 
     ground.update();

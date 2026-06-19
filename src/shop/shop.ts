@@ -5,9 +5,11 @@ export interface ShopHooks {
   items: readonly ShopItem[]; // voller Katalog
   getMoney: () => number;
   getUnlockedMk: () => number;
-  isEquipped: (id: string) => boolean;
-  getEquipped: () => ShopItem[];
+  getSlot: (slot: Slot) => ShopItem | null; // ausgerüstetes Item eines Slots
+  getBag: () => ShopItem[]; // Inventar-Tasche
   onBuy: (item: ShopItem) => void;
+  onEquip: (item: ShopItem) => void; // aus Tasche anlegen
+  onUnequip: (slot: Slot) => void; // Slot → Tasche
   onSell: (item: ShopItem) => void;
   onToggle?: (open: boolean) => void;
 }
@@ -34,11 +36,33 @@ function statText(it: ShopItem): string {
   if (it.speed) return `${it.speed} Tempo`;
   return '';
 }
+function cmpVs(it: ShopItem, cur: ShopItem | null): string {
+  if (!cur) return ' <span style="color:#7bd">neu</span>';
+  const d = primary(it) - primary(cur);
+  if (d > 0) return ` <span style="color:#5fd06a">▲ +${d}</span>`;
+  if (d < 0) return ` <span style="color:#e06a6a">▼ ${d}</span>`;
+  return ' <span style="color:#9aa">=</span>';
+}
 
-/**
- * Werkstatt: links Kaufen (mit Slot-Filter, klaren Sperr-Gründen + Vergleichspfeil
- * zum verbauten Teil), rechts das Inventar des Panzers pro Slot mit Verkaufen.
- */
+function colTitle(text: string): HTMLElement {
+  const d = document.createElement('div');
+  d.textContent = text;
+  d.style.cssText = 'color:#f0e6cc;font-weight:700;margin:0 0 8px;font-size:15px;';
+  return d;
+}
+
+function btn(label: string, color: string, enabled: boolean, onClick: () => void): HTMLElement {
+  const b = document.createElement('button');
+  b.textContent = label;
+  b.disabled = !enabled;
+  b.style.cssText =
+    `padding:5px 10px;border-radius:6px;border:1px solid #2a343b;font:600 11px system-ui;` +
+    `color:${enabled ? color : '#667'};background:#1a1f25;${enabled ? 'cursor:pointer;' : 'cursor:default;opacity:0.6;'}`;
+  if (enabled) b.addEventListener('click', onClick);
+  return b;
+}
+
+/** Werkstatt: Ausrüstung (Slots) · Inventar (Tasche) · Kaufen. */
 export function createShop(h: ShopHooks): Shop {
   const money = document.createElement('div');
   money.id = 'money';
@@ -63,71 +87,99 @@ export function createShop(h: ShopHooks): Shop {
   const inner = document.createElement('div');
   inner.style.cssText =
     'background:#13171c;border:2px solid #2a343b;border-radius:12px;padding:20px;' +
-    'width:860px;max-width:94vw;max-height:86vh;overflow:auto;';
+    'width:1000px;max-width:96vw;max-height:88vh;overflow:auto;';
   panel.appendChild(inner);
   document.body.appendChild(panel);
 
   let open = false;
   let slotFilter: SlotFilter = 'alle';
 
-  function makeRow(
-    label: string,
-    sub: string,
-    right: string,
-    enabled: boolean,
-    rightColor: string,
-    onClick?: () => void,
-  ): HTMLElement {
-    const b = document.createElement('button');
-    b.disabled = !enabled;
-    b.style.cssText =
-      'display:flex;justify-content:space-between;align-items:center;width:100%;margin:5px 0;' +
-      'padding:9px 12px;border-radius:8px;border:1px solid #2a343b;text-align:left;color:#e8e0c8;' +
-      `background:#1a1f25;${enabled ? 'cursor:pointer;' : 'opacity:0.5;cursor:default;'}`;
-    b.innerHTML =
-      `<span><b>${label}</b><br><span style="color:#9aa;font-size:12px">${sub}</span></span>` +
-      `<span style="color:${rightColor};white-space:nowrap;margin-left:10px">${right}</span>`;
-    if (enabled && onClick) b.addEventListener('click', onClick);
-    return b;
-  }
-
   function refresh(): void {
     const mk = h.getUnlockedMk();
     money.textContent = `💰 ${h.getMoney()}   ·   MK ${mk}`;
     if (!open) return;
 
-    const equippedBySlot: Partial<Record<Slot, ShopItem>> = {};
-    for (const it of h.getEquipped()) equippedBySlot[it.slot] = it;
-
     inner.innerHTML =
-      `<div style="font-size:20px;font-weight:700;color:#f0e6cc;margin-bottom:4px">Werkstatt</div>` +
-      `<div style="color:#9aa;margin-bottom:12px">💰 ${h.getMoney()} · MK ${mk} freigeschaltet · [B] schließen</div>` +
-      `<div style="display:flex;gap:20px">` +
-      `<div id="shop-buy" style="flex:1.25"></div>` +
-      `<div id="shop-inv" style="flex:1"></div></div>`;
-    const buyCol = inner.querySelector('#shop-buy')!;
-    const invCol = inner.querySelector('#shop-inv')!;
+      `<div style="font-size:20px;font-weight:700;color:#f0e6cc">Werkstatt</div>` +
+      `<div style="color:#9aa;margin:2px 0 14px">💰 ${h.getMoney()} · MK ${mk} freigeschaltet · [B] schließen</div>` +
+      `<div style="display:flex;gap:18px;align-items:flex-start">` +
+      `<div id="sh-equip" style="flex:1"></div>` +
+      `<div id="sh-bag" style="flex:1"></div>` +
+      `<div id="sh-buy" style="flex:1.15"></div></div>`;
+    const equipCol = inner.querySelector('#sh-equip')!;
+    const bagCol = inner.querySelector('#sh-bag')!;
+    const buyCol = inner.querySelector('#sh-buy')!;
 
-    // ---- KAUFEN ----
-    const buyHead = document.createElement('div');
-    buyHead.textContent = 'Kaufen (nur Normale)';
-    buyHead.style.cssText = 'color:#9aa;margin:2px 0 8px';
-    buyCol.appendChild(buyHead);
+    // ---------- AUSRÜSTUNG (Slots) ----------
+    equipCol.appendChild(colTitle('Ausrüstung'));
+    for (const slot of SLOT_ORDER) {
+      const it = h.getSlot(slot);
+      const row = document.createElement('div');
+      row.style.cssText =
+        'border:1px solid #2a343b;border-radius:8px;padding:9px 11px;margin:6px 0;background:#1a1f25;';
+      if (it) {
+        row.innerHTML =
+          `<div style="font-size:11px;color:#8aa">${SLOT_LABELS[slot]}</div>` +
+          `<div><b>${it.name}</b> <span style="color:#9aa;font-size:12px">— ${statText(it)}</span></div>`;
+        const ab = btn('Ablegen → Tasche', '#cdd6dd', true, () => {
+          h.onUnequip(slot);
+          refresh();
+        });
+        ab.style.marginTop = '6px';
+        row.appendChild(ab);
+      } else {
+        row.style.borderStyle = 'dashed';
+        row.innerHTML =
+          `<div style="font-size:11px;color:#8aa">${SLOT_LABELS[slot]}</div>` +
+          `<div style="color:#677">— leer —</div>`;
+      }
+      equipCol.appendChild(row);
+    }
 
+    // ---------- INVENTAR (Tasche) ----------
+    const bag = h.getBag();
+    bagCol.appendChild(colTitle(`Inventar (${bag.length})`));
+    if (!bag.length) {
+      const e = document.createElement('div');
+      e.textContent = 'Tasche leer. Beute landet hier.';
+      e.style.cssText = 'color:#778;padding:8px';
+      bagCol.appendChild(e);
+    }
+    for (const it of bag) {
+      const cur = h.getSlot(it.slot);
+      const row = document.createElement('div');
+      row.style.cssText =
+        'border:1px solid #2a343b;border-radius:8px;padding:9px 11px;margin:6px 0;background:#1a1f25;';
+      row.innerHTML =
+        `<div><b>${it.name}</b></div>` +
+        `<div style="color:#9aa;font-size:12px">${SLOT_LABELS[it.slot]} · ${statText(it)}${cmpVs(it, cur)}</div>`;
+      const actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;gap:6px;margin-top:6px;';
+      actions.appendChild(btn('Anlegen', '#5fd06a', true, () => {
+        h.onEquip(it);
+        refresh();
+      }));
+      actions.appendChild(btn(`Verkaufen +💰${sellValue(it)}`, '#ffe08a', true, () => {
+        h.onSell(it);
+        refresh();
+      }));
+      row.appendChild(actions);
+      bagCol.appendChild(row);
+    }
+
+    // ---------- KAUFEN ----------
+    buyCol.appendChild(colTitle('Kaufen (Normale)'));
     const bar = document.createElement('div');
     bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;';
     for (const f of ['alle', ...SLOT_ORDER] as SlotFilter[]) {
       const active = slotFilter === f;
-      const fb = document.createElement('button');
-      fb.textContent = f === 'alle' ? 'Alle' : SLOT_LABELS[f];
-      fb.style.cssText =
-        'padding:5px 11px;border-radius:6px;border:1px solid #2a343b;cursor:pointer;font:600 12px system-ui;' +
-        (active ? 'background:#d8b04a;color:#1a1d22;' : 'background:#1a1f25;color:#cdd6dd;');
-      fb.addEventListener('click', () => {
-        slotFilter = f;
-        refresh();
-      });
-      bar.appendChild(fb);
+      bar.appendChild(
+        btn(f === 'alle' ? 'Alle' : SLOT_LABELS[f], active ? '#1a1d22' : '#cdd6dd', true, () => {
+          slotFilter = f;
+          refresh();
+        }),
+      );
+      if (active) (bar.lastChild as HTMLElement).style.background = '#d8b04a';
     }
     buyCol.appendChild(bar);
 
@@ -135,8 +187,7 @@ export function createShop(h: ShopHooks): Shop {
       .filter(
         (it) =>
           it.rarity === 'normal' &&
-          it.mk <= mk + 1 && // aktuelle Stufe + nächste als Vorschau
-          !h.isEquipped(it.id) &&
+          it.mk <= mk + 1 &&
           (slotFilter === 'alle' || it.slot === slotFilter),
       )
       .sort((a, b) => SLOT_ORDER.indexOf(a.slot) - SLOT_ORDER.indexOf(b.slot) || a.mk - b.mk);
@@ -144,64 +195,31 @@ export function createShop(h: ShopHooks): Shop {
     for (const it of list) {
       const locked = it.mk > mk;
       const afford = h.getMoney() >= it.cost;
-      const cur = equippedBySlot[it.slot];
-      let cmp = '';
-      if (cur) {
-        const d = primary(it) - primary(cur);
-        cmp =
-          d > 0
-            ? ` <span style="color:#5fd06a">▲ +${d}</span>`
-            : d < 0
-              ? ` <span style="color:#e06a6a">▼ ${d}</span>`
-              : ` <span style="color:#9aa">=</span>`;
-      } else {
-        cmp = ` <span style="color:#7bd">neu</span>`;
-      }
+      const cur = h.getSlot(it.slot);
+      const row = document.createElement('button');
+      row.disabled = locked || !afford;
+      row.style.cssText =
+        'display:flex;justify-content:space-between;align-items:center;width:100%;margin:5px 0;' +
+        'padding:9px 12px;border-radius:8px;border:1px solid #2a343b;text-align:left;color:#e8e0c8;' +
+        `background:#1a1f25;${!locked && afford ? 'cursor:pointer;' : 'opacity:0.55;cursor:default;'}`;
       const right = locked ? `🔒 MK ${it.mk}` : `💰 ${it.cost}`;
       const rightColor = locked ? '#c98' : afford ? '#ffe08a' : '#e06a6a';
-      buyCol.appendChild(
-        makeRow(it.name, statText(it) + cmp, right, !locked && afford, rightColor, () => {
+      row.innerHTML =
+        `<span><b>${it.name}</b><br><span style="color:#9aa;font-size:12px">${statText(it)}${cmpVs(it, cur)}</span></span>` +
+        `<span style="color:${rightColor};white-space:nowrap;margin-left:10px">${right}</span>`;
+      if (!locked && afford) {
+        row.addEventListener('click', () => {
           h.onBuy(it);
           refresh();
-        }),
-      );
+        });
+      }
+      buyCol.appendChild(row);
     }
     if (!list.length) {
       const none = document.createElement('div');
       none.textContent = 'Nichts in diesem Filter.';
       none.style.cssText = 'color:#778;padding:8px';
       buyCol.appendChild(none);
-    }
-
-    // ---- DEIN PANZER (INVENTAR) ----
-    const invHead = document.createElement('div');
-    invHead.textContent = 'Dein Panzer';
-    invHead.style.cssText = 'color:#9aa;margin:2px 0 8px';
-    invCol.appendChild(invHead);
-
-    for (const slot of SLOT_ORDER) {
-      const it = equippedBySlot[slot];
-      if (it) {
-        invCol.appendChild(
-          makeRow(
-            `${SLOT_LABELS[slot]}: ${it.name}`,
-            statText(it),
-            `Verkaufen +💰 ${sellValue(it)}`,
-            true,
-            '#5fd06a',
-            () => {
-              h.onSell(it);
-              refresh();
-            },
-          ),
-        );
-      } else {
-        const empty = document.createElement('div');
-        empty.innerHTML = `<b style="color:#cdd6dd">${SLOT_LABELS[slot]}:</b> <span style="color:#677">— leer —</span>`;
-        empty.style.cssText =
-          'padding:11px 12px;margin:5px 0;border:1px dashed #2a343b;border-radius:8px;font-size:13px;';
-        invCol.appendChild(empty);
-      }
     }
   }
 

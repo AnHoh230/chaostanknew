@@ -3,9 +3,9 @@ import type { Scene, TransformNode, Camera } from '@babylonjs/core';
 
 // Höhe über und Distanz hinter dem Ziel + FOV bestimmen Winkel, Distanz und Zoom.
 // Höher = steiler (mehr Draufsicht), größerer Betrag von back = flacher/weiter.
-const HEIGHT = 30; // über dem Ziel
-const BACK = 26; // hinter dem Ziel (−Z)
-const FOV = 0.6;
+const HEIGHT = 25; // über dem Ziel
+const BACK = 55; // hinter dem Ziel (−Z)
+const FOV = 0.87;
 
 /**
  * Perspektivische Folgekamera mit fester Schräg-Distanz (2.5D-Look). Folgt dem
