@@ -15,6 +15,7 @@ import { createProjectileView } from './combat/projectileView';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
 import { createFireRecorder } from './debug/fireRecorder';
+import { createReticle } from './ui/reticle';
 import type { TankComposition } from './tank/sockets';
 
 const BIOME_ID = 'steppe';
@@ -174,6 +175,11 @@ function boot(): void {
 
   const input = createInput(scene, camera, tank, TANK_SPEED, fire);
 
+  // OS-Mauszeiger über dem Canvas ausblenden — das Spiel zeichnet sein eigenes
+  // Fadenkreuz, das frame-synchron mit dem Turm läuft (kein Render-Weg-Versatz).
+  canvas.style.cursor = 'none';
+  const reticle = createReticle(scene);
+
   // Mess-Overlay (Phase 1 Debugging): macht Cursor-Bodenpunkt, Ziel und Schussrichtung sichtbar.
   const aimDebug = createAimDebug(scene, camera, tank, () => input.getAimTarget());
 
@@ -183,12 +189,26 @@ function boot(): void {
   startLoop(engine, scene, clock, (simDt) => {
     simTime += simDt;
     input.update(simDt);
+    reticle.update(input.getAimTarget()); // gleicher Frame wie der Turm
     pool.update(simDt);
     ground.update();
     projectileView.sync();
     aimDebug.update();
 
     frame++;
+
+    // Live-Sonde: pro Frame Cursor-Pixel + Turm-Winkel + Tank-Pos festhalten.
+    // Damit lässt sich frame-genau prüfen, ob der Turm sich OHNE Cursor-Bewegung dreht.
+    (window as unknown as { __live: unknown }).__live = {
+      frame,
+      simTime: +simTime.toFixed(3),
+      pointerX: scene.pointerX,
+      pointerY: scene.pointerY,
+      turretYawDeg: +((tank.view.turretNode.rotation.y * 180) / Math.PI).toFixed(2),
+      tankX: +tank.view.root.position.x.toFixed(3),
+      tankZ: +tank.view.root.position.z.toFixed(3),
+    };
+
     if (frame % 60 === 0) {
       const active = pool.activeCount();
       const visible = projectileView.visibleCount();
