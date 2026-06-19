@@ -28,6 +28,7 @@ export interface Enemy {
   respawnTimer: number; // >0 = tot, kehrt als benannter Rivale zurück (Nemesis)
   equipment: ShopItem[]; // tatsächlich angelegte Teile — NUR diese kann er droppen
   bag: ShopItem[]; // eingesammelter Loot (Schatzjäger) — wird beim Shoppen verkauft
+  shopGoal: { x: number; z: number } | null; // Ziel-Shop-Feld, wenn er gerade shoppen fährt
 }
 
 export interface EnemySpec {
@@ -89,5 +90,6 @@ export function createEnemyEntity(
     respawnTimer: 0,
     equipment: rollEnemyEquipment(spec.level, rng),
     bag: [],
+    shopGoal: null,
   };
 }

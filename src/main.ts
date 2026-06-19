@@ -18,6 +18,7 @@ import { MOTIV_LABEL } from './ai/motives';
 import type { AiWorldView } from './ai/aiTypes';
 import { enemyLevelStats, type Enemy } from './enemy/enemy';
 import { rollEnemyEquipment, pickDrop } from './enemy/equipment';
+import { runEnemyShopVisit, enemyUpgradeCost } from './enemy/enemyShopping';
 import { createSpawner } from './enemy/spawner';
 import { pickTarget, type TargetInfo } from './enemy/targeting';
 import { createAkteBuch } from './named/akte';
@@ -29,8 +30,8 @@ import { createEnemyBars } from './ui/enemyBars';
 import { createCameraPanel } from './ui/cameraPanel';
 import { TANK_CLASSES, type TankClass } from './game/classes';
 import { createPickupField } from './loot/pickups';
-import { createShopField } from './world/shopTiles';
-import { CATALOG, SLOT_SOCKET, type ShopItem, type Slot } from './shop/catalog';
+import { createShopField, TILE_RADIUS } from './world/shopTiles';
+import { CATALOG, SLOT_SOCKET, catalogItem, type ShopItem, type Slot } from './shop/catalog';
 import { createShop } from './shop/shop';
 import { sellValue } from './shop/buyLogic';
 
@@ -55,6 +56,7 @@ const ENEMY_SPEED = 5; // langsamer als der Spieler (8)
 const ENEMY_SIGHT = 60; // Sichtweite auf das Ziel
 const ENEMY_KEEP_DIST = 7; // beim Annähern nicht in den Spieler hineinlaufen
 const ENEMY_FIRE_COOLDOWN = 1.4; // Sekunden zwischen Gegner-Schüssen
+const ENEMY_SHOP_TRIP_CD = 14; // Sekunden bis zum nächsten autonomen Shop-Besuch
 const NAMED_RESPAWN = 6; // Sekunden, bis ein gefallener benannter Rivale zurückkehrt
 const LEBENSSCHUB = 40; // HP-Schub bei Promotion (statt Tod)
 
@@ -482,6 +484,35 @@ function boot(cls: TankClass): void {
     playerInvuln: () => playerCombatant.invulnerable === true,
     shopOpen: () => shop.isOpen(),
     nearestTile: () => shopField.nearest(playerCombatant.x, playerCombatant.z),
+    enemyState: (id: string) => {
+      const e = roster.find((r) => r.id === id);
+      return e
+        ? {
+            id: e.id, name: e.displayName, level: e.level, credits: e.credits,
+            bag: e.bag.map((i) => i.id), equip: e.equipment.map((i) => i.id),
+            shopGoal: e.shopGoal, x: +e.combatant.x.toFixed(1), z: +e.combatant.z.toFixed(1),
+          }
+        : null;
+    },
+    shoppers: () =>
+      roster
+        .filter((e) => e.shopGoal)
+        .map((e) => ({ id: e.id, name: e.displayName, goal: e.shopGoal, bag: e.bag.length })),
+    seedEnemyShop: (id?: string, nearTile = true) => {
+      const e = id ? roster.find((r) => r.id === id) : roster.find((r) => r.combatant.alive);
+      if (!e) return 'none';
+      e.bag.push(catalogItem('waffe_mk01_normal'), catalogItem('turm_mk01_normal'));
+      e.credits += 500;
+      e.shopCd = 0;
+      e.shopGoal = null;
+      if (nearTile) {
+        const t = shopField.positions[0]!; // (40,0): Gegner knapp daneben absetzen → schnelle Ankunft
+        e.view.root.position.set(t.x - 9, 0, t.z);
+        e.combatant.x = t.x - 9;
+        e.combatant.z = t.z;
+      }
+      return { id: e.id, name: e.displayName, bagNow: e.bag.length, credits: e.credits };
+    },
     teleportToTile: () => {
       const t = shopField.positions[0]!;
       tank.view.root.position.set(t.x, 0, t.z);
@@ -564,6 +595,43 @@ function boot(cls: TankClass): void {
       const ex = er.position.x;
       const ez = er.position.z;
 
+      // S3: Shoppen — fährt der Gegner gerade zu einem Shop-Feld? Dann Kampf ignorieren.
+      if (e.shopGoal) {
+        const sgx = e.shopGoal.x - ex;
+        const sgz = e.shopGoal.z - ez;
+        const sd = Math.hypot(sgx, sgz) || 1;
+        if (sd <= TILE_RADIUS) {
+          // Angekommen → Transaktion: gesammelte Beute verkaufen + ggf. aufrüsten.
+          const res = runEnemyShopVisit(
+            { level: e.level, credits: e.credits, equipment: e.equipment, bag: e.bag },
+            () => aiRng.next(),
+          );
+          e.level = res.level;
+          e.credits = res.credits;
+          e.equipment = res.equipment;
+          e.bag = res.bag;
+          if (res.upgraded) {
+            const st = enemyLevelStats(e.level);
+            e.combatant.maxHp = st.hp;
+            e.combatant.hp = st.hp; // frisch aufgerüstet = repariert
+            e.combatant.lootValue = st.lootValue; // wertvoller → wird selbst zum Ziel
+          }
+          e.shopGoal = null;
+          e.shopCd = ENEMY_SHOP_TRIP_CD;
+          log.debug('Gegner geshoppt', {
+            id: e.id, lvl: e.level, verkauft: res.soldCollected, aufgeruestet: res.upgraded,
+          });
+        } else {
+          const step = ENEMY_SPEED * simDt;
+          er.position.x += (sgx / sd) * step;
+          er.position.z += (sgz / sd) * step;
+          er.rotation.y = Math.atan2(sgx, sgz);
+          e.combatant.x = er.position.x;
+          e.combatant.z = er.position.z;
+        }
+        continue; // shoppt → in diesem Frame kein Kampf-Verhalten
+      }
+
       // Beutewert-Jagd: Ziel unter allen anderen Combatants wählen.
       const cands: TargetInfo[] = [];
       for (const c of allC) {
@@ -619,18 +687,17 @@ function boot(cls: TankClass): void {
         e.fireCd = ENEMY_FIRE_COOLDOWN;
       }
 
-      // Gegner-Shop (E4): verdiente Credits autonom in ein Level investieren.
+      // Gegner-Shop (S3): von Zeit zu Zeit zum nächsten Shop-Feld fahren — aber nur,
+      // wenn es etwas zu tun gibt (Aufrüstung bezahlbar ODER Beute zu verkaufen).
       e.shopCd -= simDt;
-      if (e.shopCd <= 0) {
-        e.shopCd = 5;
-        const upgradeCost = 40 + e.level * 30;
-        if (e.credits >= upgradeCost && e.level < 10) {
-          e.credits -= upgradeCost;
-          e.level += 1;
-          const st = enemyLevelStats(e.level);
-          e.combatant.maxHp = st.hp;
-          e.combatant.hp = st.hp; // frisch aufgerüstet = repariert
-          e.combatant.lootValue = st.lootValue; // wertvoller → wird selbst zum Ziel
+      if (e.shopCd <= 0 && !e.shopGoal) {
+        const wantsUpgrade = e.level < 10 && e.credits >= enemyUpgradeCost(e.level);
+        if (wantsUpgrade || e.bag.length > 0) {
+          const t = shopField.nearest(ex, ez);
+          if (t) e.shopGoal = { x: t.x, z: t.z };
+          else e.shopCd = 5;
+        } else {
+          e.shopCd = 5; // nichts zu tun → bald erneut prüfen
         }
       }
 
