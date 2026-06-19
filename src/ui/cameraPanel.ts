@@ -13,7 +13,7 @@ export function createCameraPanel(): void {
   const panel = document.createElement('div');
   panel.id = 'cam-panel';
   panel.style.cssText =
-    'position:fixed;right:12px;top:64px;z-index:24;display:none;background:rgba(13,17,22,0.92);' +
+    'position:fixed;right:12px;top:64px;z-index:24;display:block;background:rgba(13,17,22,0.92);' +
     'border:1px solid #2a343b;border-radius:10px;padding:12px 14px;width:210px;' +
     'font:600 12px system-ui,sans-serif;color:#cdd6dd;';
 
