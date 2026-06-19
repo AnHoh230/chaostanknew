@@ -30,6 +30,10 @@ export interface Reveal {
  */
 export function createReveal(scene: Scene, camera: Camera, engine: Engine, clock: Clock): Reveal {
   const hl = new HighlightLayer('reveal_hl', scene);
+  hl.innerGlow = true;
+  hl.outerGlow = true;
+  hl.blurHorizontalSize = 2;
+  hl.blurVerticalSize = 2;
   let highlighted: Mesh[] = [];
 
   let slowT = -1; // <0 = keine Zeitlupe aktiv

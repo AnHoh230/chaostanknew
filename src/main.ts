@@ -19,6 +19,8 @@ import type { AiWorldView, TraitProfile } from './ai/aiTypes';
 import { createAkteBuch } from './named/akte';
 import { generateNamed, istKnapperSieg, type Named } from './named/promotion';
 import { createReveal } from './reveal/reveal';
+import { createHud } from './ui/hud';
+import { createMinimap } from './ui/minimap';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
 import { createFireRecorder } from './debug/fireRecorder';
@@ -281,6 +283,10 @@ function boot(): void {
   canvas.style.cursor = 'none';
   const reticle = createReticle(scene);
 
+  // HUD (Spieler/Gegner-HP) + Minimap (Named = roter Punkt = Wiedererkennung auf der Karte).
+  const hud = createHud();
+  const minimap = createMinimap();
+
   // Mess-Overlay (Phase 1 Debugging): macht Cursor-Bodenpunkt, Ziel und Schussrichtung sichtbar.
   const aimDebug = createAimDebug(scene, camera, tank, () => input.getAimTarget());
 
@@ -371,6 +377,23 @@ function boot(): void {
     projectileView.sync();
     aimDebug.update();
     reveal.update(engine.getDeltaTime() / 1000); // Echtzeit (HUD/Slowmo-Fade läuft real)
+
+    // HUD + Minimap (Echtzeit). Named-Gegner = roter Punkt/Balken.
+    hud.update({
+      playerHp: playerCombatant.hp,
+      playerMaxHp: playerCombatant.maxHp,
+      enemyHp: enemyCombatant.hp,
+      enemyMaxHp: enemyCombatant.maxHp,
+      enemyAlive: enemyCombatant.alive,
+      enemyName: enemyNamed ? enemyNamed.name : null,
+    });
+    minimap.update(
+      playerCombatant.x,
+      playerCombatant.z,
+      enemyCombatant.alive
+        ? [{ x: enemyCombatant.x, z: enemyCombatant.z, color: enemyNamed ? '#ff3b30' : '#e8a23c' }]
+        : [],
+    );
 
     frame++;
 
