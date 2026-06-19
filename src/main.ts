@@ -21,6 +21,7 @@ import { generateNamed, istKnapperSieg, type Named } from './named/promotion';
 import { createReveal } from './reveal/reveal';
 import { createHud } from './ui/hud';
 import { createMinimap } from './ui/minimap';
+import { TANK_CLASSES, type TankClass } from './game/classes';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
 import { createFireRecorder } from './debug/fireRecorder';
@@ -28,7 +29,6 @@ import { createReticle } from './ui/reticle';
 import type { TankComposition } from './tank/sockets';
 
 const BIOME_ID = 'steppe';
-const TANK_SPEED = 8; // Welt-Einheiten/s
 const PROJECTILE_CAPACITY = 64;
 const PROJECTILE_SPEED = 30;
 const PROJECTILE_LIFE = 3; // Sekunden
@@ -46,24 +46,58 @@ const LEBENSSCHUB = 40; // HP-Schub bei Promotion (statt Tod)
 
 const log = createLogger('main');
 
-function mountStartScreen(onStart: () => void): void {
+function statBar(label: string, value: number, max: number, color: string): string {
+  const pct = Math.round((value / max) * 100);
+  return (
+    `<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font:600 11px/1.3 system-ui">` +
+    `<span style="width:48px;color:#9aa">${label}</span>` +
+    `<span style="flex:1;height:7px;background:#11151a;border-radius:4px;overflow:hidden">` +
+    `<span style="display:block;height:100%;width:${pct}%;background:${color}"></span></span></div>`
+  );
+}
+
+function mountStartScreen(onStart: (cls: TankClass) => void): void {
   const overlay = document.createElement('div');
   overlay.id = 'start-screen';
   overlay.style.cssText =
-    'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;' +
-    'background:#0b0d10;z-index:10;font-family:system-ui,sans-serif;';
+    'position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+    'gap:20px;background:#0b0d10;z-index:10;font-family:system-ui,sans-serif;';
 
-  const btn = document.createElement('button');
-  btn.textContent = 'Start';
-  btn.style.cssText =
-    'padding:16px 48px;font-size:20px;cursor:pointer;border:2px solid #d8b04a;' +
-    'background:#1a1d22;color:#f0e6cc;border-radius:8px;';
-  btn.addEventListener('click', () => {
-    overlay.remove();
-    onStart();
-  });
+  const title = document.createElement('div');
+  title.textContent = 'Wähle deinen Panzer';
+  title.style.cssText = 'color:#f0e6cc;font-size:24px;font-weight:700;letter-spacing:0.5px;';
+  overlay.appendChild(title);
 
-  overlay.appendChild(btn);
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:18px;flex-wrap:wrap;justify-content:center;';
+  overlay.appendChild(row);
+
+  for (const cls of TANK_CLASSES) {
+    const card = document.createElement('button');
+    card.style.cssText =
+      'width:230px;text-align:left;cursor:pointer;border:2px solid #2a343b;background:#13171c;' +
+      'color:#e8e0c8;border-radius:10px;padding:16px;transition:border-color 0.12s,transform 0.12s;';
+    card.onmouseenter = () => {
+      card.style.borderColor = '#d8b04a';
+      card.style.transform = 'translateY(-3px)';
+    };
+    card.onmouseleave = () => {
+      card.style.borderColor = '#2a343b';
+      card.style.transform = 'none';
+    };
+    card.innerHTML =
+      `<div style="font-size:19px;font-weight:700;margin-bottom:4px">${cls.name}</div>` +
+      `<div style="font:13px/1.4 system-ui;color:#b9b29c;min-height:54px;margin-bottom:8px">${cls.beschreibung}</div>` +
+      statBar('Tempo', cls.speed, 12, '#4ea1ff') +
+      statBar('Panzer', cls.maxHp, 160, '#5fd06a') +
+      statBar('Schaden', cls.damage, 36, '#ff8a4e');
+    card.addEventListener('click', () => {
+      overlay.remove();
+      onStart(cls);
+    });
+    row.appendChild(card);
+  }
+
   document.body.appendChild(overlay);
 }
 
@@ -78,8 +112,8 @@ function getCanvas(): HTMLCanvasElement {
   return canvas;
 }
 
-function boot(): void {
-  log.info('boot start', { seed: SEED, biome: BIOME_ID });
+function boot(cls: TankClass): void {
+  log.info('boot start', { seed: SEED, biome: BIOME_ID, klasse: cls.id });
 
   const canvas = getCanvas();
   const engine = new Engine(canvas, true);
@@ -100,16 +134,11 @@ function boot(): void {
   const biome = getBiome(BIOME_ID);
   log.debug('biome resolved', { id: biome.id, groundColor: biome.groundColor });
 
-  // Panzer aus modularen Teilen komponieren
-  const comp: TankComposition = {
-    chassis: 'c_box',
-    wheels: 'w_round',
-    turret: 't_small',
-    weapon: 'g_short',
-  };
+  // Panzer aus der gewählten Klasse komponieren
+  const comp: TankComposition = cls.composition;
   const view = createTankView(scene, comp);
-  const tank = createTank('player', view, 100);
-  log.info('tank built', { id: tank.id, hp: tank.hp, comp });
+  const tank = createTank('player', view, cls.maxHp);
+  log.info('tank built', { id: tank.id, hp: tank.hp, comp, klasse: cls.id });
 
   // Endlos-Boden folgt dem Panzer-Root
   const ground = createEndlessGround(scene, tank.view.root, BIOME_ID);
@@ -139,7 +168,7 @@ function boot(): void {
 
   // Combatants: Datenmodell für Treffer/HP (Position pro Frame aus den Roots gespiegelt).
   const playerCombatant: Combatant = {
-    id: 'player', team: 'player', x: 0, z: 0, radius: TANK_RADIUS, hp: tank.hp, maxHp: 100, alive: true,
+    id: 'player', team: 'player', x: 0, z: 0, radius: TANK_RADIUS, hp: tank.hp, maxHp: cls.maxHp, alive: true,
   };
   const enemyCombatant: Combatant = {
     id: 'enemy', team: 'enemy', x: ENEMY_SPAWN.x, z: ENEMY_SPAWN.z, radius: TANK_RADIUS,
@@ -238,7 +267,7 @@ function boot(): void {
       speed: PROJECTILE_SPEED,
       life: PROJECTILE_LIFE,
       team: 'player',
-      damage: HIT_DAMAGE,
+      damage: cls.damage,
     });
     if (p) {
       bus.emit('tank.fired', { tankId: tank.id });
@@ -276,7 +305,7 @@ function boot(): void {
     if (p) bus.emit('projectile.spawned', { id: p.id });
   }
 
-  const input = createInput(scene, camera, tank, TANK_SPEED, fire);
+  const input = createInput(scene, camera, tank, cls.speed, fire);
 
   // OS-Mauszeiger über dem Canvas ausblenden — das Spiel zeichnet sein eigenes
   // Fadenkreuz, das frame-synchron mit dem Turm läuft (kein Render-Weg-Versatz).
@@ -444,4 +473,4 @@ function boot(): void {
 logConfig.enabled = true;
 logConfig.minLevel = 'debug';
 
-mountStartScreen(boot);
+mountStartScreen((cls) => boot(cls));
