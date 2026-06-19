@@ -17,6 +17,7 @@ import { createEnemyBrain } from './ai/enemyBrain';
 import { MOTIV_LABEL } from './ai/motives';
 import type { AiWorldView } from './ai/aiTypes';
 import { enemyLevelStats, type Enemy } from './enemy/enemy';
+import { rollEnemyEquipment, pickDrop } from './enemy/equipment';
 import { createSpawner } from './enemy/spawner';
 import { pickTarget, type TargetInfo } from './enemy/targeting';
 import { createAkteBuch } from './named/akte';
@@ -194,6 +195,7 @@ function boot(cls: TankClass): void {
 
   const pickups = createPickupField(scene);
   const PICKUP_REACH = TANK_RADIUS + 0.8;
+  const lastDrops: string[] = []; // Verifikation: tatsächlich gedroppte Item-IDs
 
   const combat = createCombatSystem(pool, liveCombatants, {
     damage: HIT_DAMAGE,
@@ -228,11 +230,17 @@ function boot(cls: TankClass): void {
         }
       }
 
-      // Normaler Tod: Beute droppen (kann jeder aufsammeln).
+      // Normaler Tod: NUR ein tatsächlich angelegtes Teil droppen (kein generierter Loot).
+      // Eingesammelte Beute in der Tasche fällt ebenfalls zurück in die Welt.
       bus.emit('tank.died', { tankId: e.id });
-      const dropPool = CATALOG.filter((it) => it.mk <= progression.unlockedMk() + 1);
-      const part = dropPool[Math.floor(aiRng.next() * dropPool.length)]!;
-      pickups.spawn(part, e.combatant.x, e.combatant.z);
+      const part = pickDrop(e.equipment, () => aiRng.next());
+      if (part) {
+        pickups.spawn(part, e.combatant.x, e.combatant.z);
+        lastDrops.push(part.id);
+        if (lastDrops.length > 200) lastDrops.shift();
+      }
+      for (const carried of e.bag) pickups.spawn(carried, e.combatant.x, e.combatant.z);
+      e.bag = [];
       const reward = Math.round((e.combatant.lootValue ?? 0.4) * 120);
 
       if (byPlayer) {
@@ -243,7 +251,7 @@ function boot(cls: TankClass): void {
           const mkNote = up.newMkUnlocks.length ? ` — MK${up.newMkUnlocks[up.newMkUnlocks.length - 1]} frei!` : '';
           showToast(`Level ${progression.level}${mkNote}`);
         }
-        log.info('enemy died (Spieler)', { id: e.id, drop: part.id, reward });
+        log.info('enemy died (Spieler)', { id: e.id, drop: part?.id ?? null, reward });
       } else {
         // Gegner-killt-Gegner: der Sieger bekommt Credits (→ Aufrüstung), kein Spieler-Gewinn.
         const killer = roster.find((r) => r.id === killerTeam);
@@ -461,6 +469,9 @@ function boot(cls: TankClass): void {
     loadout: () => loadout.equippedList().map((it) => it.id),
     bag: () => loadout.bag().map((it) => it.id),
     equippedBySlot: () => Object.fromEntries(SLOTS.map((s) => [s, loadout.get(s)?.id ?? null])),
+    enemyEquip: (id: string) => roster.find((r) => r.id === id)?.equipment.map((i) => i.id) ?? null,
+    enemyBag: (id: string) => roster.find((r) => r.id === id)?.bag.map((i) => i.id) ?? null,
+    lastDrops: () => [...lastDrops],
     pickupCount: () => pickups.count(),
     equip,
     collectLoot,
@@ -511,6 +522,7 @@ function boot(cls: TankClass): void {
             e.combatant.hp = e.combatant.maxHp;
             e.combatant.alive = true;
             e.view.root.setEnabled(true);
+            e.equipment = rollEnemyEquipment(e.level, () => aiRng.next()); // frische Ausrüstung passend zum aktuellen Level
             e.prevTargetVisible = false; // Wiedererkennungs-Spruch beim nächsten Sichtkontakt
             log.info('Rivale kehrt zurück', { name: e.displayName });
           }

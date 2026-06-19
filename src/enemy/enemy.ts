@@ -5,6 +5,8 @@ import { createEnemyBrain, type EnemyBrain } from '../ai/enemyBrain';
 import type { TraitProfile, AiAction } from '../ai/aiTypes';
 import type { Combatant } from '../combat/combat';
 import type { Named } from '../named/promotion';
+import type { ShopItem } from '../shop/catalog';
+import { rollEnemyEquipment } from './equipment';
 
 /** Ein lebender Gegner: Optik + Trefferdaten + Gehirn + Level/Credits + Promotion. */
 export interface Enemy {
@@ -24,6 +26,8 @@ export interface Enemy {
   credits: number; // verdient durch eigene Kills → Aufrüstung
   shopCd: number; // Sekunden bis zum nächsten Aufrüst-Versuch
   respawnTimer: number; // >0 = tot, kehrt als benannter Rivale zurück (Nemesis)
+  equipment: ShopItem[]; // tatsächlich angelegte Teile — NUR diese kann er droppen
+  bag: ShopItem[]; // eingesammelter Loot (Schatzjäger) — wird beim Shoppen verkauft
 }
 
 export interface EnemySpec {
@@ -83,5 +87,7 @@ export function createEnemyEntity(
     credits: 0,
     shopCd: 4 + rng() * 4,
     respawnTimer: 0,
+    equipment: rollEnemyEquipment(spec.level, rng),
+    bag: [],
   };
 }
