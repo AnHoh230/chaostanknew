@@ -328,7 +328,14 @@ function boot(): void {
         const step = ENEMY_SPEED * simDt;
         er.position.x += mx * step;
         er.position.z += mz * step;
-        er.rotation.y = Math.atan2(mx, mz); // in Laufrichtung drehen
+        er.rotation.y = Math.atan2(mx, mz); // Chassis in Laufrichtung drehen
+      }
+
+      // Turm IMMER auf den Spieler richten (Rohr = Schussrichtung). Turm ist Kind
+      // des Roots, deshalb die Chassis-Drehung herausrechnen.
+      if (world.targetVisible) {
+        const turretWorldYaw = Math.atan2(px - er.position.x, pz - er.position.z);
+        enemyTank.view.turretNode.rotation.y = turretWorldYaw - er.rotation.y;
       }
 
       // Auf Sicht zurückfeuern (so kann die Spieler-HP fallen → knapper Sieg).
