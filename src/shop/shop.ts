@@ -17,7 +17,8 @@ export interface ShopHooks {
 export interface Shop {
   toggle(): void;
   isOpen(): boolean;
-  refresh(): void;
+  refresh(): void; // baut das Panel neu (nur bei Bedarf!)
+  updateMoney(): void; // nur die Geld-Anzeige (pro Frame ok)
 }
 
 const SLOT_ORDER: Slot[] = ['waffe', 'wanne', 'turm', 'raeder', 'ruestung'];
@@ -94,10 +95,14 @@ export function createShop(h: ShopHooks): Shop {
   let open = false;
   let slotFilter: SlotFilter = 'alle';
 
+  function updateMoney(): void {
+    money.textContent = `💰 ${h.getMoney()}   ·   MK ${h.getUnlockedMk()}`;
+  }
+
   function refresh(): void {
-    const mk = h.getUnlockedMk();
-    money.textContent = `💰 ${h.getMoney()}   ·   MK ${mk}`;
+    updateMoney();
     if (!open) return;
+    const mk = h.getUnlockedMk();
 
     inner.innerHTML =
       `<div style="font-size:20px;font-weight:700;color:#f0e6cc">Werkstatt</div>` +
@@ -235,5 +240,5 @@ export function createShop(h: ShopHooks): Shop {
   });
 
   refresh();
-  return { toggle: () => setOpen(!open), isOpen: () => open, refresh };
+  return { toggle: () => setOpen(!open), isOpen: () => open, refresh, updateMoney };
 }

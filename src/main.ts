@@ -574,7 +574,7 @@ function boot(cls: TankClass): void {
 
     // Beute einsammeln: fährt der Spieler über ein Teil → ins Inventar (Tasche).
     pickups.update(px, pz, PICKUP_REACH, collectLoot);
-    shop.refresh(); // Geld-Anzeige aktuell halten
+    shop.updateMoney(); // nur die Geld-Anzeige (NICHT das Panel neu bauen → Klicks bleiben heil)
 
     ground.update();
     projectileView.sync();
