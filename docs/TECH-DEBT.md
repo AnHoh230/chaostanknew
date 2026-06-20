@@ -30,7 +30,21 @@ Vorschnelles Schrauben an Einzelwerten würde es nur anders-kaputt machen.
 - Mess-Overlay zuerst (Observability): Entscheidung & Grund pro Gegner sichtbar
   machen, bevor getunt wird.
 
-**Status:** offen, vertagt. Nicht ohne Session anfassen.
+**Erste Fassung in Arbeit** (Spec `docs/superpowers/specs/2026-06-20-engagement-zonen-ki-erste-fassung-design.md`):
+Engagement-Zonen-Modell + Scouten + Mess-Overlay, damit die Gegner überhaupt
+*etwas* tun (kein totes Stehen). **Bewusst nur erste Fassung.**
+
+**Noch zu vertiefen (Folgearbeit, eigene Sessions):**
+- Motiv-spezifische Zonen (Platzhirsch stürmt kurz, Aasgeier kitet weit, Angsthase
+  feuert nur aus Sicherheit) — die erste Fassung ist für alle Motive gleich.
+- **Ausweichen/Dodge-Reflex** unter Beschuss (das `dodge`-Stat existiert schon, wird
+  aber noch nicht durch ein Manöver genutzt).
+- Feineres Fliehen: Schwellen, Flucht-Pfade, **lesbare** Entscheidung (Tell).
+- Gruppen-/Schwarm-Verhalten (hängt mit M6 zusammen — patent-zahm halten!).
+- Rolle des Utility-/Motiv-Gehirns: in der ersten Fassung für die Bewegung
+  stillgelegt; klären, ob es als Modulator der Zonen zurückkommt.
+
+**Status:** erste Fassung wird gebaut; Vertiefung offen.
 
 ---
 
