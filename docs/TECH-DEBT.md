@@ -55,6 +55,12 @@ HP). Gewollt, aber das Früh-Spiel-Tempo (bevor der Spieler eine Waffe hat) ist
 ungetestet. Über den Run-Log feintunen (`BASE_HP` / Item-Beitrag in
 `enemy/enemyStats.ts`). Kein Design-Problem, nur Tuning per Playtest.
 
+**Nachtrag (2026-06-20):** Gegner spawnen Level 1–3, Level 3 = MK2 (`enemyMk`), und
+kaufen ihre MK sofort beim Spawn — d. h. MK2-Teile sind ab der ersten Welle im Spiel.
+Bewusst NICHT begrenzt (Spawn-Level/MK2-Käufe bleiben), nur sichtbar gemacht (Lvl/MK
+über dem Gegner). Offene Balance-Frage: MK2-Items sind so früh **zu billig** —
+MK-Kosten/Progression brauchen später eine Kurve, damit höhere MK sich verdient anfühlt.
+
 ---
 
 ## TD-3 — `enemyLevelStats` ist toter Code ✅ ERLEDIGT (2026-06-20)
