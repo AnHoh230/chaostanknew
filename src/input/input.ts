@@ -4,6 +4,7 @@ import type { Tank } from '../tank/tank';
 import { createLogger } from '../core/log';
 import { yawTo, rayGroundY0 } from './aimMath';
 import { stepChassis, chassisForward, type ChassisConfig, type ChassisState } from './chassis';
+import { stepTurret } from '../combat/turret';
 
 /** Chassis-Konfig aus dem aktuellen Tempo (Räder speisen maxForward). */
 function chassisCfgFor(speed: number): ChassisConfig {
@@ -31,8 +32,10 @@ export function createInput(
   tank: Tank,
   speed: number | (() => number),
   onFire: () => void,
+  turretSlew: number | (() => number) = Infinity,
 ): { update(simDt: number): void; getAimTarget(): Vector3 | null } {
   const speedOf = (): number => (typeof speed === 'function' ? speed() : speed);
+  const slewOf = (): number => (typeof turretSlew === 'function' ? turretSlew() : turretSlew);
   const log = createLogger('input');
 
   const keys: Record<string, boolean> = Object.create(null);
@@ -97,8 +100,12 @@ export function createInput(
       const turret = tank.view.turretNode;
       turret.computeWorldMatrix(true);
       const tp = turret.getAbsolutePosition();
-      // Turm zeigt unabhängig vom Chassis auf den Cursor: Welt-Yaw minus Wannen-Heading.
-      turret.rotation.y = yawTo(tp.x, tp.z, g.x, g.z) - root.rotation.y;
+      // Turm zeigt unabhängig vom Chassis auf den Cursor: im WELT-Yaw mit begrenztem
+      // Dreh-Tempo zum Ziel slewen (Default Infinity = sofort), dann Heading rausrechnen.
+      const targetWorld = yawTo(tp.x, tp.z, g.x, g.z);
+      const currentWorld = root.rotation.y + turret.rotation.y;
+      const newWorld = stepTurret(currentWorld, targetWorld, slewOf(), simDt);
+      turret.rotation.y = newWorld - root.rotation.y;
     }
   }
 
