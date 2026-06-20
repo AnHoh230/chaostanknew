@@ -1,5 +1,7 @@
 import type { ShopItem, Slot } from './catalog';
 import { sellValue } from './buyLogic';
+import { CATEGORIES } from './categories';
+import { itemsForCategory, type Category } from './itemTypes';
 
 export interface ShopHooks {
   items: readonly ShopItem[]; // voller Katalog
@@ -96,6 +98,7 @@ export function createShop(h: ShopHooks): Shop {
 
   let open = false;
   let slotFilter: SlotFilter = 'alle';
+  let category: Category = 'equipment';
 
   function updateMoney(): void {
     money.textContent = `💰 ${h.getMoney()}   ·   MK ${h.getUnlockedMk()}`;
@@ -181,8 +184,35 @@ export function createShop(h: ShopHooks): Shop {
       bagCol.appendChild(row);
     }
 
-    // ---------- KAUFEN ----------
-    buyCol.appendChild(colTitle('Kaufen (Normale)'));
+    // ---------- KAUFEN (Kategorie-Reiter) ----------
+    buyCol.appendChild(colTitle('Kaufen'));
+    const tabs = document.createElement('div');
+    tabs.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;';
+    for (const c of CATEGORIES) {
+      const active = category === c.id;
+      const t = btn(c.name, active ? '#1a1d22' : '#cdd6dd', true, () => {
+        category = c.id;
+        refresh();
+      });
+      if (active) (t as HTMLElement).style.background = '#d8b04a';
+      tabs.appendChild(t);
+    }
+    buyCol.appendChild(tabs);
+
+    if (category !== 'equipment') {
+      const def = CATEGORIES.find((c) => c.id === category)!;
+      const offers = itemsForCategory(h.items, category);
+      const box = document.createElement('div');
+      box.style.cssText = 'padding:6px 2px';
+      box.innerHTML =
+        `<div style="color:#9aa;margin-bottom:6px">${def.desc}</div>` +
+        (offers.length
+          ? ''
+          : `<div style="color:#778">Noch keine Angebote in dieser Werkstatt-Stufe.</div>`);
+      buyCol.appendChild(box);
+      return; // restliche Spalten (Ausrüstung/Inventar) sind oben schon gebaut
+    }
+
     const bar = document.createElement('div');
     bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;';
     for (const f of ['alle', ...SLOT_ORDER] as SlotFilter[]) {
