@@ -84,6 +84,33 @@ describe('createCombatSystem', () => {
     expect(pool.activeCount()).toBe(1); // Projektil nicht absorbiert
   });
 
+  it('dodge=1: Treffer wird ausgewichen, kein Schaden, Projektil verbraucht', () => {
+    const pool = createProjectilePool(8);
+    const player: Combatant = {
+      id: 'player', team: 'player', x: 0, z: 0, radius: 1.5, hp: 100, maxHp: 100, alive: true,
+      dodge: 1,
+    };
+    const combat = createCombatSystem(pool, () => [player], {
+      damage: 30, projectileRadius: 0.3, rng: () => 0,
+    });
+    pool.acquire({ x: 0, y: 0.5, z: 0, dx: 1, dz: 0, speed: 30, life: 3, team: 'enemy' });
+    combat.update();
+    expect(player.hp).toBe(100); // ausgewichen
+    expect(pool.activeCount()).toBe(0); // Projektil trotzdem verbraucht
+  });
+
+  it('dodge=0: normaler Treffer (kein Ausweichen)', () => {
+    const pool = createProjectilePool(8);
+    const enemy = enemyAt(0, 0, 100);
+    enemy.dodge = 0;
+    const combat = createCombatSystem(pool, () => [enemy], {
+      damage: 20, projectileRadius: 0.3, rng: () => 0,
+    });
+    pool.acquire({ x: 0, y: 0.5, z: 0, dx: 1, dz: 0, speed: 30, life: 3 });
+    combat.update();
+    expect(enemy.hp).toBe(80);
+  });
+
   it('Gegner-Projektil (team enemy) trifft den Spieler', () => {
     const pool = createProjectilePool(8);
     const player: Combatant = {

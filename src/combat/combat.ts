@@ -1,5 +1,6 @@
 import type { ProjectilePool, Projectile } from './projectilePool';
 import { circleOverlap } from './hitMath';
+import { dodgeRoll } from './accuracy';
 
 /** Ein treffbarer Akteur in der Welt (Spieler oder Gegner). */
 export interface Combatant {
@@ -17,6 +18,8 @@ export interface Combatant {
   armor?: number;
   /** Schutzzone (z. B. Shop-Feld): nimmt keinen Schaden, Projektile fliegen durch. */
   invulnerable?: boolean;
+  /** Ausweich-Chance (0..1): Treffer wird mit dieser Wahrscheinlichkeit negiert. */
+  dodge?: number;
 }
 
 const ARMOR_K = 300; // Rüstungs-Skala: Reduktion = armor/(armor+K)
@@ -37,6 +40,7 @@ export interface HitInfo {
 export interface CombatOptions {
   damage: number; // Schaden pro Treffer
   projectileRadius: number;
+  rng?: () => number; // für Ausweich-Würfe (Default Math.random)
   onHit?: (h: HitInfo) => void;
   onDeath?: (target: Combatant, killerTeam: string) => void;
 }
@@ -62,6 +66,11 @@ export function createCombatSystem(
         const t = targets[i]!;
         if (!t.alive || t.team === p.team || t.invulnerable) continue;
         if (circleOverlap(p.x, p.z, opts.projectileRadius, t.x, t.z, t.radius)) {
+          // Ausweichen: Treffer negiert, Projektil aber verbraucht.
+          if (t.dodge && dodgeRoll(t.dodge, opts.rng ?? Math.random)) {
+            pool.deactivate(p);
+            return;
+          }
           const raw = p.damage > 0 ? p.damage : opts.damage;
           const dmg = effectiveDamage(raw, t.armor ?? 0);
           t.hp -= dmg;
