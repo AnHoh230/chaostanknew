@@ -365,3 +365,14 @@ describe('nearestToPointer', () => {
 **Typ-Konsistenz:** `Buyer/ItemKind/Category` (SH1.1) durchgängig; Slot-Liste additiv erweitert (P0→SH3.4→SH4.3); `buffStack` von Spieler (SH2.6) und Gegner (SH5.4) geteilt; `accuracy/dodge` in Math (SH3.1) → combat (SH3.2/SH4.2) → stats (SH3.4) → inspect (P0.2 liest neue Felder automatisch).
 
 **Vorsysteme platziert:** Turm-Slew (SH2.2) vor Turmservo-Booster; Accuracy (SH3.1) vor Debuff-Boostern (SH3.6); Trefferrichtung (SH4.1) vor Zusatzpanzerung (SH4.2).
+
+---
+
+## Patent-Leitplanken & Baureihenfolge (Entscheidung 2026-06-20)
+
+**Reihenfolge: Treibstoff zuerst, Emotion zuletzt.** Erst der erprobte, risikoarme, kompulsiv-wiederholbare Panzer-Verbesserungs-Loop (SH3 Auto-Turrets/Accuracy/Dodge → SH4 volle Slots/Module/Usables → SH5 Gegner-Kauf/Auslöse-KI + reine Economy-Posten Verträge/Garage). Er muss sich **„geil" anfühlen** (Upgrade-Payoff + Kampf-Textur), nicht nur Items zählen — Spielgefühl schlägt Item-Anzahl. **Zuletzt** der emotionale Rivalen-Teil: hoher Reiz, hohes Risiko, wird nur auf einen stabilen Loop gesetzt.
+
+**Patent-Entschärfung (gilt für den emotionalen Teil — dyadisch JA, NPC-Sozialnetz NEIN):**
+- ✂️ **Gestrichen:** M6 Gruppen/Verrat (Gefolgschaft, Teamup→Verrat→Jäger); Verrätermarke, Versöhnung, Gerüchte streuen, NPC-Rache-Quests; jede Rang-Leiter / Anführer-Stufen / Forts. (= „social vendettas and followers" = Patent-Kern.)
+- ⚠️ **Umdefiniert:** Kopfgeld → einmalige Kampf-Markierung (kein getrackter Dauer-Boss); Rivalen-Sender → „Duell-Ruf" (spieler-initiiert); „Promotion" → „Erweckung/Benennung".
+- 🟢 **Bleibt (Spieler↔Rivale):** Erweckungs-Chance-Item, Feindakte (Schwächen), Beobachter (Historie), **Unique nur vom Rivalen**, Trophäenwand, Anfüttern, Karten-Jagd. → das ist der eigentliche Vision-Motor, patent-zahm.
