@@ -159,19 +159,19 @@ function buildCatalog(): ShopItem[] {
 const AUTO_TURRETS: ShopItem[] = [
   {
     id: 'autoturret_mk02', kind: 'equip', buyer: 'both', category: 'equipment',
-    slot: 'sekundaer', rarity: 'normal', mk: 2, name: 'MK2 Koaxial-Geschütz', cost: 520,
+    slot: 'sekundaer', rarity: 'normal', mk: 2, name: 'MK2 Koaxial-MG', cost: 520,
     damage: 0, hp: 0, armor: 0, speed: 0,
     autoFire: { fireInterval: 1.4, damage: 9, range: 26, accuracy: 0.75 },
   },
   {
     id: 'autoturret_mk05', kind: 'equip', buyer: 'both', category: 'equipment',
-    slot: 'sekundaer', rarity: 'normal', mk: 5, name: 'MK5 Wächter-Turret', cost: 1280,
+    slot: 'sekundaer', rarity: 'normal', mk: 5, name: 'MK5 Raketenwerfer', cost: 1280,
     damage: 0, hp: 0, armor: 0, speed: 0,
     autoFire: { fireInterval: 1.1, damage: 16, range: 30, accuracy: 0.82 },
   },
   {
     id: 'autoturret_mk08', kind: 'equip', buyer: 'both', category: 'equipment',
-    slot: 'sekundaer', rarity: 'normal', mk: 8, name: 'MK8 Sentinel-Geschütz', cost: 2600,
+    slot: 'sekundaer', rarity: 'normal', mk: 8, name: 'MK8 Störkanone', cost: 2600,
     damage: 0, hp: 0, armor: 0, speed: 0,
     autoFire: { fireInterval: 0.9, damage: 24, range: 34, accuracy: 0.9 },
   },

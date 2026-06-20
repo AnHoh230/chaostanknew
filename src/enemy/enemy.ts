@@ -7,6 +7,7 @@ import type { Combatant } from '../combat/combat';
 import type { Named } from '../named/promotion';
 import type { ShopItem } from '../shop/catalog';
 import { rollEnemyEquipment } from './equipment';
+import { enemyCombatStats } from './enemyStats';
 
 /** Ein lebender Gegner: Optik + Trefferdaten + Gehirn + Level/Credits + Promotion. */
 export interface Enemy {
@@ -29,6 +30,7 @@ export interface Enemy {
   equipment: ShopItem[]; // tatsächlich angelegte Teile — NUR diese kann er droppen
   bag: ShopItem[]; // eingesammelter Loot (Schatzjäger) — wird beim Shoppen verkauft
   shopGoal: { x: number; z: number } | null; // Ziel-Shop-Feld, wenn er gerade shoppen fährt
+  damage: number; // Schaden pro Schuss — AUS DER AUSRÜSTUNG abgeleitet (nicht aus dem Level)
 }
 
 export interface EnemySpec {
@@ -50,6 +52,18 @@ export function enemyLevelStats(level: number): { hp: number; damage: number; lo
   };
 }
 
+/** Combatant-Stats eines Gegners NEU aus seiner Ausrüstung berechnen (Erzeugung,
+ *  Shop-Aufrüstung, Respawn, Debug). HP wird dabei voll aufgefüllt. */
+export function applyEnemyStats(e: Enemy): void {
+  const st = enemyCombatStats(e.equipment, e.level);
+  e.combatant.maxHp = st.maxHp;
+  e.combatant.hp = st.maxHp;
+  e.combatant.armor = st.armor;
+  e.combatant.dodge = st.dodge;
+  e.combatant.lootValue = st.lootValue;
+  e.damage = st.damage;
+}
+
 /** Erzeugt einen Gegner inkl. Mesh, Combatant und frischem Gehirn. */
 export function createEnemyEntity(
   scene: Scene,
@@ -59,15 +73,18 @@ export function createEnemyEntity(
 ): Enemy {
   const view = createTankView(scene, spec.comp);
   view.root.position.set(spec.spawn.x, 0, spec.spawn.z);
-  const st = enemyLevelStats(spec.level);
+  const equipment = rollEnemyEquipment(spec.level, rng);
+  const st = enemyCombatStats(equipment, spec.level);
   const combatant: Combatant = {
     id: spec.id,
     team: spec.id, // jeder Gegner = eigene Fraktion → kann andere treffen
     x: spec.spawn.x,
     z: spec.spawn.z,
     radius,
-    hp: st.hp,
-    maxHp: st.hp,
+    hp: st.maxHp,
+    maxHp: st.maxHp,
+    armor: st.armor,
+    dodge: st.dodge,
     alive: true,
     lootValue: st.lootValue,
   };
@@ -88,8 +105,9 @@ export function createEnemyEntity(
     credits: 0,
     shopCd: 4 + rng() * 4,
     respawnTimer: 0,
-    equipment: rollEnemyEquipment(spec.level, rng),
+    equipment,
     bag: [],
     shopGoal: null,
+    damage: st.damage,
   };
 }

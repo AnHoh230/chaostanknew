@@ -16,7 +16,7 @@ import { createCombatSystem, type Combatant } from './combat/combat';
 import { createEnemyBrain } from './ai/enemyBrain';
 import { MOTIV_LABEL } from './ai/motives';
 import type { AiWorldView } from './ai/aiTypes';
-import { enemyLevelStats, type Enemy } from './enemy/enemy';
+import { applyEnemyStats, type Enemy } from './enemy/enemy';
 import { rollEnemyEquipment, pickDrop, enemyMk } from './enemy/equipment';
 import { runEnemyShopVisit, enemyUpgradeCost } from './enemy/enemyShopping';
 import { createSpawner } from './enemy/spawner';
@@ -552,6 +552,13 @@ function boot(cls: TankClass): void {
 
   // Anlegen (aus Tasche/Kauf): neues Item in den Slot, altes → Tasche.
   function equip(item: ShopItem): void {
+    // MK-Gate: über der freigeschalteten MK kann der Spieler ein Teil NICHT anlegen
+    // (looten ja, in die Tasche — aber nutzbar erst, wenn die MK frei ist).
+    if (item.mk > progression.unlockedMk()) {
+      showToast(`MK ${item.mk} nötig — du hast MK ${progression.unlockedMk()}`);
+      alog.log('equip.denied', { id: item.id, mk: item.mk, unlocked: progression.unlockedMk() });
+      return;
+    }
     const prevMax = loadout.stats().maxHp;
     loadout.equip(item);
     syncTank(prevMax);
@@ -639,6 +646,34 @@ function boot(cls: TankClass): void {
     equippedBySlot: () => Object.fromEntries(SLOTS.map((s) => [s, loadout.get(s)?.id ?? null])),
     enemyEquip: (id: string) => roster.find((r) => r.id === id)?.equipment.map((i) => i.id) ?? null,
     enemyBag: (id: string) => roster.find((r) => r.id === id)?.bag.map((i) => i.id) ?? null,
+    // Verifikations-Sonden (Observability): Gegner-Kampfwerte lesen + Gear setzen.
+    enemyCombat: (id: string) => {
+      const e = roster.find((r) => r.id === id);
+      if (!e) return null;
+      return {
+        level: e.level,
+        hp: Math.round(e.combatant.hp),
+        maxHp: Math.round(e.combatant.maxHp),
+        armor: Math.round(e.combatant.armor ?? 0),
+        dodge: e.combatant.dodge ?? 0,
+        damage: e.damage, // aus der Ausrüstung abgeleitet
+        equipMk: e.equipment.map((i) => i.mk),
+      };
+    },
+    setEnemyGear: (id: string, mk: number) => {
+      const e = roster.find((r) => r.id === id);
+      if (!e) return 'nicht gefunden';
+      const mkStr = String(mk).padStart(2, '0');
+      e.equipment = (['waffe', 'wanne', 'turm', 'raeder', 'ruestung'] as Slot[]).map((s) =>
+        catalogItem(`${s}_mk${mkStr}_normal`),
+      );
+      applyEnemyStats(e); // Stats aus der Ausrüstung neu berechnen (nach dem Fix)
+      const e2 = roster.find((r) => r.id === id)!;
+      return {
+        level: e2.level, maxHp: Math.round(e2.combatant.maxHp),
+        armor: Math.round(e2.combatant.armor ?? 0), equipMk: e2.equipment.map((i) => i.mk),
+      };
+    },
     lastDrops: () => [...lastDrops],
     pickupCount: () => pickups.count(),
     pickupList: () => pickups.list(),
@@ -784,10 +819,10 @@ function boot(cls: TankClass): void {
           if (e.respawnTimer <= 0) {
             const ang = aiRng.next() * Math.PI * 2;
             e.view.root.position.set(px + Math.cos(ang) * 46, 0, pz + Math.sin(ang) * 46);
-            e.combatant.hp = e.combatant.maxHp;
+            e.equipment = rollEnemyEquipment(e.level, () => aiRng.next()); // frische Ausrüstung passend zum aktuellen Level
+            applyEnemyStats(e); // Stats aus der frischen Ausrüstung (HP voll)
             e.combatant.alive = true;
             e.view.root.setEnabled(true);
-            e.equipment = rollEnemyEquipment(e.level, () => aiRng.next()); // frische Ausrüstung passend zum aktuellen Level
             e.prevTargetVisible = false; // Wiedererkennungs-Spruch beim nächsten Sichtkontakt
             log.info('Rivale kehrt zurück', { name: e.displayName });
           }
@@ -814,10 +849,7 @@ function boot(cls: TankClass): void {
           e.equipment = res.equipment;
           e.bag = res.bag;
           if (res.upgraded) {
-            const st = enemyLevelStats(e.level);
-            e.combatant.maxHp = st.hp;
-            e.combatant.hp = st.hp; // frisch aufgerüstet = repariert
-            e.combatant.lootValue = st.lootValue; // wertvoller → wird selbst zum Ziel
+            applyEnemyStats(e); // Stats aus der neuen Ausrüstung (HP voll, Rüstung/Schaden/Beutewert)
           }
           e.shopGoal = null;
           e.shopCd = ENEMY_SHOP_TRIP_CD;
@@ -909,7 +941,7 @@ function boot(cls: TankClass): void {
       // Auf Sicht feuern — eigene Fraktion + Level-Schaden (trifft Spieler UND Gegner).
       e.fireCd -= simDt;
       if (tvis && e.fireCd <= 0) {
-        enemyFire(er.position.x, er.position.z, tx, tz, e.combatant.team, enemyLevelStats(e.level).damage);
+        enemyFire(er.position.x, er.position.z, tx, tz, e.combatant.team, e.damage);
         e.fireCd = ENEMY_FIRE_COOLDOWN;
       }
 
