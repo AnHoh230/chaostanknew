@@ -103,6 +103,9 @@ bewusst offen gelassen:
   gewählt.
 - **Gegner kauft keine Sekundärwaffen (Auto-Turrets).** `planPurchases` bedient nur die
   5 Formel-Slots; der `sekundaer`-Slot bleibt unbestückt. (Hängt an SH3.5.)
+- **Gegner nutzen keine Debuff-Booster (SH3.6).** Zielmarkierung/Rauchstoß sind
+  `buyer:'player'` — der Gegner kauft/zündet sie nicht. Eine Gegner-Debuff-KI (Ziel
+  des Gegners markieren / bei Bedrängnis vernebeln) ist Folgearbeit (Targeting nötig).
 - **Live-Loop-Abnahme noch ausstehend.** Spawn-Verdrahtung (nackt + Startgeld +
   `shop_anfahrt`) ist per NullEngine-Test (`enemy.test.ts`) bewiesen; das
   End-to-End-Verhalten (Anfahrt→Dwell→Kauf, XP/MK im Lauf, Booster-Zündung) wurde noch
