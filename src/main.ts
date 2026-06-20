@@ -27,6 +27,7 @@ import { createReveal } from './reveal/reveal';
 import { createPlayerBar } from './ui/playerBar';
 import { createMinimap } from './ui/minimap';
 import { createEnemyBars } from './ui/enemyBars';
+import { createLootLabels } from './ui/lootLabels';
 import { createCameraPanel } from './ui/cameraPanel';
 import { TANK_CLASSES, type TankClass } from './game/classes';
 import { createPickupField } from './loot/pickups';
@@ -57,6 +58,9 @@ const ENEMY_SIGHT = 60; // Sichtweite auf das Ziel
 const ENEMY_KEEP_DIST = 7; // beim Annähern nicht in den Spieler hineinlaufen
 const ENEMY_FIRE_COOLDOWN = 1.4; // Sekunden zwischen Gegner-Schüssen
 const ENEMY_SHOP_TRIP_CD = 14; // Sekunden bis zum nächsten autonomen Shop-Besuch
+const LOOT_SIGHT_HUNTER = 34; // Schatzjäger jagen Beute aus großer Distanz
+const LOOT_SIGHT_NEAR = 9; // andere Gegner sammeln Beute nur in der Nähe auf
+const ENEMY_BAG_MAX = 6; // so viele Teile trägt ein Gegner, dann verkauft er erst
 const NAMED_RESPAWN = 6; // Sekunden, bis ein gefallener benannter Rivale zurückkehrt
 const LEBENSSCHUB = 40; // HP-Schub bei Promotion (statt Tod)
 
@@ -377,6 +381,7 @@ function boot(cls: TankClass): void {
   const playerBar = createPlayerBar(scene, camera, engine); // HP+EP über dem eigenen Panzer
   const minimap = createMinimap();
   const enemyBars = createEnemyBars(scene, camera, engine); // HP-Balken über den Gegnern
+  const lootLabels = createLootLabels(scene, camera, engine); // Item-Namen über den Loot-Würfeln
   createCameraPanel(); // Kamera-Regler (Taste K)
 
   // Loot-Toast: kurze Einblendung beim Aufsammeln eines Teils.
@@ -479,6 +484,11 @@ function boot(cls: TankClass): void {
     enemyBag: (id: string) => roster.find((r) => r.id === id)?.bag.map((i) => i.id) ?? null,
     lastDrops: () => [...lastDrops],
     pickupCount: () => pickups.count(),
+    pickupList: () => pickups.list(),
+    spawnLootAt: (x: number, z: number, itemId = 'waffe_mk05_normal') => {
+      pickups.spawn(catalogItem(itemId), x, z);
+      return { count: pickups.count(), at: [x, z], item: itemId };
+    },
     shopTiles: () => shopField.positions.map((t) => ({ x: t.x, z: t.z })),
     onShopTile: () => shopField.isOnTile(playerCombatant.x, playerCombatant.z),
     playerInvuln: () => playerCombatant.invulnerable === true,
@@ -632,6 +642,29 @@ function boot(cls: TankClass): void {
         continue; // shoppt → in diesem Frame kein Kampf-Verhalten
       }
 
+      // S4: Beute einsammeln (Schatzjäger jagen aktiv aus der Ferne, andere nur ganz nah).
+      if (e.bag.length < ENEMY_BAG_MAX) {
+        const lootSight = e.motiveId === 'schatzjaeger' ? LOOT_SIGHT_HUNTER : LOOT_SIGHT_NEAR;
+        const loot = pickups.nearest(ex, ez, lootSight);
+        if (loot) {
+          if (loot.dist <= PICKUP_REACH) {
+            const got = pickups.collectAt(ex, ez, PICKUP_REACH);
+            if (got) {
+              e.bag.push(got);
+              log.debug('Gegner sammelt Beute', { id: e.id, item: got.id, bag: e.bag.length });
+            }
+          } else {
+            const step = ENEMY_SPEED * simDt;
+            er.position.x += ((loot.x - ex) / loot.dist) * step;
+            er.position.z += ((loot.z - ez) / loot.dist) * step;
+            er.rotation.y = Math.atan2(loot.x - ex, loot.z - ez);
+            e.combatant.x = er.position.x;
+            e.combatant.z = er.position.z;
+            continue; // jagt Beute statt zu kämpfen
+          }
+        }
+      }
+
       // Beutewert-Jagd: Ziel unter allen anderen Combatants wählen.
       const cands: TargetInfo[] = [];
       for (const c of allC) {
@@ -722,6 +755,7 @@ function boot(cls: TankClass): void {
     // Beute einsammeln: fährt der Spieler über ein Teil → ins Inventar (Tasche).
     shopField.update();
     pickups.update(px, pz, PICKUP_REACH, collectLoot);
+    lootLabels.update(pickups.list()); // Item-Namen über den Würfeln
     shop.updateMoney(); // nur die Geld-Anzeige (NICHT das Panel neu bauen → Klicks bleiben heil)
 
     ground.update();
