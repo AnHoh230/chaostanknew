@@ -226,6 +226,7 @@ function boot(cls: TankClass): void {
   let fireCd = 0; // Spieler-Feuer-Cooldown (Kühlmittel senkt ihn über fireRateMul)
   const PLAYER_FIRE_BASE = 0.28; // s zwischen Schüssen bei fireRate 1
   const BASE_TURRET_SLEW = 22; // rad/s Turm-Dreh-Tempo (Turmservo verdoppelt; Schüsse bleiben pixelgenau)
+  let respawnInvulnCd = 0; // kurze Mercy-Unverwundbarkeit nach Spieler-Respawn
 
   const pickups = createPickupField(scene);
   const PICKUP_REACH = TANK_RADIUS + 0.8;
@@ -244,6 +245,7 @@ function boot(cls: TankClass): void {
         log.warn('player died', {});
         alog.log('player.death', {});
         bus.emit('tank.died', { tankId: 'player' });
+        respawnPlayer();
         return;
       }
       const e = roster.find((r) => r.id === t.id);
@@ -556,6 +558,22 @@ function boot(cls: TankClass): void {
     setTimeout(() => (toast.style.opacity = '0'), 1600);
   }
 
+  // Spieler-Respawn: bei 0 HP nicht „tot weiterballern", sondern neu aufbauen —
+  // volle HP, an eine neue zufällige Position, mit kurzer Mercy-Unverwundbarkeit.
+  function respawnPlayer(): void {
+    const ang = aiRng.next() * Math.PI * 2;
+    const r = 50 + aiRng.next() * 30;
+    tank.view.root.position.set(Math.cos(ang) * r, 0, Math.sin(ang) * r);
+    playerCombatant.x = tank.view.root.position.x;
+    playerCombatant.z = tank.view.root.position.z;
+    playerCombatant.hp = playerCombatant.maxHp;
+    playerCombatant.alive = true;
+    playerCombatant.invulnerable = true; // sofort (schützt auch im selben combat-Frame)
+    respawnInvulnCd = 3;
+    alog.log('player.respawn', { x: +playerCombatant.x.toFixed(1), z: +playerCombatant.z.toFixed(1) });
+    showToast('Zerstört — neu aufgebaut');
+  }
+
   // Optik + Stats nach JEDER Loadout-Änderung synchron halten (Slots ↔ Tasche).
   function syncTank(prevMaxHp: number): void {
     for (const slot of SLOTS) {
@@ -771,6 +789,16 @@ function boot(cls: TankClass): void {
       playerCombatant.z = z;
       return { x, z };
     },
+    respawnPlayer: () => {
+      respawnPlayer();
+      return {
+        alive: playerCombatant.alive,
+        hp: Math.round(playerCombatant.hp),
+        maxHp: Math.round(playerCombatant.maxHp),
+        pos: [+playerCombatant.x.toFixed(1), +playerCombatant.z.toFixed(1)],
+        invulnerable: playerCombatant.invulnerable === true,
+      };
+    },
     enemyVolley: (shots = 5, dmg = 30) => {
       for (let i = 0; i < shots; i++) {
         pool.acquire({
@@ -981,7 +1009,8 @@ function boot(cls: TankClass): void {
     playerCombatant.x = px;
     playerCombatant.z = pz;
     const onShopTile = shopField.isOnTile(px, pz);
-    playerCombatant.invulnerable = onShopTile;
+    respawnInvulnCd = Math.max(0, respawnInvulnCd - simDt);
+    playerCombatant.invulnerable = onShopTile || respawnInvulnCd > 0;
     if (shop.isOpen() && !onShopTile) shop.close(); // Feld verlassen → Shop schließt
     combat.update();
 
