@@ -47,3 +47,25 @@ ungetestet. Über den Run-Log feintunen (`BASE_HP` / Item-Beitrag in
 
 Seit der Umstellung auf `enemyCombatStats` wird `enemyLevelStats` (enemy.ts) nirgends
 mehr benutzt, ist aber noch exportiert. Bei Gelegenheit entfernen.
+
+---
+
+## TD-4 — Level UND MK-Stufen: doppelte Funktion fürs gleiche Problem (neu framen)
+
+Aktuell hat ein Gegner ein **Level** UND eine daraus abgeleitete **MK-Stufe**
+(`enemyMk(level)`). Beim Spieler dasselbe Muster: Level (XP) schaltet MK frei. Zwei
+Achsen für **denselben** Fortschritt — fühlt sich doppelt an (Nutzer, 2026-06-20).
+
+**Leaning (Nutzer):** wahrscheinlich nur EIN Fortschritt — ein **XP-Balken, der
+direkt die MK-Stufen füllt**, kein separates Level daneben. Umsetzung *später*.
+
+**Muss vor dem Anfassen neu geframt werden:**
+- Was *ist* eine MK-Stufe genau (nur Gear-Tier? + optionaler Veteran-Bonus?).
+- Verhältnis zum gear-basierten Stat-Modell (B2/TD-2): wenn Stats aus Gear kommen
+  und Gear-MK aus der Stufe, ist die Stufe der *einzige* Fortschritts-Knopf — passt
+  zur XP→MK-Idee.
+- Hängt an der offenen Design-Frage „soll die Stufe einen *direkten* Bonus geben
+  (Veteran zäher bei gleichem Gear) oder rein über Gear wirken?".
+- Ein XP→MK-Balken für Spieler UND Gegner (Symmetrie).
+
+**Status:** offen, vertagt (nach dem KI-Thema TD-1).
