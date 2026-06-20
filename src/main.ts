@@ -1,4 +1,6 @@
-import { Engine, Scene, HemisphericLight, Vector3, Color4, Matrix } from '@babylonjs/core';
+import { Engine, Scene, HemisphericLight, Vector3, Color4, Matrix, MeshBuilder, StandardMaterial, Color3 } from '@babylonjs/core';
+import type { Mesh } from '@babylonjs/core';
+import { nearestInRange, idsWithinRadius } from './combat/areaTargeting';
 import { yawTo, rayGroundY0 } from './input/aimMath';
 import { createClock } from './core/clock';
 import { createBus } from './core/events';
@@ -231,6 +233,7 @@ function boot(cls: TankClass): void {
   const PLAYER_FIRE_BASE = 0.28; // s zwischen Schüssen bei fireRate 1
   const BASE_TURRET_SLEW = 22; // rad/s Turm-Dreh-Tempo (Turmservo verdoppelt; Schüsse bleiben pixelgenau)
   let spawnGraceCd = 5; // 5s nach Erscheinen: unverwundbar + Shop überall öffenbar (Spawn & Respawn)
+  const fxList: { mesh: Mesh; mat: StandardMaterial; life: number; max: number; fade: boolean; alpha0: number }[] = []; // kurzlebige Effekt-Meshes (Laser, Rauch)
 
   const pickups = createPickupField(scene);
   const PICKUP_REACH = TANK_RADIUS + 0.8;
@@ -418,6 +421,46 @@ function boot(cls: TankClass): void {
     if (p) bus.emit('projectile.spawned', { id: p.id });
   }
 
+  /** Kurzer roter Markierungs-Laser vom Spieler zum Ziel (verschwindet schnell). */
+  function spawnLaser(ax: number, az: number, bx: number, bz: number): void {
+    const line = MeshBuilder.CreateLines(
+      'fx_laser',
+      { points: [new Vector3(ax, 1.1, az), new Vector3(bx, 1.6, bz)] },
+      scene,
+    );
+    line.color = new Color3(1, 0.2, 0.2);
+    line.isPickable = false;
+    // CreateLines hat kein StandardMaterial — wir tracken nur die Lebensdauer (kein Fade).
+    fxList.push({ mesh: line as unknown as Mesh, mat: null as unknown as StandardMaterial, life: 0.4, max: 0.4, fade: false, alpha0: 1 });
+  }
+
+  /** Verblassende Rauch-Scheibe am Boden (Radius = Wirkbereich). */
+  function spawnSmokeDisc(x: number, z: number, radius: number, duration: number): void {
+    const disc = MeshBuilder.CreateCylinder('fx_smoke', { diameter: radius * 2, height: 0.4, tessellation: 40 }, scene);
+    disc.position.set(x, 0.25, z); // flache Scheibe am Boden (bewährtes Shop-Feld-Muster)
+    disc.isPickable = false;
+    const mat = new StandardMaterial('fx_smoke_mat', scene);
+    mat.emissiveColor = new Color3(0.82, 0.85, 0.9); // hell, klar gegen den dunklen Boden
+    mat.disableLighting = true;
+    const alpha0 = 0.6;
+    mat.alpha = alpha0;
+    disc.material = mat;
+    fxList.push({ mesh: disc, mat, life: duration, max: duration, fade: true, alpha0 });
+  }
+
+  /** Effekt-Meshes altern lassen (Fade) und am Ende entsorgen. */
+  function updateFx(dt: number): void {
+    for (let i = fxList.length - 1; i >= 0; i--) {
+      const fx = fxList[i]!;
+      fx.life -= dt;
+      if (fx.fade && fx.mat) fx.mat.alpha = fx.alpha0 * Math.max(0, fx.life / fx.max);
+      if (fx.life <= 0) {
+        fx.mesh.dispose();
+        fxList.splice(i, 1);
+      }
+    }
+  }
+
   /** Auto-Turret-Schuss (Sekundärwaffe). Richtung ist bereits gemäß Treffsicherheit gestreut (rad). */
   function fireAutoTurret(ox: number, oz: number, dir: number, team: string, damage: number, range: number): void {
     const p = pool.acquire({
@@ -486,7 +529,7 @@ function boot(cls: TankClass): void {
   function openInspect(id: string): void {
     const e = roster.find((r) => r.id === id && r.combatant.alive);
     if (!e) return;
-    const info = buildEnemyInfo({ ...e, speed: ENEMY_SPEED, level: e.prog.level }, akteBuch.get(e.id) ?? null);
+    const info = buildEnemyInfo({ ...e, speed: ENEMY_SPEED, level: e.prog.level, activeBuffs: e.buffs.active().map((b) => b.label ?? b.id) }, akteBuch.get(e.id) ?? null);
     prevSimSpeed = clock.simSpeed;
     clock.simSpeed = 0; // Welt pausiert; beim Schließen wird prevSimSpeed wiederhergestellt
     inspecting = true;
@@ -535,6 +578,38 @@ function boot(cls: TankClass): void {
     } else if (eff.kind === 'nextShots') {
       overpressureShots = eff.shots;
       overpressureMul = eff.damageMul;
+    } else if (eff.kind === 'paint') {
+      // Zielmarkierung: den anvisierten (Cursor-nächsten) Gegner verwundbar machen.
+      const aim = input.getAimTarget();
+      const ax = aim ? aim.x : playerCombatant.x;
+      const az = aim ? aim.z : playerCombatant.z;
+      const cands = roster.filter((e) => e.combatant.alive)
+        .map((e) => ({ id: e.id, x: e.combatant.x, z: e.combatant.z }));
+      const hit = nearestInRange(ax, az, cands, eff.range);
+      if (!hit) {
+        belt.add(def); // kein Ziel in Reichweite → Ladung nicht verschwenden
+        showToast('Kein Ziel in Reichweite für ' + def.name);
+        return;
+      }
+      const tgt = roster.find((r) => r.id === hit.id)!;
+      tgt.buffs.add({ id: 'markiert', duration: eff.duration, incomingMul: eff.incomingMul, label: 'Markiert' });
+      spawnLaser(playerCombatant.x, playerCombatant.z, tgt.combatant.x, tgt.combatant.z);
+      alog.log('debuff', { id: def.id, ziel: tgt.id });
+      showToast(`Markiert: ${tgt.displayName} (+${Math.round((eff.incomingMul - 1) * 100)} % Schaden)`);
+      return;
+    } else if (eff.kind === 'smoke') {
+      // Rauch: nahe Gegner-Geschütze treffen schlechter (accuracyAdd negativ).
+      const cands = roster.filter((e) => e.combatant.alive)
+        .map((e) => ({ id: e.id, x: e.combatant.x, z: e.combatant.z }));
+      const ids = idsWithinRadius(playerCombatant.x, playerCombatant.z, cands, eff.radius);
+      for (const id of ids) {
+        const e = roster.find((r) => r.id === id);
+        if (e) e.buffs.add({ id: 'vernebelt', duration: eff.duration, accuracyAdd: -eff.accuracyPenalty, label: 'Vernebelt' });
+      }
+      spawnSmokeDisc(playerCombatant.x, playerCombatant.z, eff.radius, eff.duration);
+      alog.log('debuff', { id: def.id, getroffen: ids.length });
+      showToast(`Rauch ausgebracht — ${ids.length} Gegner vernebelt`);
+      return;
     }
     alog.log('booster', { id: def.id });
     showToast('Gezündet: ' + def.name);
@@ -728,6 +803,7 @@ function boot(cls: TankClass): void {
         maxHp: Math.round(e.combatant.maxHp),
         armor: Math.round(e.combatant.armor ?? 0),
         dodge: e.combatant.dodge ?? 0,
+        incomingMul: e.combatant.incomingMul ?? 1, // >1 = markiert/verwundbar
         damage: e.damage, // aus der Ausrüstung abgeleitet
         equipMk: e.equipment.map((i) => i.mk),
       };
@@ -760,6 +836,11 @@ function boot(cls: TankClass): void {
       loadout.equip(it);
       return { equipped: loadout.equippedList().map((i) => i.id), dodge: loadout.stats().dodge };
     },
+    fxNow: () => fxList.map((f) => ({
+      name: f.mesh.name, alpha: f.mat ? +f.mat.alpha.toFixed(2) : null,
+      visible: f.mesh.isVisible, enabled: f.mesh.isEnabled(),
+      x: +f.mesh.position.x.toFixed(1), z: +f.mesh.position.z.toFixed(1), life: +f.life.toFixed(1),
+    })),
     lastDrops: () => [...lastDrops],
     pickupCount: () => pickups.count(),
     pickupList: () => pickups.list(),
@@ -791,7 +872,7 @@ function boot(cls: TankClass): void {
     openInspect: (id: string) => { openInspect(id); return { open: inspecting, simSpeed: clock.simSpeed }; },
     enemyInfoOf: (id: string) => {
       const e = roster.find((r) => r.id === id);
-      return e ? buildEnemyInfo({ ...e, speed: ENEMY_SPEED, level: e.prog.level }, akteBuch.get(e.id) ?? null) : null;
+      return e ? buildEnemyInfo({ ...e, speed: ENEMY_SPEED, level: e.prog.level, activeBuffs: e.buffs.active().map((b) => b.label ?? b.id) }, akteBuch.get(e.id) ?? null) : null;
     },
     enemyState: (id: string) => {
       const e = roster.find((r) => r.id === id);
@@ -887,10 +968,12 @@ function boot(cls: TankClass): void {
     playerSpeed = pst.speed * pmods.speedMul;
     playerCombatant.armor = pst.armor + pmods.armorAdd;
     playerCombatant.dodge = pst.dodge + pmods.dodgeAdd; // Ausweichen aus Modulen + Buffs
+    playerCombatant.incomingMul = pmods.incomingMul; // Verwundbarkeit (falls Gegner später markieren)
     buffHud.update(playerBuffs.active());
     input.update(simDt);
     reticle.update(input.getAimTarget()); // gleicher Frame wie der Turm
     pool.update(simDt);
+    updateFx(simDt); // Laser/Rauch-Effekte altern lassen
 
     const px = tank.view.root.position.x;
     const pz = tank.view.root.position.z;
@@ -1059,6 +1142,7 @@ function boot(cls: TankClass): void {
       e.mode = out.mode;
 
       const mods = e.buffs.aggregate();
+      e.combatant.incomingMul = mods.incomingMul; // Zielmarkierung → verwundbar
       if (out.moveX !== 0 || out.moveZ !== 0) {
         const step = ENEMY_SPEED * mods.speedMul * simDt;
         er.position.x += out.moveX * step;
@@ -1096,7 +1180,8 @@ function boot(cls: TankClass): void {
       if (esek?.autoFire) {
         const st2: AutoTurretState = {
           cooldown: e.autoTurretCd, range: esek.autoFire.range,
-          fireInterval: esek.autoFire.fireInterval, damage: esek.autoFire.damage, accuracy: esek.autoFire.accuracy,
+          fireInterval: esek.autoFire.fireInterval, damage: esek.autoFire.damage,
+          accuracy: Math.max(0, Math.min(1, esek.autoFire.accuracy + mods.accuracyAdd)), // Rauch senkt Treffsicherheit
         };
         const ecands = allC.filter((c) => c.team !== e.combatant.team && c.alive).map((c) => ({ x: c.x, z: c.z }));
         const r2 = stepAutoTurret(er.position.x, er.position.z, st2, ecands, simDt, () => aiRng.next());
@@ -1178,6 +1263,10 @@ function boot(cls: TankClass): void {
           name: e.displayName,
           isNamed: e.named !== null,
           mode: e.mode,
+          marks: e.buffs.active().reduce(
+            (s, b) => s + (b.id === 'markiert' ? '🎯' : b.id === 'vernebelt' ? '💨' : ''),
+            '',
+          ),
         })),
     );
 

@@ -23,6 +23,7 @@ export interface EnemyLike {
   combatant: { hp: number; maxHp: number; armor?: number; lootValue?: number; dodge?: number };
   equipment: ReadonlyArray<EnemyLikeItem>;
   bag: ReadonlyArray<{ name: string }>;
+  activeBuffs?: ReadonlyArray<string>; // Labels aktiver Buffs/Debuffs (Markiert, Vernebelt, …)
 }
 export interface AkteLike {
   begegnungen: number;
@@ -93,7 +94,7 @@ export function buildEnemyInfo(e: EnemyLike, akte: AkteLike | null): EnemyInfo {
     lootValue: e.combatant.lootValue ?? 0,
     equipment: e.equipment.map((it) => ({ slot: it.slot, name: it.name, stat: statText(it) })),
     bag: e.bag.map((it) => it.name),
-    boosters: [],
+    boosters: e.activeBuffs ? [...e.activeBuffs] : [],
     history: hasHistory
       ? {
           hasHistory: true,

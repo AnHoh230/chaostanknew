@@ -8,6 +8,7 @@ export interface EnemyBarInfo {
   name: string; // "Panzer N" oder Named-Name — wird IMMER angezeigt
   isNamed: boolean; // true = benannter Rivale (rot + fett)
   mode?: string; // aktueller KI-Modus (scout/annähern/feuern/…) — Mess-Overlay
+  marks?: string; // aktive Debuff-Marken (🎯 markiert / 💨 vernebelt)
 }
 
 export interface EnemyBars {
@@ -87,7 +88,7 @@ export function createEnemyBars(scene: Scene, camera: Camera, engine: Engine): E
       b.wrap.style.top = p.sy + 'px';
       b.fill.style.width = Math.max(0, Math.min(1, e.hpFrac) * 100) + '%';
       b.fill.style.background = e.isNamed ? '#ff3b30' : hpColor(e.hpFrac);
-      b.label.textContent = e.name;
+      b.label.textContent = (e.marks ? e.marks + ' ' : '') + e.name;
       b.label.style.color = e.isNamed ? '#ff8a72' : '#cdd6dd';
       b.label.style.fontSize = e.isNamed ? '11px' : '9px';
       b.mode.textContent = e.mode ?? '';

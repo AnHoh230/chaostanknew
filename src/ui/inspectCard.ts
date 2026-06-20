@@ -100,10 +100,10 @@ export function createInspectCard(): InspectCard {
     );
 
     const boosters = section(
-      'Aktive Booster',
+      'Aktive Effekte',
       info.boosters.length
         ? `<div style="color:#7fd1c0">${info.boosters.join(', ')}</div>`
-        : `<div style="color:#677">— (kommt mit SH2) —</div>`,
+        : `<div style="color:#677">— keine —</div>`,
     );
 
     const history = section(
