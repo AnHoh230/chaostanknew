@@ -31,6 +31,9 @@ export interface Enemy {
   bag: ShopItem[]; // eingesammelter Loot (Schatzjäger) — wird beim Shoppen verkauft
   shopGoal: { x: number; z: number } | null; // Ziel-Shop-Feld, wenn er gerade shoppen fährt
   damage: number; // Schaden pro Schuss — AUS DER AUSRÜSTUNG abgeleitet (nicht aus dem Level)
+  scoutDir: number; // Scout-Heading (rad), wenn kein Ziel in Sicht
+  scoutCd: number; // Sekunden bis zum nächsten Scout-Richtungswechsel
+  mode: string; // aktueller Engagement-Modus (für Overlay/Debug)
 }
 
 export interface EnemySpec {
@@ -109,5 +112,8 @@ export function createEnemyEntity(
     bag: [],
     shopGoal: null,
     damage: st.damage,
+    scoutDir: rng() * Math.PI * 2,
+    scoutCd: 0,
+    mode: 'scout',
   };
 }
