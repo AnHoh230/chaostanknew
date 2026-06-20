@@ -57,10 +57,10 @@ ungetestet. Über den Run-Log feintunen (`BASE_HP` / Item-Beitrag in
 
 ---
 
-## TD-3 — `enemyLevelStats` ist toter Code
+## TD-3 — `enemyLevelStats` ist toter Code ✅ ERLEDIGT (2026-06-20)
 
-Seit der Umstellung auf `enemyCombatStats` wird `enemyLevelStats` (enemy.ts) nirgends
-mehr benutzt, ist aber noch exportiert. Bei Gelegenheit entfernen.
+Mit dem Ökonomie-Redesign entfernt: `enemyLevelStats` ist gelöscht, alle Gegner-Stats
+kommen aus `enemyCombatStats(equipment, level)`.
 
 ---
 
@@ -82,4 +82,31 @@ direkt die MK-Stufen füllt**, kein separates Level daneben. Umsetzung *später*
   (Veteran zäher bei gleichem Gear) oder rein über Gear wirken?".
 - Ein XP→MK-Balken für Spieler UND Gegner (Symmetrie).
 
-**Status:** offen, vertagt (nach dem KI-Thema TD-1).
+**Teil-Fortschritt (2026-06-20, Ökonomie-Redesign):** Für **Gegner** ist die doppelte
+Achse aufgelöst — sie haben jetzt eine eigene `Progression` (XP→MK, identisch zum
+Spieler), kein separates Gegner-`level` mehr. Der `level`-Begriff bleibt nur noch als
+`prog.level` (Eingang in `enemyMk`/`enemyCombatStats`). **Spieler-Seite** (ein
+gemeinsamer XP→MK-Balken statt Level + MK) steht weiterhin aus.
+
+**Status:** Gegner-Seite gelöst; Spieler-Seite offen, vertagt (nach TD-1).
+
+---
+
+## TD-5 — Gegner-Ökonomie: bekannte Lücken (erste Fassung)
+
+Aus dem Ökonomie-Redesign (Spec `2026-06-20-gegner-oekonomie-und-kauf-ki-design.md`)
+bewusst offen gelassen:
+
+- **`armorAdd`-Booster wirkt beim Gegner nicht.** `letzte_schicht` (Rüstungs-Buff)
+  wird in `applyEnemyBooster` nicht auf `combatant.armor` angerechnet (YAGNI). Spieler
+  rechnet `armorAdd` ein, Gegner noch nicht. Booster wird trotzdem nur als Fallback
+  gewählt.
+- **Gegner kauft keine Sekundärwaffen (Auto-Turrets).** `planPurchases` bedient nur die
+  5 Formel-Slots; der `sekundaer`-Slot bleibt unbestückt. (Hängt an SH3.5.)
+- **Live-Loop-Abnahme noch ausstehend.** Spawn-Verdrahtung (nackt + Startgeld +
+  `shop_anfahrt`) ist per NullEngine-Test (`enemy.test.ts`) bewiesen; das
+  End-to-End-Verhalten (Anfahrt→Dwell→Kauf, XP/MK im Lauf, Booster-Zündung) wurde noch
+  **nicht** im Browser beobachtet, weil der Preview-Tab im Hintergrund lag (Loop
+  pausiert). Beim nächsten Vordergrund-Playtest über den Run-Log prüfen/tunen.
+
+**Status:** erste Fassung steht; obige Punkte als Folgearbeit.
