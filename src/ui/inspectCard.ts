@@ -78,6 +78,7 @@ export function createInspectCard(): InspectCard {
       row('HP', `${info.hp}/${info.maxHp}`) +
         row('Schaden', String(info.damage)) +
         row('Rüstung', String(info.armor)) +
+        (info.dodge > 0 ? row('Ausweichen', `${Math.round(info.dodge * 100)} %`) : '') +
         row('Tempo', info.speed ? String(info.speed) : '—') +
         row('Beutewert', info.lootValue.toFixed(2)),
     );

@@ -19,6 +19,7 @@ import { engagementStep } from './ai/engagement';
 import { applyEnemyStats, type Enemy } from './enemy/enemy';
 import { rollEnemyEquipment, pickDrop, enemyMk } from './enemy/equipment';
 import { planPurchases, shouldStartShopTrip, pickBoosterToUse } from './enemy/enemyEconomy';
+import { stepAutoTurret, type AutoTurretState } from './combat/autoTurret';
 import { createSpawner } from './enemy/spawner';
 import { pickTarget, type TargetInfo } from './enemy/targeting';
 import { createAkteBuch } from './named/akte';
@@ -213,6 +214,7 @@ function boot(cls: TankClass): void {
   const loadout = createLoadout({ damage: cls.damage, maxHp: cls.maxHp, speed: cls.speed, armor: 0 });
   let geld = mostExpensiveItemPrice(1); // Startbudget = teuerstes MK1-Item (symmetrisch zum Gegner)
   let playerSpeed = cls.speed; // aus loadout.stats() abgeleitet (Räder) × Buffs
+  let playerTurretCd = 0; // Cooldown der Spieler-Sekundärwaffe (Auto-Turret)
   const progression = createProgression(); // Level/XP/MK (P2)
 
   // Run-Action-Log: pro Run nach logs/run-<NNN>.log (Schüsse, Bewegung, Shop …).
@@ -412,6 +414,15 @@ function boot(cls: TankClass): void {
     const p = pool.acquire({
       x: ox, y: 0.5, z: oz, dx: dx / l, dz: dz / l,
       speed: PROJECTILE_SPEED, life: shotRange / PROJECTILE_SPEED, team, damage,
+    });
+    if (p) bus.emit('projectile.spawned', { id: p.id });
+  }
+
+  /** Auto-Turret-Schuss (Sekundärwaffe). Richtung ist bereits gemäß Treffsicherheit gestreut (rad). */
+  function fireAutoTurret(ox: number, oz: number, dir: number, team: string, damage: number, range: number): void {
+    const p = pool.acquire({
+      x: ox, y: 0.5, z: oz, dx: Math.sin(dir), dz: Math.cos(dir),
+      speed: PROJECTILE_SPEED, life: range / PROJECTILE_SPEED, team, damage,
     });
     if (p) bus.emit('projectile.spawned', { id: p.id });
   }
@@ -735,6 +746,20 @@ function boot(cls: TankClass): void {
         armor: Math.round(e2.combatant.armor ?? 0), equipMk: e2.equipment.map((i) => i.mk),
       };
     },
+    // SH3.5: einem Gegner eine Sekundärwaffe (Auto-Turret) geben (manueller Test).
+    giveEnemyAutoTurret: (id: string, turretId = 'autoturret_mk05') => {
+      const e = roster.find((r) => r.id === id);
+      if (!e) return 'nicht gefunden';
+      e.equipment.push(cloneItem(catalogItem(turretId)));
+      return { id: e.id, equip: e.equipment.map((i) => i.id) };
+    },
+    // SH3.5: Spieler ein Item in die Tasche legen UND anlegen (manueller Test, z. B. Auto-Turret).
+    giveAndEquip: (id: string) => {
+      const it = cloneItem(catalogItem(id));
+      loadout.addToBag(it);
+      loadout.equip(it);
+      return { equipped: loadout.equippedList().map((i) => i.id), dodge: loadout.stats().dodge };
+    },
     lastDrops: () => [...lastDrops],
     pickupCount: () => pickups.count(),
     pickupList: () => pickups.list(),
@@ -861,6 +886,7 @@ function boot(cls: TankClass): void {
     const pst = loadout.stats();
     playerSpeed = pst.speed * pmods.speedMul;
     playerCombatant.armor = pst.armor + pmods.armorAdd;
+    playerCombatant.dodge = pst.dodge + pmods.dodgeAdd; // Ausweichen aus Modulen + Buffs
     buffHud.update(playerBuffs.active());
     input.update(simDt);
     reticle.update(input.getAimTarget()); // gleicher Frame wie der Turm
@@ -868,6 +894,22 @@ function boot(cls: TankClass): void {
 
     const px = tank.view.root.position.x;
     const pz = tank.view.root.position.z;
+
+    // SH3.5: Sekundärwaffe (Auto-Turret) feuert autonom auf den nächsten Gegner.
+    const sek = loadout.get('sekundaer');
+    if (sek?.autoFire) {
+      const st: AutoTurretState = {
+        cooldown: playerTurretCd, range: sek.autoFire.range,
+        fireInterval: sek.autoFire.fireInterval, damage: sek.autoFire.damage, accuracy: sek.autoFire.accuracy,
+      };
+      const cands = roster.filter((e) => e.combatant.alive).map((e) => ({ x: e.combatant.x, z: e.combatant.z }));
+      const res = stepAutoTurret(px, pz, st, cands, simDt, () => aiRng.next());
+      playerTurretCd = st.cooldown;
+      if (res.fire && res.dir != null) {
+        fireAutoTurret(px, pz, res.dir, 'player', sek.autoFire.damage, sek.autoFire.range);
+        alog.log('autoturret', { team: 'player', dmg: sek.autoFire.damage });
+      }
+    }
 
     // Bewegung gesampelt loggen (simDt=0 bei Pause → kein Spam).
     moveLogCd -= simDt;
@@ -1043,6 +1085,22 @@ function boot(cls: TankClass): void {
         if (idx >= 0) {
           const def = e.belt.trigger(idx);
           if (def) { applyEnemyBooster(e, def); e.beltCd = BELT_USE_CD; }
+        }
+      }
+
+      // SH3.5: Sekundärwaffe (Auto-Turret) des Gegners — feuert autonom auf fremde Teams.
+      const esek = e.equipment.find((it) => it.autoFire);
+      if (esek?.autoFire) {
+        const st2: AutoTurretState = {
+          cooldown: e.autoTurretCd, range: esek.autoFire.range,
+          fireInterval: esek.autoFire.fireInterval, damage: esek.autoFire.damage, accuracy: esek.autoFire.accuracy,
+        };
+        const ecands = allC.filter((c) => c.team !== e.combatant.team && c.alive).map((c) => ({ x: c.x, z: c.z }));
+        const r2 = stepAutoTurret(er.position.x, er.position.z, st2, ecands, simDt, () => aiRng.next());
+        e.autoTurretCd = st2.cooldown;
+        if (r2.fire && r2.dir != null) {
+          fireAutoTurret(er.position.x, er.position.z, r2.dir, e.combatant.team, esek.autoFire.damage, esek.autoFire.range);
+          alog.log('autoturret', { team: e.combatant.team, dmg: esek.autoFire.damage });
         }
       }
 

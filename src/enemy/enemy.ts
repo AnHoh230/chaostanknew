@@ -41,6 +41,7 @@ export interface Enemy {
   beltCd: number; // Sperre bis zur nächsten Booster-Zündung
   overShots: number; // Überdruck-Munition: Rest-Schüsse mit Bonus
   overMul: number; // Überdruck-Munition: Schadens-Multiplikator
+  autoTurretCd: number; // Cooldown der Sekundärwaffe (Auto-Turret), falls ausgerüstet
   belt: Belt<BoosterDef>; // gekaufte Consumables (Gürtel-Ladungen)
   buffs: BuffStack; // aktive Booster-Buffs
   damage: number; // Schaden pro Schuss — AUS DER AUSRÜSTUNG abgeleitet (nicht aus dem Level)
@@ -120,6 +121,7 @@ export function createEnemyEntity(
     beltCd: 0,
     overShots: 0,
     overMul: 1,
+    autoTurretCd: 0,
     belt: createBelt<BoosterDef>(3),
     buffs: createBuffStack(),
     damage: st.damage,
