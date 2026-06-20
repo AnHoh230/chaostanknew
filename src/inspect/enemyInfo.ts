@@ -1,4 +1,3 @@
-import { enemyLevelStats } from '../enemy/enemy';
 import { enemyMk } from '../enemy/equipment';
 import { MOTIV_LABEL } from '../ai/motives';
 import type { Slot } from '../shop/catalog';
@@ -18,6 +17,7 @@ export interface EnemyLike {
   named: { archetyp: string } | null;
   motiveId: string;
   level: number;
+  damage: number; // Schaden pro Schuss (aus der Ausrüstung)
   speed?: number; // Tempo (vom Aufrufer; Gegner haben aktuell ein gemeinsames Tempo)
   combatant: { hp: number; maxHp: number; armor?: number; lootValue?: number };
   equipment: ReadonlyArray<EnemyLikeItem>;
@@ -72,7 +72,6 @@ function statText(it: EnemyLikeItem): string {
 
 /** Eingefrorener Lese-Snapshot eines Gegners für M-Tooltip und I-Karte. */
 export function buildEnemyInfo(e: EnemyLike, akte: AkteLike | null): EnemyInfo {
-  const st = enemyLevelStats(e.level);
   const hasHistory = akte !== null && akte.begegnungen > 0;
   return {
     id: e.id,
@@ -84,10 +83,10 @@ export function buildEnemyInfo(e: EnemyLike, akte: AkteLike | null): EnemyInfo {
     mk: enemyMk(e.level),
     hp: e.combatant.hp,
     maxHp: e.combatant.maxHp,
-    damage: st.damage,
+    damage: e.damage,
     armor: e.combatant.armor ?? 0,
     speed: e.speed ?? 0,
-    lootValue: e.combatant.lootValue ?? st.lootValue,
+    lootValue: e.combatant.lootValue ?? 0,
     equipment: e.equipment.map((it) => ({ slot: it.slot, name: it.name, stat: statText(it) })),
     bag: e.bag.map((it) => it.name),
     boosters: [],

@@ -5,9 +5,16 @@ import { createEnemyBrain, type EnemyBrain } from '../ai/enemyBrain';
 import type { TraitProfile, AiAction } from '../ai/aiTypes';
 import type { Combatant } from '../combat/combat';
 import type { Named } from '../named/promotion';
-import type { ShopItem } from '../shop/catalog';
-import { rollEnemyEquipment } from './equipment';
+import { mostExpensiveItemPrice, type ShopItem } from '../shop/catalog';
+import { enemyMk } from './equipment';
 import { enemyCombatStats } from './enemyStats';
+import { createProgression, type Progression } from '../progression/progression';
+import { createBelt, type Belt } from '../player/belt';
+import { createBuffStack, type BuffStack } from '../combat/buffs';
+import type { BoosterDef } from '../shop/boosters';
+
+/** Phase im Shop-Trip eines Gegners. */
+export type EnemyShopState = 'kaempfen' | 'streifen' | 'shop_anfahrt' | 'shop_dwell';
 
 /** Ein lebender Gegner: Optik + Trefferdaten + Gehirn + Level/Credits + Promotion. */
 export interface Enemy {
@@ -23,13 +30,19 @@ export interface Enemy {
   named: Named | null;
   displayName: string; // "Panzer N" — bei Promotion der Named-Name
   prevTargetVisible: boolean;
-  level: number; // eigenes Level (unabhängig von Spieler-MK)
+  prog: Progression; // eigenes Level/XP/MK — gleiche Progression wie der Spieler
   credits: number; // verdient durch eigene Kills → Aufrüstung
-  shopCd: number; // Sekunden bis zum nächsten Aufrüst-Versuch
   respawnTimer: number; // >0 = tot, kehrt als benannter Rivale zurück (Nemesis)
   equipment: ShopItem[]; // tatsächlich angelegte Teile — NUR diese kann er droppen
   bag: ShopItem[]; // eingesammelter Loot (Schatzjäger) — wird beim Shoppen verkauft
   shopGoal: { x: number; z: number } | null; // Ziel-Shop-Feld, wenn er gerade shoppen fährt
+  shopState: EnemyShopState; // Phase im Shop-Trip
+  dwellTimer: number; // Sekunden Rest am Shop-Feld (Einkauf simuliert)
+  beltCd: number; // Sperre bis zur nächsten Booster-Zündung
+  overShots: number; // Überdruck-Munition: Rest-Schüsse mit Bonus
+  overMul: number; // Überdruck-Munition: Schadens-Multiplikator
+  belt: Belt<BoosterDef>; // gekaufte Consumables (Gürtel-Ladungen)
+  buffs: BuffStack; // aktive Booster-Buffs
   damage: number; // Schaden pro Schuss — AUS DER AUSRÜSTUNG abgeleitet (nicht aus dem Level)
   scoutDir: number; // Scout-Heading (rad), wenn kein Ziel in Sicht
   scoutCd: number; // Sekunden bis zum nächsten Scout-Richtungswechsel
@@ -46,19 +59,10 @@ export interface EnemySpec {
   displayName: string;
 }
 
-/** Gegner-Stats aus seinem Level (eigene Skala, NICHT an die Spieler-MK gekoppelt). */
-export function enemyLevelStats(level: number): { hp: number; damage: number; lootValue: number } {
-  return {
-    hp: Math.round(60 + level * 40),
-    damage: Math.round(4 + level * 2),
-    lootValue: +(0.3 + level * 0.18).toFixed(2),
-  };
-}
-
 /** Combatant-Stats eines Gegners NEU aus seiner Ausrüstung berechnen (Erzeugung,
  *  Shop-Aufrüstung, Respawn, Debug). HP wird dabei voll aufgefüllt. */
 export function applyEnemyStats(e: Enemy): void {
-  const st = enemyCombatStats(e.equipment, e.level);
+  const st = enemyCombatStats(e.equipment, e.prog.level);
   e.combatant.maxHp = st.maxHp;
   e.combatant.hp = st.maxHp;
   e.combatant.armor = st.armor;
@@ -76,7 +80,8 @@ export function createEnemyEntity(
 ): Enemy {
   const view = createTankView(scene, spec.comp);
   view.root.position.set(spec.spawn.x, 0, spec.spawn.z);
-  const equipment = rollEnemyEquipment(spec.level, rng);
+  const equipment: ShopItem[] = []; // startet nackt — rüstet sich am ersten Shop auf (Anfangs-Shopping)
+  const prog = createProgression(spec.level);
   const st = enemyCombatStats(equipment, spec.level);
   const combatant: Combatant = {
     id: spec.id,
@@ -104,13 +109,19 @@ export function createEnemyEntity(
     named: null,
     displayName: spec.displayName,
     prevTargetVisible: false,
-    level: spec.level,
-    credits: 0,
-    shopCd: 4 + rng() * 4,
+    prog,
+    credits: mostExpensiveItemPrice(enemyMk(spec.level)), // Startbudget = teuerstes Item seiner MK
     respawnTimer: 0,
     equipment,
     bag: [],
     shopGoal: null,
+    shopState: 'shop_anfahrt', // fährt zuerst zum Shop und rüstet sich aus
+    dwellTimer: 0,
+    beltCd: 0,
+    overShots: 0,
+    overMul: 1,
+    belt: createBelt<BoosterDef>(3),
+    buffs: createBuffStack(),
     damage: st.damage,
     scoutDir: rng() * Math.PI * 2,
     scoutCd: 0,

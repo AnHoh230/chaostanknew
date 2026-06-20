@@ -18,7 +18,7 @@ import { MOTIV_LABEL } from './ai/motives';
 import { engagementStep } from './ai/engagement';
 import { applyEnemyStats, type Enemy } from './enemy/enemy';
 import { rollEnemyEquipment, pickDrop, enemyMk } from './enemy/equipment';
-import { runEnemyShopVisit, enemyUpgradeCost } from './enemy/enemyShopping';
+import { planPurchases, shouldStartShopTrip, pickBoosterToUse } from './enemy/enemyEconomy';
 import { createSpawner } from './enemy/spawner';
 import { pickTarget, type TargetInfo } from './enemy/targeting';
 import { createAkteBuch } from './named/akte';
@@ -41,7 +41,7 @@ import { createCameraPanel } from './ui/cameraPanel';
 import { TANK_CLASSES, type TankClass } from './game/classes';
 import { createPickupField } from './loot/pickups';
 import { createShopField, TILE_RADIUS } from './world/shopTiles';
-import { CATALOG, SLOT_SOCKET, catalogItem, cloneItem, type ShopItem, type Slot } from './shop/catalog';
+import { CATALOG, SLOT_SOCKET, catalogItem, cloneItem, mostExpensiveItemPrice, type ShopItem, type Slot } from './shop/catalog';
 import { createShop } from './shop/shop';
 import { sellValue } from './shop/buyLogic';
 
@@ -65,7 +65,9 @@ const ENEMY_SPEED = 5; // langsamer als der Spieler (8)
 const ENEMY_SIGHT = 60; // Sichtweite auf das Ziel
 const ENEMY_KEEP_DIST = 7; // beim Annähern nicht in den Spieler hineinlaufen
 const ENEMY_FIRE_COOLDOWN = 1.4; // Sekunden zwischen Gegner-Schüssen
-const ENEMY_SHOP_TRIP_CD = 14; // Sekunden bis zum nächsten autonomen Shop-Besuch
+const SHOP_DWELL = 2.5; // Sekunden Einkaufs-Verweildauer am Shop-Feld (simuliert den Einkauf)
+const ENEMY_INTERRUPT_HP = 0.2; // ein Störer unter dieser HP-Fraktion wird auf dem Shop-Trip noch erledigt
+const BELT_USE_CD = 4; // Sperre zwischen zwei Booster-Zündungen eines Gegners
 const LOOT_SIGHT_HUNTER = 34; // Schatzjäger jagen Beute aus großer Distanz
 const LOOT_SIGHT_NEAR = 9; // andere Gegner sammeln Beute nur in der Nähe auf
 const ENEMY_BAG_MAX = 6; // so viele Teile trägt ein Gegner, dann verkauft er erst
@@ -209,7 +211,7 @@ function boot(cls: TankClass): void {
 
   // Loadout (P4): ein Item je Slot, Stats = Klassen-Basis + bestückte Slots.
   const loadout = createLoadout({ damage: cls.damage, maxHp: cls.maxHp, speed: cls.speed, armor: 0 });
-  let geld = 0; // Spielgeld, verdient durch Kills
+  let geld = mostExpensiveItemPrice(1); // Startbudget = teuerstes MK1-Item (symmetrisch zum Gegner)
   let playerSpeed = cls.speed; // aus loadout.stats() abgeleitet (Räder) × Buffs
   const progression = createProgression(); // Level/XP/MK (P2)
 
@@ -295,9 +297,13 @@ function boot(cls: TankClass): void {
         }
         log.info('enemy died (Spieler)', { id: e.id, drop: part?.id ?? null, reward });
       } else {
-        // Gegner-killt-Gegner: der Sieger bekommt Credits (→ Aufrüstung), kein Spieler-Gewinn.
+        // Gegner-killt-Gegner: der Sieger bekommt Credits UND XP (→ MK-Aufstieg wie der Spieler).
         const killer = roster.find((r) => r.id === killerTeam);
-        if (killer) killer.credits += reward;
+        if (killer) {
+          killer.credits += reward;
+          const up = killer.prog.addXp(Math.round(18 + (e.combatant.lootValue ?? 0.4) * 60));
+          if (up.newMkUnlocks.length) applyEnemyStats(killer); // neue MK → frische Stats/HP
+        }
         log.debug('enemy killed enemy', { tot: e.id, sieger: killerTeam });
       }
 
@@ -469,7 +475,7 @@ function boot(cls: TankClass): void {
   function openInspect(id: string): void {
     const e = roster.find((r) => r.id === id && r.combatant.alive);
     if (!e) return;
-    const info = buildEnemyInfo({ ...e, speed: ENEMY_SPEED }, akteBuch.get(e.id) ?? null);
+    const info = buildEnemyInfo({ ...e, speed: ENEMY_SPEED, level: e.prog.level }, akteBuch.get(e.id) ?? null);
     prevSimSpeed = clock.simSpeed;
     clock.simSpeed = 0; // Welt pausiert; beim Schließen wird prevSimSpeed wiederhergestellt
     inspecting = true;
@@ -528,6 +534,21 @@ function boot(cls: TankClass): void {
     if (!def) return;
     applyBooster(def);
     updateBeltHud();
+  }
+
+  /** Booster-Effekt auf einen Gegner anwenden (symmetrisch zu applyBooster). */
+  function applyEnemyBooster(e: Enemy, def: BoosterDef): void {
+    const eff = def.effect;
+    if (eff.kind === 'buff') {
+      if (eff.onlyLowHp && e.combatant.hp / e.combatant.maxHp >= 0.2) { e.belt.add(def); return; }
+      e.buffs.add({ ...eff.buff, label: def.name });
+    } else if (eff.kind === 'tempHp') {
+      e.combatant.hp = Math.min(e.combatant.maxHp, e.combatant.hp + eff.amount);
+    } else if (eff.kind === 'nextShots') {
+      e.overShots = eff.shots;
+      e.overMul = eff.damageMul;
+    }
+    alog.log('enemy.booster', { id: e.id, booster: def.id });
   }
 
   window.addEventListener('keydown', (ev) => {
@@ -673,7 +694,7 @@ function boot(cls: TankClass): void {
     enemies: roster.map((e) => e.combatant),
     roster: () =>
       roster.map((e) => ({
-        id: e.id, motive: e.motiveId, mode: e.mode, level: e.level,
+        id: e.id, motive: e.motiveId, mode: e.mode, level: e.prog.level,
         credits: e.credits, hp: e.combatant.hp, alive: e.combatant.alive,
         loot: e.combatant.lootValue, team: e.combatant.team,
         x: +e.combatant.x.toFixed(1), z: +e.combatant.z.toFixed(1),
@@ -691,7 +712,7 @@ function boot(cls: TankClass): void {
       const e = roster.find((r) => r.id === id);
       if (!e) return null;
       return {
-        level: e.level,
+        level: e.prog.level,
         hp: Math.round(e.combatant.hp),
         maxHp: Math.round(e.combatant.maxHp),
         armor: Math.round(e.combatant.armor ?? 0),
@@ -710,7 +731,7 @@ function boot(cls: TankClass): void {
       applyEnemyStats(e); // Stats aus der Ausrüstung neu berechnen (nach dem Fix)
       const e2 = roster.find((r) => r.id === id)!;
       return {
-        level: e2.level, maxHp: Math.round(e2.combatant.maxHp),
+        level: e2.prog.level, maxHp: Math.round(e2.combatant.maxHp),
         armor: Math.round(e2.combatant.armor ?? 0), equipMk: e2.equipment.map((i) => i.mk),
       };
     },
@@ -745,13 +766,14 @@ function boot(cls: TankClass): void {
     openInspect: (id: string) => { openInspect(id); return { open: inspecting, simSpeed: clock.simSpeed }; },
     enemyInfoOf: (id: string) => {
       const e = roster.find((r) => r.id === id);
-      return e ? buildEnemyInfo({ ...e, speed: ENEMY_SPEED }, akteBuch.get(e.id) ?? null) : null;
+      return e ? buildEnemyInfo({ ...e, speed: ENEMY_SPEED, level: e.prog.level }, akteBuch.get(e.id) ?? null) : null;
     },
     enemyState: (id: string) => {
       const e = roster.find((r) => r.id === id);
       return e
         ? {
-            id: e.id, name: e.displayName, level: e.level, credits: e.credits,
+            id: e.id, name: e.displayName, level: e.prog.level, mk: e.prog.unlockedMk(),
+            credits: e.credits, shopState: e.shopState,
             bag: e.bag.map((i) => i.id), equip: e.equipment.map((i) => i.id),
             shopGoal: e.shopGoal, x: +e.combatant.x.toFixed(1), z: +e.combatant.z.toFixed(1),
           }
@@ -766,7 +788,7 @@ function boot(cls: TankClass): void {
       if (!e) return 'none';
       e.bag.push(catalogItem('waffe_mk01_normal'), catalogItem('turm_mk01_normal'));
       e.credits += 500;
-      e.shopCd = 0;
+      e.shopState = 'shop_anfahrt';
       e.shopGoal = null;
       if (nearTile) {
         const t = shopField.positions[0]!; // (40,0): Gegner knapp daneben absetzen → schnelle Ankunft
@@ -870,7 +892,7 @@ function boot(cls: TankClass): void {
             const ang = aiRng.next() * Math.PI * 2;
             const rr = 60 + aiRng.next() * 70; // zufällige, weit gestreute Rückkehr-Position
             e.view.root.position.set(px + Math.cos(ang) * rr, 0, pz + Math.sin(ang) * rr);
-            e.equipment = rollEnemyEquipment(e.level, () => aiRng.next()); // frische Ausrüstung passend zum aktuellen Level
+            e.equipment = rollEnemyEquipment(e.prog.level, () => aiRng.next()); // frische Ausrüstung passend zum aktuellen Level
             applyEnemyStats(e); // Stats aus der frischen Ausrüstung (HP voll)
             e.combatant.alive = true;
             e.view.root.setEnabled(true);
@@ -884,42 +906,71 @@ function boot(cls: TankClass): void {
       const ex = er.position.x;
       const ez = er.position.z;
 
-      // S3: Shoppen — fährt der Gegner gerade zu einem Shop-Feld? Dann Kampf ignorieren.
-      if (e.shopGoal) {
-        const sgx = e.shopGoal.x - ex;
-        const sgz = e.shopGoal.z - ez;
-        const sd = Math.hypot(sgx, sgz) || 1;
-        if (sd <= TILE_RADIUS) {
-          // Angekommen → Transaktion: gesammelte Beute verkaufen + ggf. aufrüsten.
-          const res = runEnemyShopVisit(
-            { level: e.level, credits: e.credits, equipment: e.equipment, bag: e.bag },
-            () => aiRng.next(),
-          );
-          e.level = res.level;
-          e.credits = res.credits;
-          e.equipment = res.equipment;
-          e.bag = res.bag;
-          if (res.upgraded) {
-            applyEnemyStats(e); // Stats aus der neuen Ausrüstung (HP voll, Rüstung/Schaden/Beutewert)
-          }
-          e.shopGoal = null;
-          e.shopCd = ENEMY_SHOP_TRIP_CD;
-          log.debug('Gegner geshoppt', {
-            id: e.id, lvl: e.level, verkauft: res.soldCollected, aufgeruestet: res.upgraded,
+      e.buffs.tick(simDt); // Booster-Buffs altern jeden Frame
+
+      // Ziel wählen (Beutewert) — zuerst, da Shop-Trip UND Engagement es brauchen.
+      const cands: TargetInfo[] = [];
+      for (const c of allC) {
+        if (c.id === e.id) continue;
+        cands.push({ id: c.id, team: c.team, x: c.x, z: c.z, lootValue: c.lootValue ?? 0, alive: c.alive });
+      }
+      const target = pickTarget(ex, ez, e.combatant.team, ENEMY_SIGHT, cands);
+      const targetComb = target ? allC.find((c) => c.id === target.id) ?? null : null;
+      const targetHpFrac = targetComb && targetComb.maxHp > 0 ? targetComb.hp / targetComb.maxHp : 1;
+      const targetDist = target ? Math.hypot(target.x - ex, target.z - ez) : Infinity;
+
+      // — Shop-Trip: Dwell (Einkauf am Feld, Schutzzone) —
+      if (e.shopState === 'shop_dwell') {
+        e.mode = 'einkauf';
+        e.combatant.invulnerable = true;
+        e.dwellTimer -= simDt;
+        if (e.dwellTimer <= 0) {
+          const res = planPurchases({
+            credits: e.credits, equipment: e.equipment, mk: e.prog.unlockedMk(),
+            bag: e.bag, beltFree: e.belt.slots().filter((s) => s === null).length,
           });
-        } else {
-          const step = ENEMY_SPEED * simDt;
-          er.position.x += (sgx / sd) * step;
-          er.position.z += (sgz / sd) * step;
-          er.rotation.y = Math.atan2(sgx, sgz);
-          e.combatant.x = er.position.x;
-          e.combatant.z = er.position.z;
+          e.credits = res.credits;
+          e.bag = [];
+          if (res.bought > 0) { e.equipment = res.equipment; applyEnemyStats(e); }
+          for (const b of res.boostersBought) e.belt.add(b);
+          e.shopGoal = null;
+          e.shopState = 'kaempfen';
+          e.combatant.invulnerable = false;
+          log.debug('Gegner geshoppt', {
+            id: e.id, gekauft: res.bought, booster: res.boostersBought.length, rest: res.credits,
+          });
         }
-        continue; // shoppt → in diesem Frame kein Kampf-Verhalten
+        e.combatant.x = er.position.x; e.combatant.z = er.position.z;
+        continue;
+      }
+      // — Shop-Trip: Anfahrt (nicht unterbrechbar, außer durch kaum-HP-Störer) —
+      if (e.shopState === 'shop_anfahrt') {
+        if (!e.shopGoal) {
+          const t = shopField.nearest(ex, ez);
+          if (t) e.shopGoal = { x: t.x, z: t.z };
+          else e.shopState = 'kaempfen'; // kein Feld erreichbar → normal weiter
+        }
+        const weakIntruder = target != null && targetDist <= shotRange && targetHpFrac < ENEMY_INTERRUPT_HP;
+        if (e.shopGoal && !weakIntruder) {
+          e.mode = 'zum_shop';
+          const sgx = e.shopGoal.x - ex, sgz = e.shopGoal.z - ez;
+          const sd = Math.hypot(sgx, sgz) || 1;
+          if (sd <= TILE_RADIUS) {
+            e.shopState = 'shop_dwell'; e.dwellTimer = SHOP_DWELL;
+          } else {
+            const step = ENEMY_SPEED * simDt;
+            er.position.x += (sgx / sd) * step;
+            er.position.z += (sgz / sd) * step;
+            er.rotation.y = Math.atan2(sgx, sgz);
+          }
+          e.combatant.x = er.position.x; e.combatant.z = er.position.z;
+          continue; // Trip nicht durch normale Gegner unterbrechen
+        }
+        // weakIntruder in Reichweite → unten normal kämpfen (Trip bleibt 'shop_anfahrt')
       }
 
-      // S4: Beute einsammeln (Schatzjäger jagen aktiv aus der Ferne, andere nur ganz nah).
-      if (e.bag.length < ENEMY_BAG_MAX) {
+      // S4: Beute einsammeln (Schatzjäger jagen aktiv aus der Ferne, andere nur ganz nah) — nicht auf dem Shop-Trip.
+      if ((e.shopState === 'kaempfen' || e.shopState === 'streifen') && e.bag.length < ENEMY_BAG_MAX) {
         const lootSight = e.motiveId === 'schatzjaeger' ? LOOT_SIGHT_HUNTER : LOOT_SIGHT_NEAR;
         const loot = pickups.nearest(ex, ez, lootSight);
         if (loot) {
@@ -941,13 +992,7 @@ function boot(cls: TankClass): void {
         }
       }
 
-      // Beutewert-Jagd: Ziel unter allen anderen Combatants wählen.
-      const cands: TargetInfo[] = [];
-      for (const c of allC) {
-        if (c.id === e.id) continue;
-        cands.push({ id: c.id, team: c.team, x: c.x, z: c.z, lootValue: c.lootValue ?? 0, alive: c.alive });
-      }
-      const target = pickTarget(ex, ez, e.combatant.team, ENEMY_SIGHT, cands);
+      // (Ziel bereits oben gewählt: target / targetDist / targetHpFrac.)
 
       // Engagement-Zonen-KI (erste Fassung): jede Lage erzeugt Bewegung — kein totes
       // Stehen. Kein Ziel in Sicht → scouten (in eine Richtung fahren, neue Ziele finden).
@@ -968,8 +1013,9 @@ function boot(cls: TankClass): void {
       });
       e.mode = out.mode;
 
+      const mods = e.buffs.aggregate();
       if (out.moveX !== 0 || out.moveZ !== 0) {
-        const step = ENEMY_SPEED * simDt;
+        const step = ENEMY_SPEED * mods.speedMul * simDt;
         er.position.x += out.moveX * step;
         er.position.z += out.moveZ * step;
         er.rotation.y = Math.atan2(out.moveX, out.moveZ); // Chassis in Laufrichtung
@@ -981,21 +1027,31 @@ function boot(cls: TankClass): void {
       }
       e.fireCd -= simDt;
       if (out.fire && e.fireCd <= 0) {
-        enemyFire(er.position.x, er.position.z, out.faceX, out.faceZ, e.combatant.team, e.damage);
-        e.fireCd = ENEMY_FIRE_COOLDOWN;
+        const dmg = e.damage * mods.damageMul * (e.overShots > 0 ? e.overMul : 1);
+        if (e.overShots > 0) e.overShots--;
+        enemyFire(er.position.x, er.position.z, out.faceX, out.faceZ, e.combatant.team, dmg);
+        e.fireCd = ENEMY_FIRE_COOLDOWN / mods.fireRateMul;
       }
 
-      // Gegner-Shop (S3): von Zeit zu Zeit zum nächsten Shop-Feld fahren — aber nur,
-      // wenn es etwas zu tun gibt (Aufrüstung bezahlbar ODER Beute zu verkaufen).
-      e.shopCd -= simDt;
-      if (e.shopCd <= 0 && !e.shopGoal) {
-        const wantsUpgrade = e.level < 10 && e.credits >= enemyUpgradeCost(e.level);
-        if (wantsUpgrade || e.bag.length > 0) {
+      // Booster-Einsatz-KI: nach HP/Modus zünden (mit Sperre dazwischen).
+      e.beltCd = Math.max(0, e.beltCd - simDt);
+      if (e.beltCd <= 0 && e.belt.count() > 0) {
+        const inCombat = e.mode === 'feuern' || e.mode === 'abstand';
+        const idx = pickBoosterToUse(e.belt.slots(), {
+          hpFrac: e.combatant.hp / e.combatant.maxHp, inCombat, mode: e.mode,
+        });
+        if (idx >= 0) {
+          const def = e.belt.trigger(idx);
+          if (def) { applyEnemyBooster(e, def); e.beltCd = BELT_USE_CD; }
+        }
+      }
+
+      // Trip-Auslöser: genug Geld (~2 Items) & gerade Ruhe → zum nächsten Shop-Feld.
+      if (e.shopState === 'kaempfen' || e.shopState === 'streifen') {
+        const inCombat = target != null && targetDist <= shotRange;
+        if (shouldStartShopTrip({ credits: e.credits, mk: e.prog.unlockedMk(), inCombat })) {
           const t = shopField.nearest(ex, ez);
-          if (t) e.shopGoal = { x: t.x, z: t.z };
-          else e.shopCd = 5;
-        } else {
-          e.shopCd = 5; // nichts zu tun → bald erneut prüfen
+          if (t) { e.shopGoal = { x: t.x, z: t.z }; e.shopState = 'shop_anfahrt'; }
         }
       }
 
@@ -1094,7 +1150,7 @@ function boot(cls: TankClass): void {
             id: e.id, x: e.combatant.x, z: e.combatant.z,
             color: e.named ? '#ff3b30' : '#e8a23c', r: e.named ? 6 : 4,
             name: e.displayName, isNamed: e.named !== null,
-            sub: `Lvl ${e.level} · MK${enemyMk(e.level)} · ${MOTIV_LABEL[e.motiveId] ?? e.motiveId}`,
+            sub: `Lvl ${e.prog.level} · MK${enemyMk(e.prog.level)} · ${MOTIV_LABEL[e.motiveId] ?? e.motiveId}`,
             hpFrac: e.combatant.hp / e.combatant.maxHp,
           })),
       ];

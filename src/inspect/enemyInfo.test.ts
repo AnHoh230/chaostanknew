@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { buildEnemyInfo, type EnemyLike } from './enemyInfo';
-import { enemyLevelStats } from '../enemy/enemy';
 
 const base: EnemyLike = {
   id: 'e1',
@@ -8,6 +7,7 @@ const base: EnemyLike = {
   named: { archetyp: 'der Rasende' },
   motiveId: 'aasgeier',
   level: 6,
+  damage: 33, // aus der Ausrüstung
   speed: 5,
   combatant: { hp: 200, maxHp: 240, armor: 131, lootValue: 1.4 },
   equipment: [
@@ -27,7 +27,7 @@ describe('buildEnemyInfo', () => {
     expect(info.motiv).toBe('Aasgeier');
     expect(info.level).toBe(6);
     expect(info.mk).toBe(3); // enemyMk(6) = ceil(6/2)
-    expect(info.damage).toBe(enemyLevelStats(6).damage);
+    expect(info.damage).toBe(33); // aus der Ausrüstung (e.damage)
     expect(info.hp).toBe(200);
     expect(info.maxHp).toBe(240);
     expect(info.armor).toBe(131);
