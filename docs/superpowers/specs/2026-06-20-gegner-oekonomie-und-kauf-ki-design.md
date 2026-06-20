@@ -32,8 +32,14 @@ durch ein nachvollziehbares Kauf-/Verhaltensmodell.
   der MK. **MK1 = 138** (Turm), billigstes MK1 = 88 (Wanne).
 - **Spieler:** startet mit `geld = mostExpensiveItemPrice(1)` (= 138), leeres
   Loadout, kauft manuell im Schutzbereich. (Ersetzt „startet komplett nackt".)
-- **Gegner:** startet mit `credits = mostExpensiveItemPrice(seineMK)`, ohne Gear,
-  und **simuliert Anfangs-Shopping** (State Machine), bevor er kampffähig ist.
+- **Gegner:** startet mit `credits = mostExpensiveItemPrice(seineMK)` und kauft die
+  **Erstausrüstung sofort beim Erscheinen** (`planPurchases`, kein Shop-Feld nötig).
+
+**Erscheinen = 5 s Gnadenzeit (Spieler & Gegner, QoL-Update 2026-06-20):** Wer spawnt
+oder respawnt, ist **5 s unverwundbar** und kann **sofort shoppen, ohne auf einem Feld
+zu stehen** (Spieler: Werkstatt überall per „b"; Gegner: Sofortkauf beim Spawn).
+**Danach** gilt wieder die normale Regel — zum Shop-Feld fahren. Ersetzt das frühere
+„erst zum Shop fahren"-Anfangs-Shopping.
 
 ## Geld & XP verdienen
 
@@ -88,9 +94,9 @@ Zustände: `kaempfen` · `streifen` (scout) · `shop_anfahrt` · `shop_dwell`.
   dann kurz töten, Loot einsammeln, weiter zum Shop.
 - **`shop_dwell`:** steht **2,5 s** auf dem Feld (Schutzzone, simuliert den
   Einkauf), führt `planPurchases` aus, danach zurück zu `kaempfen`/`streifen`.
-- **Anfangs-Shopping:** frisch gespawnt → sofort `shop_anfahrt` mit Startgeld →
-  `shop_dwell` → kauft Erst-Ausrüstung → **erst danach kampffähig**. So gammelt
-  der Spieler nicht ungenutzt im Schutzbereich, während der Gegner schon scharf ist.
+- **Anfangs-Shopping (überarbeitet):** frisch gespawnt → **Sofort-Erstkauf** beim
+  Erscheinen (`planPurchases`, kein `shop_anfahrt`/`dwell`) + 5 s Spawn-Invuln. Die
+  `shop_anfahrt`/`shop_dwell`-Maschinerie greift nur für **spätere** Trips.
 
 ## Symmetrie Spieler ↔ Gegner
 
