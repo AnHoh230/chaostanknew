@@ -30,9 +30,9 @@ export interface Shop {
   updateMoney(): void; // nur die Geld-Anzeige (pro Frame ok)
 }
 
-const SLOT_ORDER: Slot[] = ['waffe', 'wanne', 'turm', 'raeder', 'ruestung'];
+const SLOT_ORDER: Slot[] = ['waffe', 'sekundaer', 'wanne', 'turm', 'raeder', 'ruestung'];
 const SLOT_LABELS: Record<Slot, string> = {
-  waffe: 'Waffe', wanne: 'Wanne', turm: 'Turm', raeder: 'Räder', ruestung: 'Rüstung',
+  waffe: 'Waffe', sekundaer: 'Sekundär', wanne: 'Wanne', turm: 'Turm', raeder: 'Räder', ruestung: 'Rüstung',
 };
 type SlotFilter = Slot | 'alle';
 

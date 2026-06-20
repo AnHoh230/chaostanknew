@@ -5,8 +5,24 @@ import { catalogItem } from '../shop/catalog';
 const base = { damage: 20, maxHp: 100, speed: 8, armor: 0 };
 
 describe('createLoadout (Slots + Tasche)', () => {
-  it('ohne Items = Basis-Stats', () => {
-    expect(createLoadout(base).stats()).toEqual(base);
+  it('ohne Items = Basis-Stats (dodge 0)', () => {
+    expect(createLoadout(base).stats()).toEqual({ ...base, dodge: 0 });
+  });
+
+  it('Auto-Turret im sekundaer-Slot anlegbar, trägt autoFire-Daten', () => {
+    const l = createLoadout(base);
+    const turret = catalogItem('autoturret_mk02');
+    l.equip(turret);
+    expect(l.get('sekundaer')).toBe(turret);
+    expect(turret.autoFire).toBeTruthy();
+    expect(turret.autoFire!.range).toBeGreaterThan(0);
+  });
+
+  it('dodge summiert sich über angelegte Teile', () => {
+    const l = createLoadout(base);
+    const evasive = { ...catalogItem('autoturret_mk02'), id: 'test_dodge', dodge: 0.2 };
+    l.equip(evasive);
+    expect(l.stats().dodge).toBeCloseTo(0.2, 6);
   });
 
   it('equip summiert Stats (Waffe→Schaden, Wanne+Turm→HP)', () => {

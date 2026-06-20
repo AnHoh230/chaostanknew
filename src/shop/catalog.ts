@@ -1,8 +1,18 @@
 import type { SocketName } from '../tank/sockets';
 import type { BaseItem } from './itemTypes';
 
-export type Slot = 'ruestung' | 'raeder' | 'waffe' | 'wanne' | 'turm';
+export type Slot = 'ruestung' | 'raeder' | 'waffe' | 'wanne' | 'turm' | 'sekundaer';
+/** Slots, deren Items aus den MK-Formeln generiert werden (ohne Sonderfälle). */
+export type FormulaSlot = Exclude<Slot, 'sekundaer'>;
 export type Rarity = 'normal' | 'selten';
+
+/** Auto-Feuer-Daten einer Sekundärwaffe (Auto-Turret). */
+export interface AutoFireSpec {
+  fireInterval: number;
+  damage: number;
+  range: number;
+  accuracy: number; // 0..1 — streut die Schussrichtung (manuelles Feuer ignoriert dies)
+}
 
 /** Ein Ausrüstungs-Item aus dem MK-Katalog. Genau ein Hauptwert ist > 0.
  *  Erbt id/name/cost/kind/buyer/category aus BaseItem (kind immer 'equip'). */
@@ -14,6 +24,8 @@ export interface ShopItem extends BaseItem {
   hp: number;
   armor: number;
   speed: number;
+  autoFire?: AutoFireSpec; // nur Sekundärwaffen
+  dodge?: number; // Ausweich-Bonus (Module)
 }
 
 /** Slot → sichtbarer Socket (Primitive bis M8). Rüstung hat noch kein Mesh. */
@@ -23,10 +35,11 @@ export const SLOT_SOCKET: Record<Slot, { socket: SocketName; variant: string } |
   turm: { socket: 'turret', variant: 't_big' },
   raeder: { socket: 'wheels', variant: 'w_tread' },
   ruestung: null,
+  sekundaer: null, // Auto-Turret — noch kein eigenes Mesh (kommt mit Assets)
 };
 
 interface SlotDef {
-  slot: Slot;
+  slot: FormulaSlot;
   label: string;
   stat: 'armor' | 'speed' | 'damage' | 'hp';
   f: (mk: number) => number; // Normalwert-Formel
@@ -47,7 +60,7 @@ const SLOTS: SlotDef[] = [
 ];
 
 /** Flavor-Namen aus der Item-Datei: je MK ein Paar [normal, selten] (Index 0 = MK1). */
-const NAMES: Record<Slot, [string, string][]> = {
+const NAMES: Record<FormulaSlot, [string, string][]> = {
   ruestung: [
     ['MK1 Feldblech', 'MK1 Geätztes Feldblech'],
     ['MK2 Stahlmantel', 'MK2 Verdichteter Stahlmantel'],
@@ -141,7 +154,30 @@ function buildCatalog(): ShopItem[] {
   return items;
 }
 
-export const CATALOG: readonly ShopItem[] = buildCatalog();
+/** Sekundärwaffen (Auto-Turrets): feuern autonom auf das nächste Ziel, mit
+ *  Treffsicherheit (accuracy). Credit-Sink für Spieler UND Gegner (buyer: both). */
+const AUTO_TURRETS: ShopItem[] = [
+  {
+    id: 'autoturret_mk02', kind: 'equip', buyer: 'both', category: 'equipment',
+    slot: 'sekundaer', rarity: 'normal', mk: 2, name: 'MK2 Koaxial-Geschütz', cost: 520,
+    damage: 0, hp: 0, armor: 0, speed: 0,
+    autoFire: { fireInterval: 1.4, damage: 9, range: 26, accuracy: 0.75 },
+  },
+  {
+    id: 'autoturret_mk05', kind: 'equip', buyer: 'both', category: 'equipment',
+    slot: 'sekundaer', rarity: 'normal', mk: 5, name: 'MK5 Wächter-Turret', cost: 1280,
+    damage: 0, hp: 0, armor: 0, speed: 0,
+    autoFire: { fireInterval: 1.1, damage: 16, range: 30, accuracy: 0.82 },
+  },
+  {
+    id: 'autoturret_mk08', kind: 'equip', buyer: 'both', category: 'equipment',
+    slot: 'sekundaer', rarity: 'normal', mk: 8, name: 'MK8 Sentinel-Geschütz', cost: 2600,
+    damage: 0, hp: 0, armor: 0, speed: 0,
+    autoFire: { fireInterval: 0.9, damage: 24, range: 34, accuracy: 0.9 },
+  },
+];
+
+export const CATALOG: readonly ShopItem[] = [...buildCatalog(), ...AUTO_TURRETS];
 
 export function catalogItem(id: string): ShopItem {
   const it = CATALOG.find((x) => x.id === id);

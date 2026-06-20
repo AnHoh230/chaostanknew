@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { CATALOG, catalogItem } from './catalog';
 
 describe('CATALOG', () => {
-  it('hat 100 Items (5 Slots × 10 MK × 2 Seltenheiten)', () => {
-    expect(CATALOG).toHaveLength(100);
+  it('hat 100 Formel-Items (5 Slots × 10 MK × 2 Seltenheiten) plus Sonder-Items', () => {
+    const formel = CATALOG.filter((it) => !it.autoFire);
+    expect(formel).toHaveLength(100);
+    expect(CATALOG.length).toBeGreaterThan(100); // + Auto-Turrets (Sekundärwaffen)
   });
 
   it('Stats & Preise treffen die Item-Datei (Stichproben)', () => {
@@ -26,8 +28,8 @@ describe('CATALOG', () => {
     expect(s.cost).toBe(Math.round(n.cost * 1.65)); // 178
   });
 
-  it('jedes Item hat genau einen Hauptwert > 0', () => {
-    for (const it of CATALOG) {
+  it('jedes Formel-Item hat genau einen Hauptwert > 0 (Auto-Turrets ausgenommen)', () => {
+    for (const it of CATALOG.filter((x) => !x.autoFire)) {
       const nonzero = [it.damage, it.hp, it.armor, it.speed].filter((v) => v > 0).length;
       expect(nonzero).toBe(1);
     }

@@ -12,6 +12,7 @@ export interface DerivedStats {
   maxHp: number;
   speed: number;
   armor: number;
+  dodge: number; // Summe der Ausweich-Boni angelegter Teile (0..1+)
 }
 
 export interface Loadout {
@@ -74,6 +75,7 @@ export function createLoadout(base: BaseStats): Loadout {
       maxHp: base.maxHp + (slots.wanne?.hp ?? 0) + (slots.turm?.hp ?? 0),
       speed: base.speed + (slots.raeder?.speed ?? 0),
       armor: base.armor + (slots.ruestung?.armor ?? 0),
+      dodge: Object.values(slots).reduce((n, it) => n + (it.dodge ?? 0), 0),
     }),
   };
 }
