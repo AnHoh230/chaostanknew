@@ -25,9 +25,9 @@ export interface Progression {
   unlockedMk(): number;
 }
 
-export function createProgression(): Progression {
+export function createProgression(startLevel = 1): Progression {
   const state = {
-    level: 1,
+    level: startLevel,
     xp: 0,
     addXp(n: number): LevelUpInfo {
       let gained = 0;

@@ -194,3 +194,18 @@ export function catalogItem(id: string): ShopItem {
 export function cloneItem(it: ShopItem): ShopItem {
   return { ...it };
 }
+
+/** Teuerstes Normal-Equip einer MK (über die 5 Formel-Slots). Startgeld-Basis. */
+export function mostExpensiveItemPrice(mk: number): number {
+  return Math.max(...SLOTS.map((s) => s.prices[mk - 1]!));
+}
+
+/** Billigstes Normal-Equip einer MK. */
+export function cheapestItemPrice(mk: number): number {
+  return Math.min(...SLOTS.map((s) => s.prices[mk - 1]!));
+}
+
+/** Alle Katalog-Items eines Slots in einer MK (normal + selten). */
+export function itemsForSlotMk(slot: Slot, mk: number): ShopItem[] {
+  return CATALOG.filter((it) => it.slot === slot && it.mk === mk);
+}

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { CATALOG, catalogItem } from './catalog';
+import {
+  CATALOG, catalogItem, mostExpensiveItemPrice, cheapestItemPrice, itemsForSlotMk,
+} from './catalog';
 
 describe('CATALOG', () => {
   it('hat 100 Formel-Items (5 Slots × 10 MK × 2 Seltenheiten) plus Sonder-Items', () => {
@@ -33,5 +35,17 @@ describe('CATALOG', () => {
       const nonzero = [it.damage, it.hp, it.armor, it.speed].filter((v) => v > 0).length;
       expect(nonzero).toBe(1);
     }
+  });
+});
+
+describe('Preis-Helfer', () => {
+  it('teuerstes/billigstes MK1-Normal-Item', () => {
+    expect(mostExpensiveItemPrice(1)).toBe(138); // Waffe
+    expect(cheapestItemPrice(1)).toBe(88); // Räder
+  });
+  it('itemsForSlotMk liefert normal+selten eines Slots/MK', () => {
+    const items = itemsForSlotMk('waffe', 1);
+    expect(items).toHaveLength(2);
+    expect(items.every((i) => i.slot === 'waffe' && i.mk === 1)).toBe(true);
   });
 });

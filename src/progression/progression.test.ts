@@ -46,4 +46,10 @@ describe('createProgression', () => {
     expect(p.level).toBe(20);
     expect(p.xpToNext()).toBe(0);
   });
+
+  it('createProgression(startLevel) startet auf dem Level', () => {
+    const p = createProgression(3);
+    expect(p.level).toBe(3);
+    expect(p.unlockedMk()).toBe(unlockedMkForLevel(3));
+  });
 });
