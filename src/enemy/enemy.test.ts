@@ -1,8 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { NullEngine, Scene } from '@babylonjs/core';
 import { createEnemyEntity, type EnemySpec } from './enemy';
-import { enemyMk } from './equipment';
-import { mostExpensiveItemPrice } from '../shop/catalog';
 
 function makeScene(): Scene {
   return new Scene(new NullEngine());
@@ -20,22 +18,21 @@ function specAtLevel(level: number): EnemySpec {
   };
 }
 
-describe('createEnemyEntity — Sofort-Erstkauf + Spawn-Gnadenzeit', () => {
-  it('kauft sofort beim Erscheinen (kein Shop-Feld), startet kampfbereit + unverwundbar', () => {
+describe('createEnemyEntity — volles Set beim Spawn + Gnadenzeit', () => {
+  it('spawnt mit vollem Basis-Set (abwechslungsreiche Drops), kampfbereit + unverwundbar', () => {
     const e = createEnemyEntity(makeScene(), specAtLevel(3), 1, () => 0.5);
-    // Startgeld = teuerstes MK2-Item (340) → kauft genau die Waffe, Rest 0.
-    expect(e.equipment.length).toBeGreaterThan(0);
-    expect(e.equipment[0]!.slot).toBe('waffe'); // schwächster/leerer Slot zuerst
-    expect(e.credits).toBe(mostExpensiveItemPrice(enemyMk(3)) - e.equipment[0]!.cost);
+    expect(e.equipment.length).toBe(5); // ein Teil je Slot → Drops über alle Slots
+    expect(new Set(e.equipment.map((i) => i.slot)).size).toBe(5);
+    expect(e.credits).toBe(0); // verdient Credits über Kills
     expect(e.shopState).toBe('kaempfen');
     expect(e.spawnInvulnCd).toBe(5);
     expect(e.combatant.invulnerable).toBe(true);
     expect(e.prog.level).toBe(3);
   });
 
-  it('Stats kommen aus der Ausrüstung — gleiche Basis-HP, da der Erstkauf eine Waffe (kein HP) ist', () => {
+  it('höhere MK = zäher (Stats aus dem vollen Set, nicht aus dem Level direkt)', () => {
     const lo = createEnemyEntity(makeScene(), specAtLevel(1), 1, () => 0.5);
     const hi = createEnemyEntity(makeScene(), specAtLevel(9), 1, () => 0.5);
-    expect(lo.combatant.maxHp).toBe(hi.combatant.maxHp); // Waffe addiert kein HP
+    expect(hi.combatant.maxHp).toBeGreaterThan(lo.combatant.maxHp);
   });
 });

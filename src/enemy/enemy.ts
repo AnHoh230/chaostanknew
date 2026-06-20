@@ -5,10 +5,9 @@ import { createEnemyBrain, type EnemyBrain } from '../ai/enemyBrain';
 import type { TraitProfile, AiAction } from '../ai/aiTypes';
 import type { Combatant } from '../combat/combat';
 import type { Named } from '../named/promotion';
-import { mostExpensiveItemPrice, type ShopItem } from '../shop/catalog';
-import { enemyMk } from './equipment';
+import type { ShopItem } from '../shop/catalog';
+import { rollEnemyEquipment } from './equipment';
 import { enemyCombatStats } from './enemyStats';
-import { planPurchases } from './enemyEconomy';
 import { createProgression, type Progression } from '../progression/progression';
 import { createBelt, type Belt } from '../player/belt';
 import { createBuffStack, type BuffStack } from '../combat/buffs';
@@ -83,10 +82,9 @@ export function createEnemyEntity(
 ): Enemy {
   const view = createTankView(scene, spec.comp);
   view.root.position.set(spec.spawn.x, 0, spec.spawn.z);
-  const mk = enemyMk(spec.level);
-  // Sofortiger Erstkauf beim Erscheinen (kein Shop-Feld nötig) — symmetrisch zum Spieler.
-  const buy = planPurchases({ credits: mostExpensiveItemPrice(mk), equipment: [], mk, bag: [], beltFree: 3 });
-  const equipment = buy.equipment;
+  // Volles Basis-Set beim Erscheinen (ein Teil je Slot, ~15 % selten) → abwechslungsreiche
+  // Drops. Aufrüsten passiert später über Shop-Fahrten (verdiente Credits).
+  const equipment = rollEnemyEquipment(spec.level, rng);
   const prog = createProgression(spec.level);
   const st = enemyCombatStats(equipment, spec.level);
   const combatant: Combatant = {
@@ -117,7 +115,7 @@ export function createEnemyEntity(
     displayName: spec.displayName,
     prevTargetVisible: false,
     prog,
-    credits: buy.credits, // Rest nach dem Sofort-Erstkauf
+    credits: 0, // verdient Credits über Kills → spätere Aufrüstung im Shop
     respawnTimer: 0,
     equipment,
     bag: [],

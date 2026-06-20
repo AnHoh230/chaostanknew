@@ -205,6 +205,11 @@ export function cheapestItemPrice(mk: number): number {
   return Math.min(...SLOTS.map((s) => s.prices[mk - 1]!));
 }
 
+/** Kosten eines vollen Basis-Sets (ein Normal-Teil je Formel-Slot) einer MK. Startbudget. */
+export function basicSetCost(mk: number): number {
+  return SLOTS.reduce((sum, s) => sum + s.prices[mk - 1]!, 0);
+}
+
 /** Alle Katalog-Items eines Slots in einer MK (normal + selten). */
 export function itemsForSlotMk(slot: Slot, mk: number): ShopItem[] {
   return CATALOG.filter((it) => it.slot === slot && it.mk === mk);
