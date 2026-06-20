@@ -15,7 +15,7 @@ import { createProjectileView } from './combat/projectileView';
 import { createCombatSystem, type Combatant } from './combat/combat';
 import { createEnemyBrain } from './ai/enemyBrain';
 import { MOTIV_LABEL } from './ai/motives';
-import type { AiWorldView } from './ai/aiTypes';
+import { engagementStep } from './ai/engagement';
 import { applyEnemyStats, type Enemy } from './enemy/enemy';
 import { rollEnemyEquipment, pickDrop, enemyMk } from './enemy/equipment';
 import { runEnemyShopVisit, enemyUpgradeCost } from './enemy/enemyShopping';
@@ -655,7 +655,7 @@ function boot(cls: TankClass): void {
     enemies: roster.map((e) => e.combatant),
     roster: () =>
       roster.map((e) => ({
-        id: e.id, motive: e.motiveId, action: e.action, level: e.level,
+        id: e.id, motive: e.motiveId, mode: e.mode, level: e.level,
         credits: e.credits, hp: e.combatant.hp, alive: e.combatant.alive,
         loot: e.combatant.lootValue, team: e.combatant.team,
         x: +e.combatant.x.toFixed(1), z: +e.combatant.z.toFixed(1),
@@ -920,51 +920,40 @@ function boot(cls: TankClass): void {
         cands.push({ id: c.id, team: c.team, x: c.x, z: c.z, lootValue: c.lootValue ?? 0, alive: c.alive });
       }
       const target = pickTarget(ex, ez, e.combatant.team, ENEMY_SIGHT, cands);
-      const tvis = target !== null;
-      const tx = target ? target.x : ex;
-      const tz = target ? target.z : ez;
-      const dTarget = Math.hypot(tx - ex, tz - ez) || 1;
-      const dHome = Math.hypot(e.home.x - ex, e.home.z - ez) || 0;
 
-      const world: AiWorldView = {
-        selfHpFrac: e.combatant.hp / e.combatant.maxHp,
-        targetVisible: tvis,
-        distance: dTarget,
-        homeDistance: dHome,
-        groupSize: 0,
-        lootValue: target ? target.lootValue : 0,
-      };
-      e.action = e.brain.update(world, simDt);
-
-      let mx = 0;
-      let mz = 0;
-      if (e.action === 'annähern' && tvis && dTarget > ENEMY_KEEP_DIST) {
-        mx = (tx - ex) / dTarget;
-        mz = (tz - ez) / dTarget;
-      } else if (e.action === 'fliehen' && tvis) {
-        mx = (ex - tx) / dTarget;
-        mz = (ez - tz) / dTarget;
-      } else if (e.action === 'Revier_halten' && dHome > 1) {
-        mx = (e.home.x - ex) / dHome;
-        mz = (e.home.z - ez) / dHome;
+      // Engagement-Zonen-KI (erste Fassung): jede Lage erzeugt Bewegung — kein totes
+      // Stehen. Kein Ziel in Sicht → scouten (in eine Richtung fahren, neue Ziele finden).
+      e.scoutCd -= simDt;
+      if (e.scoutCd <= 0) {
+        e.scoutCd = 3 + aiRng.next() * 3;
+        e.scoutDir = aiRng.next() * Math.PI * 2;
       }
-      if (mx !== 0 || mz !== 0) {
+      const out = engagementStep({
+        selfX: ex,
+        selfZ: ez,
+        target: target ? { x: target.x, z: target.z, dist: Math.hypot(target.x - ex, target.z - ez) } : null,
+        hpFrac: e.combatant.hp / e.combatant.maxHp,
+        fireRange: shotRange,
+        keepDist: ENEMY_KEEP_DIST,
+        fleeHp: 0.25,
+        scoutDir: e.scoutDir,
+      });
+      e.mode = out.mode;
+
+      if (out.moveX !== 0 || out.moveZ !== 0) {
         const step = ENEMY_SPEED * simDt;
-        er.position.x += mx * step;
-        er.position.z += mz * step;
-        er.rotation.y = Math.atan2(mx, mz); // Chassis in Laufrichtung drehen
+        er.position.x += out.moveX * step;
+        er.position.z += out.moveZ * step;
+        er.rotation.y = Math.atan2(out.moveX, out.moveZ); // Chassis in Laufrichtung
       }
-
-      // Turm auf das Ziel richten (Rohr = Schussrichtung; Chassis-Drehung herausgerechnet).
-      if (tvis) {
-        const yaw = Math.atan2(tx - er.position.x, tz - er.position.z);
+      // Turm auf den Blickpunkt richten (Ziel bzw. Scout-Richtung), Chassis herausgerechnet.
+      {
+        const yaw = Math.atan2(out.faceX - er.position.x, out.faceZ - er.position.z);
         e.view.turretNode.rotation.y = yaw - er.rotation.y;
       }
-
-      // Feuern nur in Schussweite (sonst fällt der Schuss eh vorher zu Boden).
       e.fireCd -= simDt;
-      if (tvis && e.fireCd <= 0 && dTarget <= shotRange) {
-        enemyFire(er.position.x, er.position.z, tx, tz, e.combatant.team, e.damage);
+      if (out.fire && e.fireCd <= 0) {
+        enemyFire(er.position.x, er.position.z, out.faceX, out.faceZ, e.combatant.team, e.damage);
         e.fireCd = ENEMY_FIRE_COOLDOWN;
       }
 
@@ -1102,7 +1091,7 @@ function boot(cls: TankClass): void {
       enemyHp: hudEnemy ? hudEnemy.combatant.hp : 0,
       enemyAlive: hudEnemy !== null,
       enemyNamed: hudEnemy?.named?.name ?? null,
-      enemyAction: hudEnemy?.action ?? 'none',
+      enemyMode: hudEnemy?.mode ?? 'none',
       enemyX: hudEnemy ? +hudEnemy.combatant.x.toFixed(2) : 0,
       enemyZ: hudEnemy ? +hudEnemy.combatant.z.toFixed(2) : 0,
       enemyScreen: (() => {
