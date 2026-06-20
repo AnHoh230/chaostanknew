@@ -1,0 +1,49 @@
+# Technische Schulden & vertagte Design-Themen
+
+Sammelstelle für Dinge, die bewusst NICHT „mal eben" gefixt werden — sie brauchen
+eine eigene Brainstorm-/Design-Session, bevor implementiert wird.
+
+---
+
+## TD-1 — „Zu offensichtliche KI" (braucht eigene Brainstorm-Session)
+
+**Symptom (Nutzer, 2026-06-20):** Die Gegner wirken mechanisch/durchschaubar. Sie
+- weichen Schüssen **nicht** aus,
+- **fliehen** kaum,
+- **entscheiden** sich nicht sichtbar (kein lesbares Zögern/Umschwenken).
+
+Folge: Der Spieler „fährt nur rum und sucht Items" — der Kampf trägt sich nicht aus
+sich selbst, weil der Gegner keine spürbaren eigenen Absichten zeigt.
+
+**Warum kein Schnellfix:** Das ist kein einzelner Bug, sondern das Herz der
+„lebenden Welt / Gegner mit eigenem Leben"-Vision. Es berührt das Utility-AI-Modell
+(Motive, Passung, Schwellen), die Bewegungs-Ausführung (Ausweich-Manöver,
+Flucht-Pfade), und die **Lesbarkeit** (der Spieler muss die Entscheidung *sehen*).
+Vorschnelles Schrauben an Einzelwerten würde es nur anders-kaputt machen.
+
+**Nächster Schritt:** Eigene Brainstorm-Session — Fragen u. a.:
+- Was soll ein Gegner *sichtbar* tun, das ihn „lebendig" macht (Ausweich-Roll bei
+  Beschuss? Deckung suchen? Rückzug bei niedrigem HP mit Sichtbarkeit?)?
+- Wie wird die Entscheidung **lesbar** (Tell/Animation/Spruch), nicht nur ein
+  Zahlen-Flip?
+- Wie verzahnt sich das mit Dodge (SH3) und den Motiven, ohne den 0,5-s-Frame-Spam?
+- Mess-Overlay zuerst (Observability): Entscheidung & Grund pro Gegner sichtbar
+  machen, bevor getunt wird.
+
+**Status:** offen, vertagt. Nicht ohne Session anfassen.
+
+---
+
+## TD-2 — Balance der Gegner-HP (gear-basiert) noch ungetestet
+
+Seit „Gegner-Stats aus Ausrüstung" sind Gegner deutlich zäher (MK1 ~322 statt ~100
+HP). Gewollt, aber das Früh-Spiel-Tempo (bevor der Spieler eine Waffe hat) ist
+ungetestet. Über den Run-Log feintunen (`BASE_HP` / Item-Beitrag in
+`enemy/enemyStats.ts`). Kein Design-Problem, nur Tuning per Playtest.
+
+---
+
+## TD-3 — `enemyLevelStats` ist toter Code
+
+Seit der Umstellung auf `enemyCombatStats` wird `enemyLevelStats` (enemy.ts) nirgends
+mehr benutzt, ist aber noch exportiert. Bei Gelegenheit entfernen.

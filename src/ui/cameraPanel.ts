@@ -3,12 +3,20 @@ interface CamApi {
   get(): { height: number; back: number; fov: number };
 }
 
+interface TuneApi {
+  getShotRange(): number;
+  setShotRange(v: number): void;
+  getMaxEnemies(): number;
+  setMaxEnemies(v: number): void;
+}
+
 /**
  * Kleines GUI-Panel mit drei Schiebereglern für Höhe, Distanz und FOV der Kamera
  * (Live, kein Terminal nötig). Taste "K" blendet es ein/aus.
  */
 export function createCameraPanel(): void {
   const cam = (): CamApi | undefined => (window as unknown as { __cam?: CamApi }).__cam;
+  const tune = (): TuneApi | undefined => (window as unknown as { __tune?: TuneApi }).__tune;
 
   const panel = document.createElement('div');
   panel.id = 'cam-panel';
@@ -18,7 +26,7 @@ export function createCameraPanel(): void {
     'font:600 12px system-ui,sans-serif;color:#cdd6dd;';
 
   const title = document.createElement('div');
-  title.textContent = 'Kamera — [K] schließen';
+  title.textContent = 'Einstellungen — [K] schließen';
   title.style.cssText = 'color:#f0e6cc;font-weight:700;margin-bottom:8px;';
   panel.appendChild(title);
 
@@ -74,6 +82,16 @@ export function createCameraPanel(): void {
     fov = v;
     apply();
   });
+
+  // Gameplay-Regler (Schussweite, Max-Gegner) — falls __tune vorhanden.
+  const t = tune();
+  if (t) {
+    const sep = document.createElement('div');
+    sep.style.cssText = 'border-top:1px solid #2a343b;margin:8px 0 2px;';
+    panel.appendChild(sep);
+    slider('Schussweite', 12, 120, 1, () => t.getShotRange(), (v) => t.setShotRange(v));
+    slider('Max Gegner', 1, 12, 1, () => t.getMaxEnemies(), (v) => t.setMaxEnemies(v));
+  }
 
   const hintRow = document.createElement('div');
   hintRow.textContent = '[K] öffnet/schließt dieses Panel';

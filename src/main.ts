@@ -57,7 +57,6 @@ import type { TankComposition } from './tank/sockets';
 const BIOME_ID = 'steppe';
 const PROJECTILE_CAPACITY = 64;
 const PROJECTILE_SPEED = 30;
-const PROJECTILE_LIFE = 3; // Sekunden
 const SEED = 1337;
 const TANK_RADIUS = 1.5; // Treffer-Radius eines Panzers (XZ)
 const PROJECTILE_RADIUS = 0.3;
@@ -182,14 +181,18 @@ function boot(cls: TankClass): void {
   const pool = createProjectilePool(PROJECTILE_CAPACITY);
   const projectileView = createProjectileView(scene, pool, PROJECTILE_CAPACITY);
 
+  // Live einstellbar (Regler im Panel): Schussweite + max. gleichzeitige Gegner.
+  let shotRange = 40; // Weltеinheiten, die ein Schuss fliegt (nicht über die ganze Map)
+  let maxEnemies = 4; // gleichzeitig lebende Gegner
+
   // Gegner werden NICHT mehr fest gesetzt, sondern dauerhaft nachgespawnt (P1).
   const aiRng = createRng(SEED + 7);
   const roster: Enemy[] = []; // lebende + frisch promotete Gegner (dynamisch)
   const spawner = createSpawner(scene, TANK_RADIUS, () => aiRng.next(), {
-    maxAlive: 6,
-    interval: 2.5,
-    radiusMin: 40,
-    radiusMax: 55,
+    maxAlive: maxEnemies,
+    interval: 3.5, // langsamer nachspawnen
+    radiusMin: 55, // größere, weiter gestreute Spawn-Area (kein Dauerfeuer auf der Stelle)
+    radiusMax: 130,
     maxLevel: 3,
   });
 
@@ -364,7 +367,7 @@ function boot(cls: TankClass): void {
       dx,
       dz,
       speed: PROJECTILE_SPEED,
-      life: PROJECTILE_LIFE,
+      life: shotRange / PROJECTILE_SPEED, // begrenzte Schussweite
       team: 'player',
       damage: shotDamage,
     });
@@ -384,7 +387,7 @@ function boot(cls: TankClass): void {
         dirX: dx,
         dirZ: dz,
         speed: PROJECTILE_SPEED,
-        range: PROJECTILE_SPEED * PROJECTILE_LIFE,
+        range: shotRange,
       });
       log.debug('fired', { tankId: tank.id, projectile: p.id, dx, dz });
     } else {
@@ -399,7 +402,7 @@ function boot(cls: TankClass): void {
     const l = Math.hypot(dx, dz) || 1;
     const p = pool.acquire({
       x: ox, y: 0.5, z: oz, dx: dx / l, dz: dz / l,
-      speed: PROJECTILE_SPEED, life: PROJECTILE_LIFE, team, damage,
+      speed: PROJECTILE_SPEED, life: shotRange / PROJECTILE_SPEED, team, damage,
     });
     if (p) bus.emit('projectile.spawned', { id: p.id });
   }
@@ -419,7 +422,19 @@ function boot(cls: TankClass): void {
   const minimap = createMinimap();
   const enemyBars = createEnemyBars(scene, camera, engine); // HP-Balken über den Gegnern
   const lootLabels = createLootLabels(scene, camera, engine); // Item-Namen über den Loot-Würfeln
-  createCameraPanel(); // Kamera-Regler (Taste K)
+  // Live-Tuning-Regler (Schussweite, Max-Gegner) — vom Panel gelesen.
+  (window as unknown as { __tune: unknown }).__tune = {
+    getShotRange: () => shotRange,
+    setShotRange: (v: number) => {
+      shotRange = Math.max(8, v);
+    },
+    getMaxEnemies: () => maxEnemies,
+    setMaxEnemies: (v: number) => {
+      maxEnemies = Math.max(0, Math.round(v));
+      spawner.setMaxAlive(maxEnemies);
+    },
+  };
+  createCameraPanel(); // Einstellungs-Regler (Taste K)
 
   // Inspizier-System (P0): M = Echtzeit-Übersichtskarte, I = modaler Tiefblick (Pause).
   const overviewMap = createOverviewMap();
@@ -818,7 +833,8 @@ function boot(cls: TankClass): void {
           e.respawnTimer -= simDt;
           if (e.respawnTimer <= 0) {
             const ang = aiRng.next() * Math.PI * 2;
-            e.view.root.position.set(px + Math.cos(ang) * 46, 0, pz + Math.sin(ang) * 46);
+            const rr = 60 + aiRng.next() * 70; // zufällige, weit gestreute Rückkehr-Position
+            e.view.root.position.set(px + Math.cos(ang) * rr, 0, pz + Math.sin(ang) * rr);
             e.equipment = rollEnemyEquipment(e.level, () => aiRng.next()); // frische Ausrüstung passend zum aktuellen Level
             applyEnemyStats(e); // Stats aus der frischen Ausrüstung (HP voll)
             e.combatant.alive = true;
@@ -938,9 +954,9 @@ function boot(cls: TankClass): void {
         e.view.turretNode.rotation.y = yaw - er.rotation.y;
       }
 
-      // Auf Sicht feuern — eigene Fraktion + Level-Schaden (trifft Spieler UND Gegner).
+      // Feuern nur in Schussweite (sonst fällt der Schuss eh vorher zu Boden).
       e.fireCd -= simDt;
-      if (tvis && e.fireCd <= 0) {
+      if (tvis && e.fireCd <= 0 && dTarget <= shotRange) {
         enemyFire(er.position.x, er.position.z, tx, tz, e.combatant.team, e.damage);
         e.fireCd = ENEMY_FIRE_COOLDOWN;
       }
@@ -959,11 +975,7 @@ function boot(cls: TankClass): void {
         }
       }
 
-      // Wiedererkennung: Spieler erneut in Sicht NACH Reveal → anderer Spruch, kein Reveal.
-      if (e.named && tvis && target?.id === 'player' && !e.prevTargetVisible && !reveal.active()) {
-        reveal.triggerRecognition(e.named, er, akteBuch.get(e.id)!);
-      }
-      e.prevTargetVisible = tvis;
+      // (Reveal nur EINMAL bei der Promotion — kein wiederholter Wiedererkennungs-Spruch.)
 
       e.combatant.x = er.position.x;
       e.combatant.z = er.position.z;

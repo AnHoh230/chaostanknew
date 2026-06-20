@@ -25,6 +25,8 @@ export interface SpawnerOptions {
 export interface Spawner {
   /** Pro Frame; gibt einen neuen Gegner zurück, wenn einer fällig ist (sonst null). */
   update(simDt: number, playerX: number, playerZ: number, aliveCount: number): Enemy | null;
+  /** Maximale gleichzeitige Gegner zur Laufzeit ändern (Regler im Panel). */
+  setMaxAlive(n: number): void;
 }
 
 export function createSpawner(
@@ -36,10 +38,11 @@ export function createSpawner(
   let cd = 1.0; // erste Welle kommt schnell
   let seq = 0;
   let nameSeq = 0; // fortlaufende "Panzer N"-Nummer
+  let maxAlive = opts.maxAlive; // zur Laufzeit über setMaxAlive änderbar
 
   function update(simDt: number, px: number, pz: number, aliveCount: number): Enemy | null {
     cd -= simDt;
-    if (aliveCount >= opts.maxAlive || cd > 0) return null;
+    if (aliveCount >= maxAlive || cd > 0) return null;
     cd = opts.interval;
 
     // Position: Ring um den Spieler unter zufälligem Winkel (kommt von außerhalb).
@@ -62,5 +65,10 @@ export function createSpawner(
     return createEnemyEntity(scene, spec, tankRadius, rng);
   }
 
-  return { update };
+  return {
+    update,
+    setMaxAlive: (n) => {
+      maxAlive = Math.max(0, Math.round(n));
+    },
+  };
 }
