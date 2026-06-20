@@ -5,7 +5,9 @@ import type { BuffSpec } from '../combat/buffs';
 export type BoosterEffect =
   | { kind: 'buff'; buff: BuffSpec; onlyLowHp?: boolean } // zeitlich begrenzter Selbst-Buff
   | { kind: 'tempHp'; amount: number } // sofortige Zusatz-HP
-  | { kind: 'nextShots'; shots: number; damageMul: number }; // nächste N Schüsse stärker
+  | { kind: 'nextShots'; shots: number; damageMul: number } // nächste N Schüsse stärker
+  | { kind: 'paint'; incomingMul: number; duration: number; range: number } // Debuff: markiertes Ziel verwundbar
+  | { kind: 'smoke'; accuracyPenalty: number; duration: number; radius: number }; // Debuff: nahe Geschütze treffen schlechter
 
 export interface BoosterDef {
   id: string;
@@ -60,6 +62,19 @@ export const BOOSTERS: BoosterDef[] = [
     desc: 'Nur unter 20 % HP: 8 s viel mehr Rüstung — Drama für knappe Kämpfe.',
     kind: 'consumable', consumableType: 'booster', category: 'instant', buyer: 'both', cost: 150,
     effect: { kind: 'buff', buff: { id: 'letzte_schicht', duration: 8, armorAdd: 120 }, onlyLowHp: true },
+  },
+  // — Debuff-Booster (offensiv, wirken auf GEGNER). Vorerst nur der Spieler (buyer:'player'). —
+  {
+    id: 'zielmarkierung', name: 'Zielmarkierungs-Laser',
+    desc: 'Markiert den anvisierten Gegner: er nimmt 8 s lang +50 % Schaden.',
+    kind: 'consumable', consumableType: 'booster', category: 'instant', buyer: 'player', cost: 130,
+    effect: { kind: 'paint', incomingMul: 1.5, duration: 8, range: 45 },
+  },
+  {
+    id: 'rauchstoss', name: 'Rauchstoß',
+    desc: 'Vernebelt die Umgebung: nahe Gegner-Geschütze treffen 6 s deutlich schlechter.',
+    kind: 'consumable', consumableType: 'booster', category: 'instant', buyer: 'player', cost: 110,
+    effect: { kind: 'smoke', accuracyPenalty: 0.5, duration: 6, radius: 28 },
   },
 ];
 

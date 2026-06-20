@@ -20,6 +20,8 @@ export interface Combatant {
   invulnerable?: boolean;
   /** Ausweich-Chance (0..1): Treffer wird mit dieser Wahrscheinlichkeit negiert. */
   dodge?: number;
+  /** Eingehender-Schaden-Multiplikator; >1 = verwundbar (Zielmarkierung). Fehlt = 1. */
+  incomingMul?: number;
 }
 
 const ARMOR_K = 300; // Rüstungs-Skala: Reduktion = armor/(armor+K)
@@ -72,7 +74,8 @@ export function createCombatSystem(
             return;
           }
           const raw = p.damage > 0 ? p.damage : opts.damage;
-          const dmg = effectiveDamage(raw, t.armor ?? 0);
+          let dmg = effectiveDamage(raw, t.armor ?? 0);
+          if (t.incomingMul && t.incomingMul !== 1) dmg = Math.max(1, Math.round(dmg * t.incomingMul));
           t.hp -= dmg;
           const lethal = t.hp <= 0;
           if (lethal) {

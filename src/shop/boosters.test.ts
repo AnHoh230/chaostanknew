@@ -43,4 +43,16 @@ describe('BOOSTERS', () => {
   it('boosterDef wirft bei unbekannter id', () => {
     expect(() => boosterDef('gibtsnicht')).toThrow(/Unbekannter Booster/);
   });
+
+  it('Debuff-Booster: Zielmarkierung (paint) + Rauchstoß (smoke), nur Spieler', () => {
+    const paint = boosterDef('zielmarkierung');
+    expect(paint.buyer).toBe('player');
+    expect(paint.effect.kind).toBe('paint');
+    if (paint.effect.kind === 'paint') expect(paint.effect.incomingMul).toBeGreaterThan(1);
+
+    const smoke = boosterDef('rauchstoss');
+    expect(smoke.buyer).toBe('player');
+    expect(smoke.effect.kind).toBe('smoke');
+    if (smoke.effect.kind === 'smoke') expect(smoke.effect.accuracyPenalty).toBeGreaterThan(0);
+  });
 });

@@ -49,7 +49,15 @@ describe('createBuffStack', () => {
     const a = createBuffStack().aggregate();
     expect(a).toEqual({
       damageMul: 1, speedMul: 1, fireRateMul: 1, turretSlewMul: 1,
-      armorAdd: 0, accuracyAdd: 0, dodgeAdd: 0,
+      armorAdd: 0, accuracyAdd: 0, dodgeAdd: 0, incomingMul: 1,
     });
+  });
+
+  it('incomingMul (Verwundbarkeits-Debuff) multipliziert sich', () => {
+    const s = createBuffStack();
+    s.add({ id: 'markiert', duration: 8, incomingMul: 1.5 });
+    expect(s.aggregate().incomingMul).toBeCloseTo(1.5, 6);
+    s.tick(8.1);
+    expect(s.aggregate().incomingMul).toBe(1);
   });
 });

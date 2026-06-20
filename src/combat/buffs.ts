@@ -7,6 +7,7 @@ export interface BuffMods {
   armorAdd: number;
   accuracyAdd: number;
   dodgeAdd: number;
+  incomingMul: number; // eingehender Schaden ×; >1 = verwundbar (Debuff durch Zielmarkierung)
 }
 
 /** Ein zeitlich begrenzter Buff. Gleiche id refresht (kein Doppelstapel). */
@@ -22,6 +23,7 @@ export interface BuffSpec {
   armorAdd?: number;
   accuracyAdd?: number;
   dodgeAdd?: number;
+  incomingMul?: number;
 }
 
 export interface ActiveBuff {
@@ -46,7 +48,7 @@ interface Entry extends BuffSpec {
 function neutral(): BuffMods {
   return {
     damageMul: 1, speedMul: 1, fireRateMul: 1, turretSlewMul: 1,
-    armorAdd: 0, accuracyAdd: 0, dodgeAdd: 0,
+    armorAdd: 0, accuracyAdd: 0, dodgeAdd: 0, incomingMul: 1,
   };
 }
 
@@ -79,6 +81,7 @@ export function createBuffStack(): BuffStack {
         if (e.armorAdd != null) m.armorAdd += e.armorAdd;
         if (e.accuracyAdd != null) m.accuracyAdd += e.accuracyAdd;
         if (e.dodgeAdd != null) m.dodgeAdd += e.dodgeAdd;
+        if (e.incomingMul != null) m.incomingMul *= e.incomingMul;
       }
       return m;
     },

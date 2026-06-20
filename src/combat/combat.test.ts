@@ -111,6 +111,16 @@ describe('createCombatSystem', () => {
     expect(enemy.hp).toBe(80);
   });
 
+  it('incomingMul (Zielmarkierung) erhöht den eingehenden Schaden', () => {
+    const pool = createProjectilePool(8);
+    const enemy = enemyAt(0, 0, 100);
+    enemy.incomingMul = 1.5; // markiert → +50 %
+    const combat = createCombatSystem(pool, () => [enemy], { damage: 20, projectileRadius: 0.3 });
+    pool.acquire({ x: 0, y: 0.5, z: 0, dx: 1, dz: 0, speed: 30, life: 3, damage: 20 });
+    combat.update();
+    expect(enemy.hp).toBe(70); // 20 × 1.5 = 30
+  });
+
   it('Gegner-Projektil (team enemy) trifft den Spieler', () => {
     const pool = createProjectilePool(8);
     const player: Combatant = {
