@@ -184,3 +184,13 @@ export function catalogItem(id: string): ShopItem {
   if (!it) throw new Error('Unbekanntes Item: ' + id);
   return it;
 }
+
+/**
+ * Eigene Instanz eines Items für den Besitz (Kauf/Loot). KATALOG-Items sind
+ * geteilte Singletons — würde man sie direkt in Slot UND Tasche legen, zeigten
+ * beide auf dasselbe Objekt, und ein Verkauf der einen Kopie löschte die andere.
+ * Darum: beim Erwerb klonen, damit jedes besessene Teil ein eigenes Objekt ist.
+ */
+export function cloneItem(it: ShopItem): ShopItem {
+  return { ...it };
+}

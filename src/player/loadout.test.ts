@@ -66,6 +66,17 @@ describe('createLoadout (Slots + Tasche)', () => {
     expect(l.stats().speed).toBe(8);
   });
 
+  it('zwei Instanzen gleicher id sind unabhängig — Verkauf der Tasche-Kopie lässt die ausgerüstete heil', () => {
+    const l = createLoadout(base);
+    const equipped = { ...catalogItem('waffe_mk02_normal') }; // eigene Instanz
+    const looted = { ...catalogItem('waffe_mk02_normal') }; // zweite Instanz, gleiche id
+    l.equip(equipped);
+    l.addToBag(looted);
+    l.remove(looted); // Tasche-Kopie verkaufen
+    expect(l.get('waffe')).toBe(equipped); // ausgerüstete bleibt erhalten
+    expect(l.stats().damage).toBe(base.damage + equipped.damage);
+  });
+
   it('remove entfernt aus Tasche ODER Slot (Verkauf)', () => {
     const l = createLoadout(base);
     const eq = catalogItem('ruestung_mk02_normal');

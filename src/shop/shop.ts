@@ -103,6 +103,7 @@ export function createShop(h: ShopHooks): Shop {
 
   let open = false;
   let slotFilter: SlotFilter = 'alle';
+  let bagFilter: SlotFilter = 'alle';
   let category: Category = 'equipment';
 
   function updateMoney(): void {
@@ -159,11 +160,25 @@ export function createShop(h: ShopHooks): Shop {
     }
 
     // ---------- INVENTAR (Tasche) ----------
-    const bag = h.getBag();
-    bagCol.appendChild(colTitle(`Inventar (${bag.length})`));
+    const bagAll = h.getBag();
+    bagCol.appendChild(colTitle(`Inventar (${bagAll.length})`));
+    // Slot-Filter (wie in der Kaufen-Spalte)
+    const bagBar = document.createElement('div');
+    bagBar.style.cssText = 'display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;';
+    for (const f of ['alle', ...SLOT_ORDER] as SlotFilter[]) {
+      const active = bagFilter === f;
+      const bb = btn(f === 'alle' ? 'Alle' : SLOT_LABELS[f], active ? '#1a1d22' : '#cdd6dd', true, () => {
+        bagFilter = f;
+        refresh();
+      });
+      if (active) (bb as HTMLElement).style.background = '#d8b04a';
+      bagBar.appendChild(bb);
+    }
+    bagCol.appendChild(bagBar);
+    const bag = bagFilter === 'alle' ? bagAll : bagAll.filter((it) => it.slot === bagFilter);
     if (!bag.length) {
       const e = document.createElement('div');
-      e.textContent = 'Tasche leer. Beute landet hier.';
+      e.textContent = bagAll.length ? 'Nichts in diesem Filter.' : 'Tasche leer. Beute landet hier.';
       e.style.cssText = 'color:#778;padding:8px';
       bagCol.appendChild(e);
     }

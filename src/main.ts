@@ -36,11 +36,12 @@ import { createBuffStack } from './combat/buffs';
 import { createBelt } from './player/belt';
 import { createBuffHud } from './ui/buffHud';
 import { BOOSTERS, type BoosterDef } from './shop/boosters';
+import { createActionLog } from './debug/actionLog';
 import { createCameraPanel } from './ui/cameraPanel';
 import { TANK_CLASSES, type TankClass } from './game/classes';
 import { createPickupField } from './loot/pickups';
 import { createShopField, TILE_RADIUS } from './world/shopTiles';
-import { CATALOG, SLOT_SOCKET, catalogItem, type ShopItem, type Slot } from './shop/catalog';
+import { CATALOG, SLOT_SOCKET, catalogItem, cloneItem, type ShopItem, type Slot } from './shop/catalog';
 import { createShop } from './shop/shop';
 import { sellValue } from './shop/buyLogic';
 
@@ -208,6 +209,10 @@ function boot(cls: TankClass): void {
   let playerSpeed = cls.speed; // aus loadout.stats() abgeleitet (Räder) × Buffs
   const progression = createProgression(); // Level/XP/MK (P2)
 
+  // Run-Action-Log: pro Run nach logs/run-<NNN>.log (Schüsse, Bewegung, Shop …).
+  const alog = createActionLog();
+  alog.log('class', { id: cls.id });
+
   // SH2: Aktiv-Buffs + Sofort-Booster (Gürtel/Hotkeys 1-3) + Turm-Slew.
   const playerBuffs = createBuffStack();
   const belt = createBelt<BoosterDef>(3);
@@ -233,6 +238,7 @@ function boot(cls: TankClass): void {
     onDeath: (t, killerTeam) => {
       if (t.id === 'player') {
         log.warn('player died', {});
+        alog.log('player.death', {});
         bus.emit('tank.died', { tankId: 'player' });
         return;
       }
@@ -249,6 +255,7 @@ function boot(cls: TankClass): void {
           akteBuch.promote(e.id, named);
           e.named = named;
           e.displayName = named.name; // "Panzer N" → "Garfild der Aasgeier"
+          alog.log('promotion', { id: e.id, name: named.name, motiv: e.motiveId });
           e.traits = { ...e.traits, ...named.traitOverlay };
           e.brain = createEnemyBrain(e.traits, () => aiRng.next());
           e.combatant.alive = true;
@@ -308,6 +315,7 @@ function boot(cls: TankClass): void {
   let simTime = 0; // Sekunden seit Boot (Sim-Uhr), in der Loop akkumuliert
   let frame = 0;
   let shotSeq = 0;
+  let moveLogCd = 0; // Bewegung nur alle 0,5 s loggen (kein Frame-Spam)
 
   // Feuern: Richtung im KLICK-Augenblick frisch aus dem aktuellen Cursor ableiten —
   // NICHT die (um einen Frame veraltete) Turm-Ausrichtung lesen. Sonst zielt der
@@ -363,6 +371,7 @@ function boot(cls: TankClass): void {
     if (p) {
       bus.emit('tank.fired', { tankId: tank.id });
       bus.emit('projectile.spawned', { id: p.id });
+      alog.log('shot', { x: +origin.x.toFixed(1), z: +origin.z.toFixed(1), dmg: shotDamage });
       // Schuss mit Zeitstempel + eingefrorenem Cursor protokollieren.
       recorder.recordShot({
         shotId: ++shotSeq,
@@ -486,6 +495,7 @@ function boot(cls: TankClass): void {
       overpressureShots = eff.shots;
       overpressureMul = eff.damageMul;
     }
+    alog.log('booster', { id: def.id });
     showToast('Gezündet: ' + def.name);
   }
   function triggerBelt(i: number): void {
@@ -545,12 +555,14 @@ function boot(cls: TankClass): void {
     const prevMax = loadout.stats().maxHp;
     loadout.equip(item);
     syncTank(prevMax);
+    alog.log('equip', { id: item.id, slot: item.slot });
     showToast('Angelegt: ' + item.name);
   }
   function unequipSlot(slot: Slot): void {
     const prevMax = loadout.stats().maxHp;
     loadout.unequip(slot);
     syncTank(prevMax);
+    alog.log('unequip', { slot });
     showToast('Abgelegt → Inventar');
   }
   function sellAny(item: ShopItem): void {
@@ -558,11 +570,13 @@ function boot(cls: TankClass): void {
     loadout.remove(item);
     geld += sellValue(item);
     syncTank(prevMax);
+    alog.log('shop.sell', { id: item.id, slot: item.slot, geld });
     showToast(`Verkauft: ${item.name} (+💰 ${sellValue(item)})`);
   }
   // Loot landet im INVENTAR (Tasche), nicht automatisch im Slot.
   function collectLoot(item: ShopItem): void {
-    loadout.addToBag(item);
+    loadout.addToBag(cloneItem(item)); // eigene Instanz — keine geteilten Referenzen
+    alog.log('loot', { id: item.id });
     showToast('Eingesammelt: ' + item.name + ' → Inventar');
   }
 
@@ -576,7 +590,8 @@ function boot(cls: TankClass): void {
     onBuy: (item) => {
       if (item.rarity !== 'normal' || item.mk > progression.unlockedMk() || geld < item.cost) return;
       geld -= item.cost;
-      equip(item); // gekauftes Item in den Slot, altes → Tasche
+      equip(cloneItem(item)); // eigene Instanz in den Slot, altes → Tasche
+      alog.log('shop.buy', { id: item.id, cost: item.cost, geld });
       showToast('Gekauft & angelegt: ' + item.name);
     },
     onEquip: (item) => equip(item),
@@ -594,10 +609,12 @@ function boot(cls: TankClass): void {
       geld -= b.cost;
       belt.add(b);
       updateBeltHud();
+      alog.log('shop.buyBooster', { id: b.id, cost: b.cost, geld });
       showToast('Gekauft → Gürtel: ' + b.name);
     },
     // S2: Werkstatt NUR auf einem Shop-Feld öffenbar; die Welt pausiert NICHT.
     canOpen: () => shopField.isOnTile(playerCombatant.x, playerCombatant.z),
+    onToggle: (o) => alog.log(o ? 'shop.open' : 'shop.close', { geld }),
   });
 
   // Mess-Overlay (Phase 1 Debugging): macht Cursor-Bodenpunkt, Ziel und Schussrichtung sichtbar.
@@ -635,6 +652,8 @@ function boot(cls: TankClass): void {
     shopOpen: () => shop.isOpen(),
     nearestTile: () => shopField.nearest(playerCombatant.x, playerCombatant.z),
     inspect: () => ({ open: inspecting, simSpeed: clock.simSpeed, hovered: hoveredId }),
+    logTail: (n?: number) => alog.tail(n),
+    runId: () => alog.runId(),
     buffs: () => playerBuffs.active(),
     buffMods: () => playerBuffs.aggregate(),
     belt: () => belt.slots().map((b) => b?.id ?? null),
@@ -742,6 +761,13 @@ function boot(cls: TankClass): void {
 
     const px = tank.view.root.position.x;
     const pz = tank.view.root.position.z;
+
+    // Bewegung gesampelt loggen (simDt=0 bei Pause → kein Spam).
+    moveLogCd -= simDt;
+    if (moveLogCd <= 0) {
+      moveLogCd = 0.5;
+      alog.log('move', { x: +px.toFixed(1), z: +pz.toFixed(1), hp: Math.round(playerCombatant.hp), geld });
+    }
 
     // Permanenter Nachschub (P1): VOR dem KI-/Promotion-Teil.
     const aliveCount = roster.reduce((n, e) => n + (e.combatant.alive ? 1 : 0), 0);
