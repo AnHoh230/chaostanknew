@@ -181,16 +181,17 @@ function boot(cls: TankClass): void {
   const pool = createProjectilePool(PROJECTILE_CAPACITY);
   const projectileView = createProjectileView(scene, pool, PROJECTILE_CAPACITY);
 
-  // Live einstellbar (Regler im Panel): Schussweite + max. gleichzeitige Gegner.
+  // Live einstellbar (Regler im Panel): Schussweite + max. Gegner + Spawn-Intervall.
   let shotRange = 40; // Weltеinheiten, die ein Schuss fliegt (nicht über die ganze Map)
   let maxEnemies = 4; // gleichzeitig lebende Gegner
+  let spawnInterval = 3.5; // Sekunden zwischen Spawns
 
   // Gegner werden NICHT mehr fest gesetzt, sondern dauerhaft nachgespawnt (P1).
   const aiRng = createRng(SEED + 7);
   const roster: Enemy[] = []; // lebende + frisch promotete Gegner (dynamisch)
   const spawner = createSpawner(scene, TANK_RADIUS, () => aiRng.next(), {
     maxAlive: maxEnemies,
-    interval: 3.5, // langsamer nachspawnen
+    interval: spawnInterval, // langsamer nachspawnen (per Regler änderbar)
     radiusMin: 55, // größere, weiter gestreute Spawn-Area (kein Dauerfeuer auf der Stelle)
     radiusMax: 130,
     maxLevel: 3,
@@ -422,7 +423,7 @@ function boot(cls: TankClass): void {
   const minimap = createMinimap();
   const enemyBars = createEnemyBars(scene, camera, engine); // HP-Balken über den Gegnern
   const lootLabels = createLootLabels(scene, camera, engine); // Item-Namen über den Loot-Würfeln
-  // Live-Tuning-Regler (Schussweite, Max-Gegner) — vom Panel gelesen.
+  // Live-Tuning-Regler (Schussweite, Max-Gegner, Spawn-Intervall) — vom Panel gelesen.
   (window as unknown as { __tune: unknown }).__tune = {
     getShotRange: () => shotRange,
     setShotRange: (v: number) => {
@@ -433,8 +434,14 @@ function boot(cls: TankClass): void {
       maxEnemies = Math.max(0, Math.round(v));
       spawner.setMaxAlive(maxEnemies);
     },
+    getSpawnInterval: () => spawnInterval,
+    setSpawnInterval: (v: number) => {
+      spawnInterval = Math.max(0.2, v);
+      spawner.setInterval(spawnInterval);
+    },
   };
-  createCameraPanel(); // Einstellungs-Regler (Taste K)
+  // Jede Regler-Änderung in den Run-Log schreiben (kein manuelles Durchgeben nötig).
+  createCameraPanel((name, value) => alog.log('regler', { name, value }));
 
   // Inspizier-System (P0): M = Echtzeit-Übersichtskarte, I = modaler Tiefblick (Pause).
   const overviewMap = createOverviewMap();

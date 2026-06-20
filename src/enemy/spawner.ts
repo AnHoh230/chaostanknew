@@ -27,6 +27,8 @@ export interface Spawner {
   update(simDt: number, playerX: number, playerZ: number, aliveCount: number): Enemy | null;
   /** Maximale gleichzeitige Gegner zur Laufzeit ändern (Regler im Panel). */
   setMaxAlive(n: number): void;
+  /** Sekunden zwischen Spawns zur Laufzeit ändern (Regler im Panel). */
+  setInterval(seconds: number): void;
 }
 
 export function createSpawner(
@@ -39,11 +41,12 @@ export function createSpawner(
   let seq = 0;
   let nameSeq = 0; // fortlaufende "Panzer N"-Nummer
   let maxAlive = opts.maxAlive; // zur Laufzeit über setMaxAlive änderbar
+  let spawnInterval = opts.interval; // zur Laufzeit über setInterval änderbar
 
   function update(simDt: number, px: number, pz: number, aliveCount: number): Enemy | null {
     cd -= simDt;
     if (aliveCount >= maxAlive || cd > 0) return null;
-    cd = opts.interval;
+    cd = spawnInterval;
 
     // Position: Ring um den Spieler unter zufälligem Winkel (kommt von außerhalb).
     const ang = rng() * Math.PI * 2;
@@ -69,6 +72,9 @@ export function createSpawner(
     update,
     setMaxAlive: (n) => {
       maxAlive = Math.max(0, Math.round(n));
+    },
+    setInterval: (seconds) => {
+      spawnInterval = Math.max(0.2, seconds);
     },
   };
 }

@@ -8,13 +8,16 @@ interface TuneApi {
   setShotRange(v: number): void;
   getMaxEnemies(): number;
   setMaxEnemies(v: number): void;
+  getSpawnInterval(): number;
+  setSpawnInterval(v: number): void;
 }
 
 /**
- * Kleines GUI-Panel mit drei Schiebereglern für Höhe, Distanz und FOV der Kamera
- * (Live, kein Terminal nötig). Taste "K" blendet es ein/aus.
+ * Einstellungs-Panel (Kamera + Gameplay-Regler), live, kein Terminal nötig.
+ * Taste "K" blendet es ein/aus. onChange(name,value) wird beim Loslassen jedes
+ * Reglers aufgerufen (→ Run-Log), damit die gesetzten Werte nachlesbar sind.
  */
-export function createCameraPanel(): void {
+export function createCameraPanel(onChange?: (name: string, value: number) => void): void {
   const cam = (): CamApi | undefined => (window as unknown as { __cam?: CamApi }).__cam;
   const tune = (): TuneApi | undefined => (window as unknown as { __tune?: TuneApi }).__tune;
 
@@ -58,6 +61,8 @@ export function createCameraPanel(): void {
       val.textContent = step < 1 ? v.toFixed(2) : String(v);
       onInput(v);
     });
+    // Beim Loslassen den Endwert in den Log schreiben (nicht jeden Drag-Tick).
+    input.addEventListener('change', () => onChange?.(label, parseFloat(input.value)));
     row.appendChild(cap);
     row.appendChild(input);
     panel.appendChild(row);
@@ -91,6 +96,8 @@ export function createCameraPanel(): void {
     panel.appendChild(sep);
     slider('Schussweite', 12, 120, 1, () => t.getShotRange(), (v) => t.setShotRange(v));
     slider('Max Gegner', 1, 12, 1, () => t.getMaxEnemies(), (v) => t.setMaxEnemies(v));
+    slider('Spawn-Intervall s (klein=schnell)', 1, 12, 0.5,
+      () => t.getSpawnInterval(), (v) => t.setSpawnInterval(v));
   }
 
   const hintRow = document.createElement('div');
