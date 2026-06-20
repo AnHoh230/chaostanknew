@@ -1,16 +1,15 @@
 import type { SocketName } from '../tank/sockets';
+import type { BaseItem } from './itemTypes';
 
 export type Slot = 'ruestung' | 'raeder' | 'waffe' | 'wanne' | 'turm';
 export type Rarity = 'normal' | 'selten';
 
-/** Ein Ausrüstungs-Item aus dem MK-Katalog. Genau ein Hauptwert ist > 0. */
-export interface ShopItem {
-  id: string;
+/** Ein Ausrüstungs-Item aus dem MK-Katalog. Genau ein Hauptwert ist > 0.
+ *  Erbt id/name/cost/kind/buyer/category aus BaseItem (kind immer 'equip'). */
+export interface ShopItem extends BaseItem {
   slot: Slot;
   rarity: Rarity;
   mk: number;
-  name: string;
-  cost: number;
   damage: number;
   hp: number;
   armor: number;
@@ -123,6 +122,9 @@ function buildCatalog(): ShopItem[] {
         const cost = rarity === 'selten' ? Math.round(normalCost * 1.65) : normalCost;
         items.push({
           id: `${s.slot}_mk${String(mk).padStart(2, '0')}_${rarity}`,
+          kind: 'equip',
+          buyer: 'both',
+          category: 'equipment',
           slot: s.slot,
           rarity,
           mk,
