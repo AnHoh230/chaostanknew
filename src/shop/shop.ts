@@ -2,6 +2,7 @@ import type { ShopItem, Slot } from './catalog';
 import { sellValue } from './buyLogic';
 import { CATEGORIES } from './categories';
 import { itemsForCategory, type Category } from './itemTypes';
+import type { BoosterDef } from './boosters';
 
 export interface ShopHooks {
   items: readonly ShopItem[]; // voller Katalog
@@ -15,6 +16,10 @@ export interface ShopHooks {
   onSell: (item: ShopItem) => void;
   onToggle?: (open: boolean) => void;
   canOpen?: () => boolean; // nur öffnen, wenn erlaubt (z. B. auf einem Shop-Feld)
+  // SH2: Sofort-Booster (Reiter „instant") + Gürtel-Anzeige.
+  getBoosters?: () => BoosterDef[];
+  getBelt?: () => (BoosterDef | null)[];
+  onBuyBooster?: (b: BoosterDef) => void;
 }
 
 export interface Shop {
@@ -201,15 +206,56 @@ export function createShop(h: ShopHooks): Shop {
 
     if (category !== 'equipment') {
       const def = CATEGORIES.find((c) => c.id === category)!;
+      const intro = document.createElement('div');
+      intro.style.cssText = 'color:#9aa;margin-bottom:8px';
+      intro.textContent = def.desc;
+      buyCol.appendChild(intro);
+
+      // SH2: Sofort-Booster im „instant"-Reiter — Gürtel zeigen + kaufen → Gürtel.
+      if (category === 'instant' && h.getBoosters) {
+        if (h.getBelt) {
+          const beltRow = document.createElement('div');
+          beltRow.style.cssText = 'display:flex;gap:6px;margin-bottom:10px;';
+          h.getBelt().forEach((b, i) => {
+            const chip = document.createElement('div');
+            chip.style.cssText =
+              'flex:1;text-align:center;border:1px solid #2a343b;border-radius:6px;padding:4px;font-size:10px;color:#9aa;';
+            chip.innerHTML =
+              `<b style="color:#ffe08a">[${i + 1}]</b> ` +
+              (b ? `<span style="color:#cdd6dd">${b.name}</span>` : 'leer');
+            beltRow.appendChild(chip);
+          });
+          buyCol.appendChild(beltRow);
+        }
+        for (const b of h.getBoosters()) {
+          const afford = h.getMoney() >= b.cost;
+          const row = document.createElement('button');
+          row.disabled = !afford;
+          row.style.cssText =
+            'display:flex;justify-content:space-between;align-items:center;width:100%;margin:5px 0;' +
+            'padding:9px 12px;border-radius:8px;border:1px solid #2a343b;text-align:left;color:#e8e0c8;' +
+            `background:#1a1f25;${afford ? 'cursor:pointer;' : 'opacity:0.55;cursor:default;'}`;
+          row.innerHTML =
+            `<span><b>${b.name}</b><br><span style="color:#9aa;font-size:12px">${b.desc}</span></span>` +
+            `<span style="color:${afford ? '#ffe08a' : '#e06a6a'};white-space:nowrap;margin-left:10px">💰 ${b.cost}</span>`;
+          if (afford) {
+            row.addEventListener('click', () => {
+              h.onBuyBooster?.(b);
+              refresh();
+            });
+          }
+          buyCol.appendChild(row);
+        }
+        return;
+      }
+
       const offers = itemsForCategory(h.items, category);
-      const box = document.createElement('div');
-      box.style.cssText = 'padding:6px 2px';
-      box.innerHTML =
-        `<div style="color:#9aa;margin-bottom:6px">${def.desc}</div>` +
-        (offers.length
-          ? ''
-          : `<div style="color:#778">Noch keine Angebote in dieser Werkstatt-Stufe.</div>`);
-      buyCol.appendChild(box);
+      if (!offers.length) {
+        const none = document.createElement('div');
+        none.textContent = 'Noch keine Angebote in dieser Werkstatt-Stufe.';
+        none.style.cssText = 'color:#778;padding:4px 2px';
+        buyCol.appendChild(none);
+      }
       return; // restliche Spalten (Ausrüstung/Inventar) sind oben schon gebaut
     }
 

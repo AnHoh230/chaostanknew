@@ -32,6 +32,10 @@ import { createOverviewMap, type MapBlip } from './ui/overviewMap';
 import { createInspectCard } from './ui/inspectCard';
 import { buildEnemyInfo } from './inspect/enemyInfo';
 import { nearestToPointer, type ScreenBlip } from './inspect/enemyPick';
+import { createBuffStack } from './combat/buffs';
+import { createBelt } from './player/belt';
+import { createBuffHud } from './ui/buffHud';
+import { BOOSTERS, type BoosterDef } from './shop/boosters';
 import { createCameraPanel } from './ui/cameraPanel';
 import { TANK_CLASSES, type TankClass } from './game/classes';
 import { createPickupField } from './loot/pickups';
@@ -201,8 +205,18 @@ function boot(cls: TankClass): void {
   // Loadout (P4): ein Item je Slot, Stats = Klassen-Basis + bestückte Slots.
   const loadout = createLoadout({ damage: cls.damage, maxHp: cls.maxHp, speed: cls.speed, armor: 0 });
   let geld = 0; // Spielgeld, verdient durch Kills
-  let playerSpeed = cls.speed; // aus loadout.stats() abgeleitet (Räder)
+  let playerSpeed = cls.speed; // aus loadout.stats() abgeleitet (Räder) × Buffs
   const progression = createProgression(); // Level/XP/MK (P2)
+
+  // SH2: Aktiv-Buffs + Sofort-Booster (Gürtel/Hotkeys 1-3) + Turm-Slew.
+  const playerBuffs = createBuffStack();
+  const belt = createBelt<BoosterDef>(3);
+  const buffHud = createBuffHud();
+  let overpressureShots = 0; // Überdruck-Munition: nächste N Schüsse stärker
+  let overpressureMul = 1;
+  let fireCd = 0; // Spieler-Feuer-Cooldown (Kühlmittel senkt ihn über fireRateMul)
+  const PLAYER_FIRE_BASE = 0.28; // s zwischen Schüssen bei fireRate 1
+  const BASE_TURRET_SLEW = 22; // rad/s Turm-Dreh-Tempo (Turmservo verdoppelt; Schüsse bleiben pixelgenau)
 
   const pickups = createPickupField(scene);
   const PICKUP_REACH = TANK_RADIUS + 0.8;
@@ -299,6 +313,8 @@ function boot(cls: TankClass): void {
   // NICHT die (um einen Frame veraltete) Turm-Ausrichtung lesen. Sonst zielt der
   // Schuss aufs Ziel vom letzten Frame (bewiesen: aimErr 7-40° beim Bewegen).
   function fire(): void {
+    if (fireCd > 0) return; // Feuer-Cooldown (Kühlmittel senkt ihn)
+    fireCd = PLAYER_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
     const root = tank.view.root;
     const turret = tank.view.turretNode;
     const origin = root.getAbsolutePosition();
@@ -328,6 +344,11 @@ function boot(cls: TankClass): void {
       dx = fwd.x / len;
       dz = fwd.z / len;
     }
+    let shotDamage = loadout.stats().damage;
+    if (overpressureShots > 0) {
+      shotDamage = Math.round(shotDamage * overpressureMul);
+      overpressureShots -= 1;
+    }
     const p = pool.acquire({
       x: origin.x,
       y: 0.5,
@@ -337,7 +358,7 @@ function boot(cls: TankClass): void {
       speed: PROJECTILE_SPEED,
       life: PROJECTILE_LIFE,
       team: 'player',
-      damage: loadout.stats().damage,
+      damage: shotDamage,
     });
     if (p) {
       bus.emit('tank.fired', { tankId: tank.id });
@@ -374,7 +395,10 @@ function boot(cls: TankClass): void {
     if (p) bus.emit('projectile.spawned', { id: p.id });
   }
 
-  const input = createInput(scene, camera, tank, () => playerSpeed, fire);
+  const input = createInput(
+    scene, camera, tank, () => playerSpeed, fire,
+    () => BASE_TURRET_SLEW * playerBuffs.aggregate().turretSlewMul,
+  );
 
   // OS-Mauszeiger über dem Canvas ausblenden — das Spiel zeichnet sein eigenes
   // Fadenkreuz, das frame-synchron mit dem Turm läuft (kein Render-Weg-Versatz).
@@ -422,6 +446,56 @@ function boot(cls: TankClass): void {
     });
   }
 
+  // Gürtel-HUD: 3 Ladungs-Slots (Tasten 1-3) unten mittig.
+  const beltHud = document.createElement('div');
+  beltHud.style.cssText =
+    'position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:19;display:flex;gap:8px;pointer-events:none;';
+  document.body.appendChild(beltHud);
+  const beltSlotEls: HTMLElement[] = [];
+  for (let i = 0; i < 3; i++) {
+    const s = document.createElement('div');
+    s.style.cssText =
+      'min-width:78px;text-align:center;background:rgba(8,12,16,0.78);border:1px solid #2a343b;' +
+      'border-radius:7px;padding:5px 8px;font:600 10px system-ui,sans-serif;';
+    beltHud.appendChild(s);
+    beltSlotEls.push(s);
+  }
+  function updateBeltHud(): void {
+    const slots = belt.slots();
+    for (let i = 0; i < 3; i++) {
+      const it = slots[i];
+      beltSlotEls[i]!.innerHTML =
+        `<div style="color:#ffe08a;font-weight:800">[${i + 1}]</div>` +
+        (it ? `<div style="color:#cdd6dd">${it.name}</div>` : `<div style="color:#566">leer</div>`);
+    }
+  }
+  updateBeltHud();
+
+  function applyBooster(def: BoosterDef): void {
+    const eff = def.effect;
+    if (eff.kind === 'buff') {
+      if (eff.onlyLowHp && playerCombatant.hp / playerCombatant.maxHp >= 0.2) {
+        belt.add(def); // Bedingung nicht erfüllt → nicht verschwenden, zurück in den Gürtel
+        showToast('Nur unter 20 % HP: ' + def.name);
+        return;
+      }
+      playerBuffs.add({ ...eff.buff, label: def.name });
+    } else if (eff.kind === 'tempHp') {
+      playerCombatant.hp = Math.min(playerCombatant.maxHp, playerCombatant.hp + eff.amount);
+    } else if (eff.kind === 'nextShots') {
+      overpressureShots = eff.shots;
+      overpressureMul = eff.damageMul;
+    }
+    showToast('Gezündet: ' + def.name);
+  }
+  function triggerBelt(i: number): void {
+    if (inspecting || shop.isOpen()) return;
+    const def = belt.trigger(i);
+    if (!def) return;
+    applyBooster(def);
+    updateBeltHud();
+  }
+
   window.addEventListener('keydown', (ev) => {
     const k = ev.key.toLowerCase();
     if (k === 'm' && !inspecting) {
@@ -431,6 +505,8 @@ function boot(cls: TankClass): void {
       else if (hoveredId && !shop.isOpen()) openInspect(hoveredId);
     } else if (ev.key === 'Escape' && inspecting) {
       inspectCard.close();
+    } else if (k === '1' || k === '2' || k === '3') {
+      triggerBelt(Number(k) - 1);
     }
   });
 
@@ -506,6 +582,20 @@ function boot(cls: TankClass): void {
     onEquip: (item) => equip(item),
     onUnequip: (slot) => unequipSlot(slot),
     onSell: (item) => sellAny(item),
+    // SH2: Sofort-Booster — kaufbar (Spieler), landen als Ladung im Gürtel.
+    getBoosters: () => BOOSTERS.filter((b) => b.buyer !== 'enemy'),
+    getBelt: () => belt.slots(),
+    onBuyBooster: (b) => {
+      if (geld < b.cost) return;
+      if (belt.slots().every((s) => s !== null)) {
+        showToast('Gürtel voll (max 3)');
+        return;
+      }
+      geld -= b.cost;
+      belt.add(b);
+      updateBeltHud();
+      showToast('Gekauft → Gürtel: ' + b.name);
+    },
     // S2: Werkstatt NUR auf einem Shop-Feld öffenbar; die Welt pausiert NICHT.
     canOpen: () => shopField.isOnTile(playerCombatant.x, playerCombatant.z),
   });
@@ -545,6 +635,18 @@ function boot(cls: TankClass): void {
     shopOpen: () => shop.isOpen(),
     nearestTile: () => shopField.nearest(playerCombatant.x, playerCombatant.z),
     inspect: () => ({ open: inspecting, simSpeed: clock.simSpeed, hovered: hoveredId }),
+    buffs: () => playerBuffs.active(),
+    buffMods: () => playerBuffs.aggregate(),
+    belt: () => belt.slots().map((b) => b?.id ?? null),
+    giveBooster: (id: string) => {
+      const b = BOOSTERS.find((x) => x.id === id);
+      if (b) belt.add(b);
+      updateBeltHud();
+      return belt.slots().map((s) => s?.id ?? null);
+    },
+    triggerBelt: (i: number) => { triggerBelt(i); return belt.slots().map((s) => s?.id ?? null); },
+    overpressure: () => ({ shots: overpressureShots, mul: overpressureMul }),
+    playerSpeedNow: () => playerSpeed,
     mapOpen: () => overviewMap.isOpen(),
     openInspect: (id: string) => { openInspect(id); return { open: inspecting, simSpeed: clock.simSpeed }; },
     enemyInfoOf: (id: string) => {
@@ -626,6 +728,14 @@ function boot(cls: TankClass): void {
   // GENAU EIN Loop. Reihenfolge: Steuerung -> Pool-Logik -> Boden-Recenter -> Mesh-Sync.
   startLoop(engine, scene, clock, (simDt) => {
     simTime += simDt;
+    // SH2: Buffs altern, effektive Spieler-Stats (Tempo/Rüstung) = Loadout × Buffs.
+    fireCd -= simDt;
+    playerBuffs.tick(simDt);
+    const pmods = playerBuffs.aggregate();
+    const pst = loadout.stats();
+    playerSpeed = pst.speed * pmods.speedMul;
+    playerCombatant.armor = pst.armor + pmods.armorAdd;
+    buffHud.update(playerBuffs.active());
     input.update(simDt);
     reticle.update(input.getAimTarget()); // gleicher Frame wie der Turm
     pool.update(simDt);
