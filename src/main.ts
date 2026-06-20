@@ -30,6 +30,7 @@ import { createReveal } from './reveal/reveal';
 import { createPlayerBar } from './ui/playerBar';
 import { createMinimap } from './ui/minimap';
 import { createEnemyBars } from './ui/enemyBars';
+import { createOwnInventory, type OwnInvItem } from './ui/ownInventory';
 import { createLootLabels } from './ui/lootLabels';
 import { createOverviewMap, type MapBlip } from './ui/overviewMap';
 import { createInspectCard } from './ui/inspectCard';
@@ -234,6 +235,7 @@ function boot(cls: TankClass): void {
   const BASE_TURRET_SLEW = 22; // rad/s Turm-Dreh-Tempo (Turmservo verdoppelt; Schüsse bleiben pixelgenau)
   let spawnGraceCd = 5; // 5s nach Erscheinen: unverwundbar + Shop überall öffenbar (Spawn & Respawn)
   const fxList: { mesh: Mesh; mat: StandardMaterial; life: number; max: number; fade: boolean; alpha0: number }[] = []; // kurzlebige Effekt-Meshes (Laser, Rauch)
+  let ownInvRefreshCd = 0; // drosselt das Live-Refresh des Inventar-Panels
 
   const pickups = createPickupField(scene);
   const PICKUP_REACH = TANK_RADIUS + 0.8;
@@ -637,13 +639,54 @@ function boot(cls: TankClass): void {
     alog.log('enemy.booster', { id: e.id, booster: def.id });
   }
 
+  // Eigenes Live-Inventar (Taste „I" ohne anvisierten Gegner) — OHNE Pause.
+  const INV_SLOTS: { slot: Slot; label: string }[] = [
+    { slot: 'waffe', label: 'Waffe' },
+    { slot: 'sekundaer', label: 'Sekundär' },
+    { slot: 'turm', label: 'Turm' },
+    { slot: 'wanne', label: 'Wanne' },
+    { slot: 'raeder', label: 'Räder' },
+    { slot: 'ruestung', label: 'Rüstung' },
+  ];
+  function invStat(it: ShopItem): string {
+    if (it.autoFire) return `Auto: ${it.autoFire.damage} Schaden`;
+    if (it.damage) return `${it.damage} Schaden`;
+    if (it.hp) return `${it.hp} HP`;
+    if (it.armor) return `${it.armor} Rüstung`;
+    if (it.speed) return `${it.speed} Tempo`;
+    if (it.dodge) return `${Math.round(it.dodge * 100)} % Ausweichen`;
+    return '—';
+  }
+  function invItem(it: ShopItem): OwnInvItem {
+    return { id: it.id, name: it.name, stat: invStat(it), rarity: it.rarity };
+  }
+  const ownInv = createOwnInventory({
+    slots: () =>
+      INV_SLOTS.map((s) => {
+        const it = loadout.get(s.slot);
+        return { slot: s.slot, label: s.label, item: it ? invItem(it) : null };
+      }),
+    bag: () => loadout.bag().map(invItem),
+    stats: () => {
+      const st = loadout.stats();
+      return { damage: st.damage, maxHp: st.maxHp, armor: st.armor, speed: st.speed, dodge: st.dodge };
+    },
+    onEquip: (id) => {
+      const it = loadout.bag().find((x) => x.id === id);
+      if (it) { loadout.equip(it); alog.log('inv.equip', { id }); }
+    },
+    onUnequip: (slot) => { loadout.unequip(slot as Slot); alog.log('inv.unequip', { slot }); },
+  });
+
   window.addEventListener('keydown', (ev) => {
     const k = ev.key.toLowerCase();
     if (k === 'm' && !inspecting) {
       overviewMap.toggle();
     } else if (k === 'i') {
       if (inspecting) inspectCard.close();
-      else if (hoveredId && !shop.isOpen()) openInspect(hoveredId);
+      else if (ownInv.isOpen()) ownInv.toggle(); // offenes Inventar schließen
+      else if (hoveredId && !shop.isOpen()) openInspect(hoveredId); // Gegner anvisiert → Inspect (pausiert)
+      else if (!shop.isOpen()) ownInv.toggle(); // kein Gegner → eigenes Inventar (läuft weiter)
     } else if (ev.key === 'Escape' && inspecting) {
       inspectCard.close();
     } else if (k === '1' || k === '2' || k === '3') {
@@ -974,6 +1017,10 @@ function boot(cls: TankClass): void {
     reticle.update(input.getAimTarget()); // gleicher Frame wie der Turm
     pool.update(simDt);
     updateFx(simDt); // Laser/Rauch-Effekte altern lassen
+    if (ownInv.isOpen()) { // Inventar läuft live mit (Beute/Statänderungen), gedrosselt
+      ownInvRefreshCd -= simDt;
+      if (ownInvRefreshCd <= 0) { ownInvRefreshCd = 0.5; ownInv.refresh(); }
+    }
 
     const px = tank.view.root.position.x;
     const pz = tank.view.root.position.z;
@@ -1263,6 +1310,8 @@ function boot(cls: TankClass): void {
           name: e.displayName,
           isNamed: e.named !== null,
           mode: e.mode,
+          level: e.prog.level,
+          mk: e.prog.unlockedMk(),
           marks: e.buffs.active().reduce(
             (s, b) => s + (b.id === 'markiert' ? '🎯' : b.id === 'vernebelt' ? '💨' : ''),
             '',
