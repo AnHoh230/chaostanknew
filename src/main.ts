@@ -1031,6 +1031,7 @@ function boot(cls: TankClass): void {
           hpFrac: e.combatant.hp / e.combatant.maxHp,
           name: e.displayName,
           isNamed: e.named !== null,
+          mode: e.mode,
         })),
     );
 

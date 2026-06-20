@@ -7,6 +7,7 @@ export interface EnemyBarInfo {
   hpFrac: number;
   name: string; // "Panzer N" oder Named-Name — wird IMMER angezeigt
   isNamed: boolean; // true = benannter Rivale (rot + fett)
+  mode?: string; // aktueller KI-Modus (scout/annähern/feuern/…) — Mess-Overlay
 }
 
 export interface EnemyBars {
@@ -22,6 +23,7 @@ interface Bar {
   wrap: HTMLElement;
   fill: HTMLElement;
   label: HTMLElement;
+  mode: HTMLElement;
 }
 
 /**
@@ -46,10 +48,14 @@ export function createEnemyBars(scene: Scene, camera: Camera, engine: Engine): E
     const fill = document.createElement('div');
     fill.style.cssText = 'height:100%;width:100%;';
     track.appendChild(fill);
+    const mode = document.createElement('div');
+    mode.style.cssText =
+      'font:600 8px/1.1 system-ui,sans-serif;color:#9fb0c0;text-shadow:0 1px 2px #000;margin-top:1px;white-space:nowrap;';
     wrap.appendChild(label);
     wrap.appendChild(track);
+    wrap.appendChild(mode);
     document.body.appendChild(wrap);
-    return { wrap, fill, label };
+    return { wrap, fill, label, mode };
   }
 
   function project(x: number, z: number): { sx: number; sy: number; visible: boolean } {
@@ -84,6 +90,7 @@ export function createEnemyBars(scene: Scene, camera: Camera, engine: Engine): E
       b.label.textContent = e.name;
       b.label.style.color = e.isNamed ? '#ff8a72' : '#cdd6dd';
       b.label.style.fontSize = e.isNamed ? '11px' : '9px';
+      b.mode.textContent = e.mode ?? '';
     }
   }
 
