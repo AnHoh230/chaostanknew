@@ -20,20 +20,22 @@ function specAtLevel(level: number): EnemySpec {
   };
 }
 
-describe('createEnemyEntity — Anfangs-Shopping-Verdrahtung', () => {
-  it('spawnt nackt, mit Startgeld = teuerstes Item seiner MK, im Zustand shop_anfahrt', () => {
+describe('createEnemyEntity — Sofort-Erstkauf + Spawn-Gnadenzeit', () => {
+  it('kauft sofort beim Erscheinen (kein Shop-Feld), startet kampfbereit + unverwundbar', () => {
     const e = createEnemyEntity(makeScene(), specAtLevel(3), 1, () => 0.5);
-    expect(e.equipment).toHaveLength(0); // nackt — rüstet sich am ersten Shop auf
+    // Startgeld = teuerstes MK2-Item (340) → kauft genau die Waffe, Rest 0.
+    expect(e.equipment.length).toBeGreaterThan(0);
+    expect(e.equipment[0]!.slot).toBe('waffe'); // schwächster/leerer Slot zuerst
+    expect(e.credits).toBe(mostExpensiveItemPrice(enemyMk(3)) - e.equipment[0]!.cost);
+    expect(e.shopState).toBe('kaempfen');
+    expect(e.spawnInvulnCd).toBe(5);
+    expect(e.combatant.invulnerable).toBe(true);
     expect(e.prog.level).toBe(3);
-    expect(e.credits).toBe(mostExpensiveItemPrice(enemyMk(3)));
-    expect(e.shopState).toBe('shop_anfahrt');
-    expect(e.belt.count()).toBe(0);
   });
 
-  it('Stats kommen aus der (leeren) Ausrüstung — kein Level-basiertes HP mehr', () => {
+  it('Stats kommen aus der Ausrüstung — gleiche Basis-HP, da der Erstkauf eine Waffe (kein HP) ist', () => {
     const lo = createEnemyEntity(makeScene(), specAtLevel(1), 1, () => 0.5);
     const hi = createEnemyEntity(makeScene(), specAtLevel(9), 1, () => 0.5);
-    // Beide nackt → gleiche Basis-HP (HP hängt jetzt an Ausrüstung, nicht am Level).
-    expect(lo.combatant.maxHp).toBe(hi.combatant.maxHp);
+    expect(lo.combatant.maxHp).toBe(hi.combatant.maxHp); // Waffe addiert kein HP
   });
 });

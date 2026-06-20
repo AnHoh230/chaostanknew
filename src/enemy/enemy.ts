@@ -8,6 +8,7 @@ import type { Named } from '../named/promotion';
 import { mostExpensiveItemPrice, type ShopItem } from '../shop/catalog';
 import { enemyMk } from './equipment';
 import { enemyCombatStats } from './enemyStats';
+import { planPurchases } from './enemyEconomy';
 import { createProgression, type Progression } from '../progression/progression';
 import { createBelt, type Belt } from '../player/belt';
 import { createBuffStack, type BuffStack } from '../combat/buffs';
@@ -42,6 +43,7 @@ export interface Enemy {
   overShots: number; // Überdruck-Munition: Rest-Schüsse mit Bonus
   overMul: number; // Überdruck-Munition: Schadens-Multiplikator
   autoTurretCd: number; // Cooldown der Sekundärwaffe (Auto-Turret), falls ausgerüstet
+  spawnInvulnCd: number; // 5s Unverwundbarkeit nach dem Erscheinen (Spawn/Respawn)
   belt: Belt<BoosterDef>; // gekaufte Consumables (Gürtel-Ladungen)
   buffs: BuffStack; // aktive Booster-Buffs
   damage: number; // Schaden pro Schuss — AUS DER AUSRÜSTUNG abgeleitet (nicht aus dem Level)
@@ -81,7 +83,10 @@ export function createEnemyEntity(
 ): Enemy {
   const view = createTankView(scene, spec.comp);
   view.root.position.set(spec.spawn.x, 0, spec.spawn.z);
-  const equipment: ShopItem[] = []; // startet nackt — rüstet sich am ersten Shop auf (Anfangs-Shopping)
+  const mk = enemyMk(spec.level);
+  // Sofortiger Erstkauf beim Erscheinen (kein Shop-Feld nötig) — symmetrisch zum Spieler.
+  const buy = planPurchases({ credits: mostExpensiveItemPrice(mk), equipment: [], mk, bag: [], beltFree: 3 });
+  const equipment = buy.equipment;
   const prog = createProgression(spec.level);
   const st = enemyCombatStats(equipment, spec.level);
   const combatant: Combatant = {
@@ -96,6 +101,7 @@ export function createEnemyEntity(
     dodge: st.dodge,
     alive: true,
     lootValue: st.lootValue,
+    invulnerable: true, // 5s Spawn-Gnadenzeit (siehe spawnInvulnCd)
   };
   return {
     id: spec.id,
@@ -111,17 +117,18 @@ export function createEnemyEntity(
     displayName: spec.displayName,
     prevTargetVisible: false,
     prog,
-    credits: mostExpensiveItemPrice(enemyMk(spec.level)), // Startbudget = teuerstes Item seiner MK
+    credits: buy.credits, // Rest nach dem Sofort-Erstkauf
     respawnTimer: 0,
     equipment,
     bag: [],
     shopGoal: null,
-    shopState: 'shop_anfahrt', // fährt zuerst zum Shop und rüstet sich aus
+    shopState: 'kaempfen', // sofort kampfbereit; weitere Käufe per Shop-Fahrt
     dwellTimer: 0,
     beltCd: 0,
     overShots: 0,
     overMul: 1,
     autoTurretCd: 0,
+    spawnInvulnCd: 5,
     belt: createBelt<BoosterDef>(3),
     buffs: createBuffStack(),
     damage: st.damage,

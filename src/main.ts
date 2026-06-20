@@ -230,7 +230,7 @@ function boot(cls: TankClass): void {
   let fireCd = 0; // Spieler-Feuer-Cooldown (Kühlmittel senkt ihn über fireRateMul)
   const PLAYER_FIRE_BASE = 0.28; // s zwischen Schüssen bei fireRate 1
   const BASE_TURRET_SLEW = 22; // rad/s Turm-Dreh-Tempo (Turmservo verdoppelt; Schüsse bleiben pixelgenau)
-  let respawnInvulnCd = 0; // kurze Mercy-Unverwundbarkeit nach Spieler-Respawn
+  let spawnGraceCd = 5; // 5s nach Erscheinen: unverwundbar + Shop überall öffenbar (Spawn & Respawn)
 
   const pickups = createPickupField(scene);
   const PICKUP_REACH = TANK_RADIUS + 0.8;
@@ -601,7 +601,7 @@ function boot(cls: TankClass): void {
     playerCombatant.hp = playerCombatant.maxHp;
     playerCombatant.alive = true;
     playerCombatant.invulnerable = true; // sofort (schützt auch im selben combat-Frame)
-    respawnInvulnCd = 3;
+    spawnGraceCd = 5; // Respawn = Erscheinen: 5s Invuln + Shop überall öffenbar
     alog.log('player.respawn', { x: +playerCombatant.x.toFixed(1), z: +playerCombatant.z.toFixed(1) });
     showToast('Zerstört — neu aufgebaut');
   }
@@ -691,8 +691,8 @@ function boot(cls: TankClass): void {
       alog.log('shop.buyBooster', { id: b.id, cost: b.cost, geld });
       showToast('Gekauft → Gürtel: ' + b.name);
     },
-    // S2: Werkstatt NUR auf einem Shop-Feld öffenbar; die Welt pausiert NICHT.
-    canOpen: () => shopField.isOnTile(playerCombatant.x, playerCombatant.z),
+    // Werkstatt: auf einem Shop-Feld ODER während der 5s-Gnadenzeit nach dem Erscheinen (überall).
+    canOpen: () => shopField.isOnTile(playerCombatant.x, playerCombatant.z) || spawnGraceCd > 0,
     onToggle: (o) => alog.log(o ? 'shop.open' : 'shop.close', { geld }),
   });
 
@@ -937,6 +937,7 @@ function boot(cls: TankClass): void {
             e.equipment = rollEnemyEquipment(e.prog.level, () => aiRng.next()); // frische Ausrüstung passend zum aktuellen Level
             applyEnemyStats(e); // Stats aus der frischen Ausrüstung (HP voll)
             e.combatant.alive = true;
+            e.spawnInvulnCd = 5; // Wiederkehr = Erscheinen → 5s Gnadenzeit
             e.view.root.setEnabled(true);
             e.prevTargetVisible = false; // Wiedererkennungs-Spruch beim nächsten Sichtkontakt
             log.info('Rivale kehrt zurück', { name: e.displayName });
@@ -948,6 +949,8 @@ function boot(cls: TankClass): void {
       const ex = er.position.x;
       const ez = er.position.z;
 
+      e.spawnInvulnCd = Math.max(0, e.spawnInvulnCd - simDt); // 5s Gnadenzeit nach Erscheinen
+      e.combatant.invulnerable = e.spawnInvulnCd > 0; // (Shop-Dwell setzt unten ggf. wieder true)
       e.buffs.tick(simDt); // Booster-Buffs altern jeden Frame
 
       // Ziel wählen (Beutewert) — zuerst, da Shop-Trip UND Engagement es brauchen.
@@ -1123,9 +1126,9 @@ function boot(cls: TankClass): void {
     playerCombatant.x = px;
     playerCombatant.z = pz;
     const onShopTile = shopField.isOnTile(px, pz);
-    respawnInvulnCd = Math.max(0, respawnInvulnCd - simDt);
-    playerCombatant.invulnerable = onShopTile || respawnInvulnCd > 0;
-    if (shop.isOpen() && !onShopTile) shop.close(); // Feld verlassen → Shop schließt
+    spawnGraceCd = Math.max(0, spawnGraceCd - simDt);
+    playerCombatant.invulnerable = onShopTile || spawnGraceCd > 0;
+    if (shop.isOpen() && !onShopTile && spawnGraceCd <= 0) shop.close(); // Feld verlassen → Shop schließt (außer in der Gnadenzeit)
     combat.update();
 
     // Beute einsammeln: fährt der Spieler über ein Teil → ins Inventar (Tasche).
