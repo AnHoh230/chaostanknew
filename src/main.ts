@@ -17,7 +17,7 @@ import { createEnemyBrain } from './ai/enemyBrain';
 import { MOTIV_LABEL } from './ai/motives';
 import type { AiWorldView } from './ai/aiTypes';
 import { enemyLevelStats, type Enemy } from './enemy/enemy';
-import { rollEnemyEquipment, pickDrop } from './enemy/equipment';
+import { rollEnemyEquipment, pickDrop, enemyMk } from './enemy/equipment';
 import { runEnemyShopVisit, enemyUpgradeCost } from './enemy/enemyShopping';
 import { createSpawner } from './enemy/spawner';
 import { pickTarget, type TargetInfo } from './enemy/targeting';
@@ -28,6 +28,10 @@ import { createPlayerBar } from './ui/playerBar';
 import { createMinimap } from './ui/minimap';
 import { createEnemyBars } from './ui/enemyBars';
 import { createLootLabels } from './ui/lootLabels';
+import { createOverviewMap, type MapBlip } from './ui/overviewMap';
+import { createInspectCard } from './ui/inspectCard';
+import { buildEnemyInfo } from './inspect/enemyInfo';
+import { nearestToPointer, type ScreenBlip } from './inspect/enemyPick';
 import { createCameraPanel } from './ui/cameraPanel';
 import { TANK_CLASSES, type TankClass } from './game/classes';
 import { createPickupField } from './loot/pickups';
@@ -384,6 +388,52 @@ function boot(cls: TankClass): void {
   const lootLabels = createLootLabels(scene, camera, engine); // Item-Namen über den Loot-Würfeln
   createCameraPanel(); // Kamera-Regler (Taste K)
 
+  // Inspizier-System (P0): M = Echtzeit-Übersichtskarte, I = modaler Tiefblick (Pause).
+  const overviewMap = createOverviewMap();
+  const inspectCard = createInspectCard();
+  let prevSimSpeed = 1; // gespeicherter Zeitfaktor während Inspizieren (Pausen-Vertrag)
+  let inspecting = false;
+  let hoveredId: string | null = null;
+  // Overlay-fester Maus-Tracker (DOM-Overlays schlucken scene.pointerX sonst).
+  let mouseX = 0;
+  let mouseY = 0;
+  window.addEventListener('pointermove', (e) => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+  });
+  // "[I] Inspizieren"-Hinweis am anvisierten Gegner (lehrt die Taste).
+  const inspectPrompt = document.createElement('div');
+  inspectPrompt.style.cssText =
+    'position:fixed;z-index:18;transform:translate(-50%,-100%);pointer-events:none;display:none;' +
+    'font:700 11px system-ui,sans-serif;color:#ffe08a;text-shadow:0 1px 3px #000;white-space:nowrap;';
+  inspectPrompt.textContent = '[I] Inspizieren';
+  document.body.appendChild(inspectPrompt);
+
+  function openInspect(id: string): void {
+    const e = roster.find((r) => r.id === id && r.combatant.alive);
+    if (!e) return;
+    const info = buildEnemyInfo({ ...e, speed: ENEMY_SPEED }, akteBuch.get(e.id) ?? null);
+    prevSimSpeed = clock.simSpeed;
+    clock.simSpeed = 0; // Welt pausiert; beim Schließen wird prevSimSpeed wiederhergestellt
+    inspecting = true;
+    inspectCard.open(info, () => {
+      clock.simSpeed = prevSimSpeed;
+      inspecting = false;
+    });
+  }
+
+  window.addEventListener('keydown', (ev) => {
+    const k = ev.key.toLowerCase();
+    if (k === 'm' && !inspecting) {
+      overviewMap.toggle();
+    } else if (k === 'i') {
+      if (inspecting) inspectCard.close();
+      else if (hoveredId && !shop.isOpen()) openInspect(hoveredId);
+    } else if (ev.key === 'Escape' && inspecting) {
+      inspectCard.close();
+    }
+  });
+
   // Loot-Toast: kurze Einblendung beim Aufsammeln eines Teils.
   const toast = document.createElement('div');
   toast.id = 'loot-toast';
@@ -494,6 +544,13 @@ function boot(cls: TankClass): void {
     playerInvuln: () => playerCombatant.invulnerable === true,
     shopOpen: () => shop.isOpen(),
     nearestTile: () => shopField.nearest(playerCombatant.x, playerCombatant.z),
+    inspect: () => ({ open: inspecting, simSpeed: clock.simSpeed, hovered: hoveredId }),
+    mapOpen: () => overviewMap.isOpen(),
+    openInspect: (id: string) => { openInspect(id); return { open: inspecting, simSpeed: clock.simSpeed }; },
+    enemyInfoOf: (id: string) => {
+      const e = roster.find((r) => r.id === id);
+      return e ? buildEnemyInfo({ ...e, speed: ENEMY_SPEED }, akteBuch.get(e.id) ?? null) : null;
+    },
     enemyState: (id: string) => {
       const e = roster.find((r) => r.id === id);
       return e
@@ -800,6 +857,43 @@ function boot(cls: TankClass): void {
           isNamed: e.named !== null,
         })),
     );
+
+    // P0: Hover-Pick (Gegner unter dem Mauszeiger) + Übersichtskarte (M).
+    const screenBlips: ScreenBlip[] = [];
+    for (const e of roster) {
+      if (!e.combatant.alive) continue;
+      const s = Vector3.Project(
+        new Vector3(e.combatant.x, 1.4, e.combatant.z),
+        Matrix.IdentityReadOnly,
+        scene.getTransformMatrix(),
+        camera.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight()),
+      );
+      if (s.z > 0 && s.z < 1) screenBlips.push({ id: e.id, sx: s.x, sy: s.y });
+    }
+    hoveredId = inspecting ? null : nearestToPointer(mouseX, mouseY, screenBlips, 70);
+    const hb = hoveredId ? screenBlips.find((b) => b.id === hoveredId) : null;
+    if (hb && !overviewMap.isOpen()) {
+      inspectPrompt.style.display = 'block';
+      inspectPrompt.style.left = hb.sx + 'px';
+      inspectPrompt.style.top = hb.sy - 24 + 'px';
+    } else {
+      inspectPrompt.style.display = 'none';
+    }
+    if (overviewMap.isOpen()) {
+      const mapBlips: MapBlip[] = [
+        ...shopField.positions.map((t) => ({ x: t.x, z: t.z, color: '#22b0e6', r: 5 })),
+        ...roster
+          .filter((e) => e.combatant.alive)
+          .map((e) => ({
+            id: e.id, x: e.combatant.x, z: e.combatant.z,
+            color: e.named ? '#ff3b30' : '#e8a23c', r: e.named ? 6 : 4,
+            name: e.displayName, isNamed: e.named !== null,
+            sub: `Lvl ${e.level} · MK${enemyMk(e.level)} · ${MOTIV_LABEL[e.motiveId] ?? e.motiveId}`,
+            hpFrac: e.combatant.hp / e.combatant.maxHp,
+          })),
+      ];
+      overviewMap.update(playerCombatant.x, playerCombatant.z, mapBlips, mouseX, mouseY);
+    }
 
     frame++;
 
