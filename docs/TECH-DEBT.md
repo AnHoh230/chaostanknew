@@ -3,6 +3,13 @@
 Sammelstelle für Dinge, die bewusst NICHT „mal eben" gefixt werden — sie brauchen
 eine eigene Brainstorm-/Design-Session, bevor implementiert wird.
 
+> **Pivot-Hinweis (2026-06-21):** Das Spiel wurde auf ein **Schwarm-Survival-Modell**
+> umgebaut (stil-getriebener Spawn, Konter über Verhalten — siehe Plan
+> `2026-06-20-reaktive-kriegsdoktrin.md`, Phasen R1–R5). Dabei wurden die alte
+> Utility-/Motiv-KI und die Gegner-Ökonomie **gelöscht**. **TD-1, TD-2, TD-4 und TD-5
+> beziehen sich auf diese Vor-Pivot-Systeme und sind weitgehend gegenstandslos** —
+> nur als Historie behalten. Aktuell relevant: **TD-6**.
+
 ---
 
 ## TD-1 — „Zu offensichtliche KI" (braucht eigene Brainstorm-Session)
@@ -119,3 +126,34 @@ bewusst offen gelassen:
   pausiert). Beim nächsten Vordergrund-Playtest über den Run-Log prüfen/tunen.
 
 **Status:** erste Fassung steht; obige Punkte als Folgearbeit.
+
+---
+
+## TD-6 — Schwarm-Kern (R1–R5) steht; Survival-Gerüst & Feintuning offen
+
+Der adaptive Spawn-Kern ist gebaut & abgenommen (R1–R5): Stil messen → Heat pro
+Richtung (asymmetrischer Decay) → Schwarm-Dichte + Typ-Mix → Verhaltens-Konter, alles
+sichtbar (Typ-Label, Schwarm-/Stil-Heat-HUD) und über Regler stellbar (persistiert).
+
+**Bewusst OFFEN — wartet auf das Gesamtdesign (mit GPT), NICHT vorbauen (YAGNI):**
+- **Survival-/Run-Struktur:** Rundenanfang/-ende, Sieg/Niederlage-Bedingung. Gibt es
+  aktuell nicht — die Welt läuft endlos.
+- **Aufrüstung/Build** zwischen oder während Runden (Upgrade-Auswahl, Meta-Progression).
+- **Rolle von Geld/XP/MK/Shop im neuen Modell.** Diese Systeme existieren noch aus der
+  Vor-Pivot-Zeit, sind aber im Schwarm-Modell **nicht neu eingeordnet**. Vor dem
+  Weiterbauen klären, ob/wie sie zum VS/Brotato-Loop passen (sonst entfernen).
+
+**Feintuning per Playtest (kein Design, nur Regler):**
+- Heat-Anstieg/Decay, Stufen-Schwellen, Frontlage-Puls: wie schnell soll sich die Welt
+  an einen Stilwechsel anpassen? (Default-Puls 40 s ist für „spürbar" evtl. zu träge.)
+- Schwarm-Dichte (Grunddichte/Dichte je Heat) vs. Performance: viele Panzer = Last.
+- Verhaltens-Tempi/Standoff je Typ — ob der Konter sich *fies genug* anfühlt, ist noch
+  **nicht erspielt** (Spieler-Urteil nötig, nicht messbar).
+
+**Mögliche kleine Politur (kein Blocker):**
+- `STYLE_LABEL` (main.ts) und die Doktrin-`displayName` doppeln die Richtungs-Benennung
+  — bei Gelegenheit zusammenführen.
+- Linke HUD-Panels (Schwarm/Stil-Heat) können bei vielen Typen eng werden; ggf.
+  zusammenlegen.
+
+**Status:** Kern fertig & verifiziert; Survival-Gerüst offen (eigene Session).

@@ -52,37 +52,37 @@ darauf aufbauen.
 
 **Files:** `src/doctrine/doctrineDirector.ts` (+ .test), `src/doctrine/doctrineConfig.ts`
 
-- [ ] **R1.1** Pro Richtung **unabhängiger** `heat` (0..100) + `stufe` (0..3 aus Heat-Bändern). **Kein** `activeId`, **kein** `commitmentLeft`.
-- [ ] **R1.2** **Asymmetrischer Decay** in `evaluate(profile)`: Richtung mit starkem Stil-Signal → Heat **+** (bis +25/Puls); Richtung ohne Signal → Heat **−** mit *kleinerer* Rate (Default −5/Puls). → genutzte Richtung heizt schnell, alte kühlt langsam.
-- [ ] **R1.3** Configs strippen auf: `id`, `displayName`, `triggers`, **`enemyTypesByStufe: string[][]`** (Stufe 0..3 → welche Gegner-Typ-IDs). `fieldObject/objective/lootMark/shopUnlock` entfernen.
-- [ ] **R1.4 Tests:** Sniper-Stil 3 Pulse → Sniper-Richtung Heat hoch + Stufe steigt; danach 1 Puls Rush → Rush-Heat steigt, **Sniper kühlt nur langsam** (beide noch heiß); mehrere Richtungen dürfen gleichzeitig hohe Stufe haben (kein Deckeln). tsc + grün. **Commit.**
+- [x] **R1.1** Pro Richtung **unabhängiger** `heat` (0..100) + `stufe` (0..3 aus Heat-Bändern). **Kein** `activeId`, **kein** `commitmentLeft`.
+- [x] **R1.2** **Asymmetrischer Decay** in `evaluate(profile)`: Richtung mit starkem Stil-Signal → Heat **+** (bis +25/Puls); Richtung ohne Signal → Heat **−** mit *kleinerer* Rate (Default −5/Puls). → genutzte Richtung heizt schnell, alte kühlt langsam.
+- [x] **R1.3** Configs strippen auf: `id`, `displayName`, `triggers`, **`enemyTypesByStufe: string[][]`** (Stufe 0..3 → welche Gegner-Typ-IDs). `fieldObject/objective/lootMark/shopUnlock` entfernen.
+- [x] **R1.4 Tests:** Sniper-Stil 3 Pulse → Sniper-Richtung Heat hoch + Stufe steigt; danach 1 Puls Rush → Rush-Heat steigt, **Sniper kühlt nur langsam** (beide noch heiß); mehrere Richtungen dürfen gleichzeitig hohe Stufe haben (kein Deckeln). tsc + grün. **Commit.**
 
 ## R2 — Gegner-Typ-Register mit Verhalten (ersetzt den Platzhalter-Loop)
 
 **Files:** `src/enemy/enemyTypes.ts` (+ ggf. .test für reine Auswahl/Verhaltens-Parameter), `src/enemy/enemy.ts`, `src/main.ts`
 
-- [ ] **R2.1** Typ-Register: jeder Gegner-Typ = `{ id, comp, behavior, baseStats }`. `behavior` = ein reines Bewegungs-/Angriffsmuster (z. B. `closer` schnell auf Spieler zu + Sichtlinie egal; `flanker` umkreist; `swarm` konvergiert in Masse; `disruptor` stürmt gezielt; `blocker`/`baiter` stellt sich in den Weg). Konter = Verhalten, nicht Stats.
-- [ ] **R2.2** Enemy bekommt `typeId` + ein per Typ gesetztes Verhalten; der **Platzhalter-Loop wird gelöscht** und durch ein Verhaltens-Dispatch ersetzt (pro Typ sein Muster). Rein testbare Bewegungs-Mathe wo möglich.
-- [ ] **R2.3 Verifikation:** je ein Typ pro Richtung sichtbar unterschiedlich (Browser). **Commit.**
+- [x] **R2.1** Typ-Register: jeder Gegner-Typ = `{ id, comp, behavior, baseStats }`. `behavior` = ein reines Bewegungs-/Angriffsmuster (z. B. `closer` schnell auf Spieler zu + Sichtlinie egal; `flanker` umkreist; `swarm` konvergiert in Masse; `disruptor` stürmt gezielt; `blocker`/`baiter` stellt sich in den Weg). Konter = Verhalten, nicht Stats.
+- [x] **R2.2** Enemy bekommt `typeId` + ein per Typ gesetztes Verhalten; der **Platzhalter-Loop wird gelöscht** und durch ein Verhaltens-Dispatch ersetzt (pro Typ sein Muster). Rein testbare Bewegungs-Mathe wo möglich.
+- [x] **R2.3 Verifikation:** je ein Typ pro Richtung sichtbar unterschiedlich (Browser). **Commit.**
 
 ## R3 — Stil-gewichteter Schwarm-Spawn (Kern)
 
 **Files:** `src/doctrine/spawnPlan.ts` (+ .test), `src/enemy/spawner.ts`, `src/main.ts`
 
-- [ ] **R3.1 (rein, TDD)** `planSwarm(directionStates)`: liefert (a) **Dichte/Anzahl** skaliert mit der **Summe der Heats**, (b) **Typ-Mix** gewichtet nach Heat/Stufe je Richtung (heiße Richtung → mehr ihrer Typen; Stufe wählt die Typ-Stufe-IDs aus `enemyTypesByStufe`). Mehrere heiße Richtungen → gemischter Mix.
-- [ ] **R3.2** Spawner konsumiert `planSwarm` (kontinuierlicher Schwarm-Nachschub statt fixem Roster-Cap). Vampire-Survivors-Dichte.
-- [ ] **R3.3 Verifikation:** Sniper-Stil → nach einigen Pulsen Schwarm aus Sniper-Konter-Typen; Stilwechsel → neue Typen mischen sich dazu, alte ebben langsam ab. **Commit.**
+- [x] **R3.1 (rein, TDD)** `planSwarm(directionStates)`: liefert (a) **Dichte/Anzahl** skaliert mit der **Summe der Heats**, (b) **Typ-Mix** gewichtet nach Heat/Stufe je Richtung (heiße Richtung → mehr ihrer Typen; Stufe wählt die Typ-Stufe-IDs aus `enemyTypesByStufe`). Mehrere heiße Richtungen → gemischter Mix.
+- [x] **R3.2** Spawner konsumiert `planSwarm` (kontinuierlicher Schwarm-Nachschub statt fixem Roster-Cap). Vampire-Survivors-Dichte.
+- [x] **R3.3 Verifikation:** Sniper-Stil → nach einigen Pulsen Schwarm aus Sniper-Konter-Typen; Stilwechsel → neue Typen mischen sich dazu, alte ebben langsam ab. **Commit.**
 
 ## R4 — Sichtbarkeit (leichtgewichtig, optional)
 
-- [ ] **R4.1** Kleine Anzeige, **welche Richtungen gerade heiß** sind + grob welche Typen kommen. Reine **Info** (kein „provozieren", kein Loot). **Commit.**
+- [x] **R4.1** Kleine Anzeige, **welche Richtungen gerade heiß** sind + grob welche Typen kommen. Reine **Info** (kein „provozieren", kein Loot). **Commit.**
 
 ## R5 — Abnahme
 
-- [ ] **R5.1** Sniper spielen → Sniper-Konter-Schwarm wächst über Pulse.
-- [ ] **R5.2** Stilwechsel → neue Richtung wächst, alte kühlt **langsamer** → nachweislich gemischter Schwarm.
-- [ ] **R5.3** Konter spürbar über **Verhalten** (Typen bedrängen die jeweilige Spielweise), nicht über Stat-Anpassung.
-- [ ] **R5.4** Politur + offene Punkte (Survival-Gerüst) in TECH-DEBT, als „wartet auf Gesamt-Design".
+- [x] **R5.1** Sniper spielen → Sniper-Konter-Schwarm wächst über Pulse.
+- [x] **R5.2** Stilwechsel → neue Richtung wächst, alte kühlt **langsamer** → nachweislich gemischter Schwarm.
+- [x] **R5.3** Konter spürbar über **Verhalten** (Typen bedrängen die jeweilige Spielweise), nicht über Stat-Anpassung.
+- [x] **R5.4** Politur + offene Punkte (Survival-Gerüst) in TECH-DEBT, als „wartet auf Gesamt-Design".
 
 ---
 
