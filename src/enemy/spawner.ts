@@ -1,22 +1,21 @@
 import type { Scene } from '@babylonjs/core';
 import { createEnemyEntity, type Enemy, type EnemySpec } from './enemy';
-import { ENEMY_TYPES, ENEMY_TYPE_IDS } from './enemyTypes';
+import { ENEMY_TYPES } from './enemyTypes';
+import { pickWeighted, type SwarmPlan } from '../doctrine/spawnPlan';
 
 export interface SpawnerOptions {
-  maxAlive: number; // wie viele gleichzeitig leben dürfen
-  interval: number; // Sekunden zwischen Spawns
+  interval(): number; // Sekunden zwischen Spawns (live per Regler)
   radiusMin: number; // Spawn-Abstand zum Spieler (außer Sicht)
   radiusMax: number;
   maxLevel: number; // höchstes Spawn-Level
 }
 
 export interface Spawner {
-  /** Pro Frame; gibt einen neuen Gegner zurück, wenn einer fällig ist (sonst null). */
-  update(simDt: number, playerX: number, playerZ: number, aliveCount: number): Enemy | null;
-  /** Maximale gleichzeitige Gegner zur Laufzeit ändern. */
-  setMaxAlive(n: number): void;
-  /** Sekunden zwischen Spawns zur Laufzeit ändern. */
-  setInterval(seconds: number): void;
+  /**
+   * Pro Frame; spawnt einen neuen Gegner, solange weniger als `plan.targetCount` leben und der
+   * Takt fällig ist. Der Typ wird gewichtet aus `plan.weights` gezogen (stil-getriebener Mix).
+   */
+  update(simDt: number, playerX: number, playerZ: number, aliveCount: number, plan: SwarmPlan): Enemy | null;
 }
 
 export function createSpawner(
@@ -28,25 +27,24 @@ export function createSpawner(
   let cd = 1.0; // erste Welle kommt schnell
   let seq = 0;
   let nameSeq = 0; // fortlaufende "Panzer N"-Nummer
-  let compSeq = 0; // rotiert über COMPS
-  let maxAlive = opts.maxAlive;
-  let spawnInterval = opts.interval;
 
-  function update(simDt: number, px: number, pz: number, aliveCount: number): Enemy | null {
+  function update(simDt: number, px: number, pz: number, aliveCount: number, plan: SwarmPlan): Enemy | null {
     cd -= simDt;
-    if (aliveCount >= maxAlive || cd > 0) return null;
-    cd = spawnInterval;
+    if (aliveCount >= plan.targetCount || cd > 0) return null;
+    cd = Math.max(0.1, opts.interval());
 
-    // Position: Ring um den Spieler unter zufälligem Winkel (kommt von außerhalb).
+    const typeId = pickWeighted(plan.weights, rng());
+    if (!typeId) return null;
+    const type = ENEMY_TYPES[typeId];
+    if (!type) return null;
+
+    // Position: Ring um den Spieler unter zufälligem Winkel (kommt von außerhalb der Sicht).
     const ang = rng() * Math.PI * 2;
     const r = opts.radiusMin + rng() * (opts.radiusMax - opts.radiusMin);
     const x = px + Math.cos(ang) * r;
     const z = pz + Math.sin(ang) * r;
 
     const level = 1 + Math.floor(rng() * opts.maxLevel);
-    // R2: alle Typen durchrotieren, damit jedes Verhalten sichtbar ist (R3 ersetzt das durch
-    // stil-gewichtete Auswahl). Optik + Verhalten kommen aus dem Typ-Register.
-    const type = ENEMY_TYPES[ENEMY_TYPE_IDS[compSeq++ % ENEMY_TYPE_IDS.length]!]!;
     const spec: EnemySpec = {
       id: 'e' + seq++,
       comp: type.comp,
@@ -59,13 +57,5 @@ export function createSpawner(
     return createEnemyEntity(scene, spec, tankRadius, rng);
   }
 
-  return {
-    update,
-    setMaxAlive: (n) => {
-      maxAlive = Math.max(0, Math.round(n));
-    },
-    setInterval: (seconds) => {
-      spawnInterval = Math.max(0.2, seconds);
-    },
-  };
+  return { update };
 }

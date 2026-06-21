@@ -18,6 +18,7 @@ import { createCombatSystem, type Combatant } from './combat/combat';
 import { createStyleTracker } from './doctrine/styleTracker';
 import { createDoctrineDirector } from './doctrine/doctrineDirector';
 import { DOCTRINES, HEAT_STRONG, HEAT_MID, HEAT_LIGHT, DECAY, BANDS } from './doctrine/doctrineConfig';
+import { planSwarm, type SwarmDirection } from './doctrine/spawnPlan';
 import { emptyProfile, STATIONARY_SPEED, type PlayerStyleProfile } from './doctrine/styleProfile';
 import { applyEnemyStats, type Enemy } from './enemy/enemy';
 import { pickDrop, enemyMk } from './enemy/equipment';
@@ -179,9 +180,13 @@ function boot(cls: TankClass): void {
   // Gegner werden dauerhaft nachgespawnt (feste Dichte; Steuerung kommt später über die Doktrin).
   const aiRng = createRng(SEED + 7);
   const roster: Enemy[] = []; // lebende Gegner (dynamisch)
+  // — Schwarm-Dichte/Takt (R3): wie viele Gegner gleichzeitig leben + wie schnell nachrücken.
+  // Alles als Live-Regler (Kategorie „Schwarm").
+  const swarmBaseGet = tunables.add({ label: 'Grunddichte', category: 'Schwarm', value: 4, min: 0, max: 40, step: 1 });
+  const swarmPerHeatGet = tunables.add({ label: 'Dichte je Heat', category: 'Schwarm', value: 0.1, min: 0, max: 0.6, step: 0.01 });
+  const swarmIntervalGet = tunables.add({ label: 'Spawn-Takt s', category: 'Schwarm', value: 0.8, min: 0.1, max: 5, step: 0.1 });
   const spawner = createSpawner(scene, TANK_RADIUS, () => aiRng.next(), {
-    maxAlive: 4,
-    interval: 3.5,
+    interval: swarmIntervalGet,
     radiusMin: 55, // größere, weiter gestreute Spawn-Area (kein Dauerfeuer auf der Stelle)
     radiusMax: 130,
     maxLevel: 3,
@@ -248,6 +253,15 @@ function boot(cls: TankClass): void {
     blockerSpeed: tunables.add({ label: 'Blocker-Tempo', category: 'Gegner', value: 1.3, min: 0.5, max: 3, step: 0.1 }),
     flankerOrbit: tunables.add({ label: 'Flanker-Orbit', category: 'Gegner', value: 0.85, min: 0.3, max: 1.5, step: 0.05 }),
     blockerLead: tunables.add({ label: 'Blocker-Vorhalt', category: 'Gegner', value: 14, min: 0, max: 40, step: 1 }),
+  };
+  // — Schwarm-Plan (R3): Heat-Lage → Dichte + Typ-Mix. Pro Frame neu, treibt den Spawner.
+  const swarmTuning = { base: swarmBaseGet, perHeat: swarmPerHeatGet };
+  const typesById = new Map(DOCTRINES.map((d) => [d.id, d.enemyTypesByStufe]));
+  const currentSwarmPlan = () => {
+    const dirs: SwarmDirection[] = director.states().map((s) => ({
+      id: s.id, heat: s.heat, stufe: s.stufe, typesByStufe: typesById.get(s.id) ?? [],
+    }));
+    return planSwarm(dirs, swarmTuning);
   };
   let playerStationary = false; // für „Schaden im Stand" + Stil
   let prevPx = 0, prevPz = 0, prevPosInit = false; // echtes Spielertempo aus Positionsdelta
@@ -794,6 +808,7 @@ function boot(cls: TankClass): void {
       director.evaluate({ ...emptyProfile(), ...partial });
       return director.states();
     },
+    swarm: () => currentSwarmPlan(),
     stats: () => loadout.stats(),
     loadout: () => loadout.equippedList().map((it) => it.id),
     bag: () => loadout.bag().map((it) => it.id),
@@ -981,9 +996,9 @@ function boot(cls: TankClass): void {
       alog.log('move', { x: +px.toFixed(1), z: +pz.toFixed(1), hp: Math.round(playerCombatant.hp), geld });
     }
 
-    // Permanenter Nachschub (P1): VOR dem Gegner-Verhalten.
+    // Stil-getriebener Schwarm-Nachschub (R3): Dichte + Typ-Mix aus der Heat-Lage.
     const aliveCount = roster.reduce((n, e) => n + (e.combatant.alive ? 1 : 0), 0);
-    const spawned = spawner.update(simDt, px, pz, aliveCount);
+    const spawned = spawner.update(simDt, px, pz, aliveCount, currentSwarmPlan());
     if (spawned) roster.push(spawned);
 
     // Gegner-Verhalten (R2): jeder Typ steuert nach seinem Muster auf einen Zielpunkt zu,
