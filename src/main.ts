@@ -292,7 +292,7 @@ function boot(cls: TankClass): void {
         metrics.onHitDealt(h.damage);
       } else if (h.target.id === 'player') {
         styleTracker.onDamageTaken({ amount: h.damage, stationary: playerStationary });
-        metrics.onDamageTaken(h.damage);
+        metrics.onDamageTaken(h.damage, h.projectile.ownerType);
       }
       log.debug('hit', { target: h.target.id, hp: h.target.hp, lethal: h.lethal });
     },
@@ -314,7 +314,7 @@ function boot(cls: TankClass): void {
       }
       // Spieler-Kill: Geld + XP (alle Gegner sind team 'enemy' → nur der Spieler killt).
       if (killerTeam === 'player') {
-        metrics.onKill();
+        metrics.onKill(e.typeId, runClock - (spawnTimes.get(e.id) ?? runClock));
         styleTracker.onKill({ dist: Math.hypot(e.combatant.x - playerCombatant.x, e.combatant.z - playerCombatant.z) });
         const reward = Math.round((e.combatant.lootValue ?? 0.4) * 120);
         geld += reward;
@@ -327,6 +327,7 @@ function boot(cls: TankClass): void {
       }
 
       // Gegner endgültig weg, Nachschub rückt nach.
+      spawnTimes.delete(e.id);
       e.view.root.dispose();
       const idx = roster.indexOf(e);
       if (idx >= 0) roster.splice(idx, 1);
@@ -339,6 +340,8 @@ function boot(cls: TankClass): void {
   let frame = 0;
   let shotSeq = 0;
   let snapCd = 0; // Diagnose-Snapshot-Takt (s); Default/Regler unten
+  let runClock = 0; // Laufzeit-Uhr (Summe simDt) für Gegner-Lebensdauer
+  const spawnTimes = new Map<string, number>(); // Gegner-ID → Spawn-Zeitpunkt (für Ø-Lebensdauer)
 
   // Feuern: Richtung im KLICK-Augenblick frisch aus dem aktuellen Cursor ableiten —
   // NICHT die (um einen Frame veraltete) Turm-Ausrichtung lesen. Sonst zielt der
@@ -417,13 +420,13 @@ function boot(cls: TankClass): void {
   }
 
   // Gegner feuert auf sein Ziel — eigene Fraktion (team = Gegner-id) + Level-Schaden.
-  function enemyFire(ox: number, oz: number, tx: number, tz: number, team: string, damage: number): void {
+  function enemyFire(ox: number, oz: number, tx: number, tz: number, team: string, damage: number, ownerType = ''): void {
     const dx = tx - ox;
     const dz = tz - oz;
     const l = Math.hypot(dx, dz) || 1;
     const p = pool.acquire({
       x: ox, y: 0.5, z: oz, dx: dx / l, dz: dz / l,
-      speed: PROJECTILE_SPEED, life: shotRange / PROJECTILE_SPEED, team, damage,
+      speed: PROJECTILE_SPEED, life: shotRange / PROJECTILE_SPEED, team, damage, ownerType,
     });
     if (p) bus.emit('projectile.spawned', { id: p.id });
   }
@@ -708,7 +711,7 @@ function boot(cls: TankClass): void {
     playerCombatant.alive = false;
     log.warn('player died', { cause });
     metrics.onDeath();
-    alog.log('player.death', { cause });
+    alog.log('player.death', { cause, byType: metrics.lastDamager() }); // welcher Typ den Spieler erlegte
     bus.emit('tank.died', { tankId: 'player' });
     respawnPlayer();
   }
@@ -1020,10 +1023,11 @@ function boot(cls: TankClass): void {
       }
     }
 
-    // Stil-getriebener Schwarm-Nachschub (R3): Dichte + Typ-Mix aus der Heat-Lage.
+    // Stil-getriebener Nachschub (gedeckelt): Typ-Mix aus der Heat-Lage, Zahl fest (Max Gegner).
+    runClock += simDt;
     const aliveCount = roster.reduce((n, e) => n + (e.combatant.alive ? 1 : 0), 0);
     const spawned = spawner.update(simDt, px, pz, aliveCount, currentSwarmPlan());
-    if (spawned) { roster.push(spawned); metrics.onSpawn(); }
+    if (spawned) { roster.push(spawned); metrics.onSpawn(spawned.typeId); spawnTimes.set(spawned.id, runClock); }
 
     // Run-Diagnostik: pro Frame messen, periodisch einen kompakten 'snap' loggen.
     metrics.frame(simDt, actualSpeed, aliveCount);
@@ -1039,7 +1043,7 @@ function boot(cls: TankClass): void {
         alive: aliveCount, target: plan.targetCount,
         hp: playerCombatant.hp, hpMax: playerCombatant.maxHp,
         geld, level: progression.level, mk: progression.unlockedMk(),
-        heat, mix: aliveByType,
+        px, pz, heat, mix: aliveByType,
       });
       alog.log('snap', snap as unknown as Record<string, unknown>);
     }
@@ -1071,7 +1075,7 @@ function boot(cls: TankClass): void {
       { const yaw = Math.atan2(px - er.position.x, pz - er.position.z); e.view.turretNode.rotation.y = yaw - er.rotation.y; }
       e.fireCd -= simDt;
       if (distToPlayer <= shotRange && e.fireCd <= 0) {
-        enemyFire(er.position.x, er.position.z, px, pz, 'enemy', e.damage * mods.damageMul);
+        enemyFire(er.position.x, er.position.z, px, pz, 'enemy', e.damage * mods.damageMul, e.typeId);
         e.fireCd = ENEMY_FIRE_COOLDOWN;
       }
       e.combatant.x = er.position.x;
