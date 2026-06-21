@@ -37,7 +37,8 @@ import { createBelt } from './player/belt';
 import { createBuffHud } from './ui/buffHud';
 import { BOOSTERS, type BoosterDef } from './shop/boosters';
 import { createActionLog } from './debug/actionLog';
-import { createCameraPanel } from './ui/cameraPanel';
+import { createTunables } from './ui/tunables';
+import { createTuningPanel } from './ui/tuningPanel';
 import { TANK_CLASSES, type TankClass } from './game/classes';
 import { createPickupField } from './loot/pickups';
 import { createShopField } from './world/shopTiles';
@@ -165,6 +166,7 @@ function boot(cls: TankClass): void {
 
   // Kamera auf den Panzer-Root
   const camera = createCameraRig(scene, tank.view.root);
+  const tunables = createTunables(); // Registry für alle live-stellbaren Magic Numbers
 
   // Projektil-Pool (rein logisch) + sichtbare Mesh-Brücke
   const pool = createProjectilePool(PROJECTILE_CAPACITY);
@@ -440,19 +442,18 @@ function boot(cls: TankClass): void {
   const minimap = createMinimap();
   const enemyBars = createEnemyBars(scene, camera, engine); // HP-Balken über den Gegnern
   const lootLabels = createLootLabels(scene, camera, engine); // Item-Namen über den Loot-Würfeln
-  // Live-Tuning-Regler (Schussweite, Max-Gegner, Spawn-Intervall) — vom Panel gelesen.
-  (window as unknown as { __tune: unknown }).__tune = {
-    getShotRange: () => shotRange,
-    setShotRange: (v: number) => {
-      shotRange = Math.max(8, v);
-    },
-    getPulse: () => pulseLen,
-    setPulse: (v: number) => {
-      pulseLen = Math.max(10, v);
-    },
-  };
-  // Jede Regler-Änderung in den Run-Log schreiben (kein manuelles Durchgeben nötig).
-  createCameraPanel((name, value) => alog.log('regler', { name, value }));
+  // — Regler-Registry (R0): jede live-stellbare Magic Number wird hier registriert und
+  // erscheint automatisch im filterbaren Tuning-HUD. Spielcode liest die Live-Getter.
+  const camApi = (window as unknown as { __cam?: { set(h: number, b: number, f?: number): void; get(): { height: number; back: number; fov: number } } }).__cam;
+  const cam0 = camApi?.get() ?? { height: 25, back: 55, fov: 0.87 };
+  let camH = cam0.height, camB = cam0.back, camF = cam0.fov;
+  const applyCam = (): void => camApi?.set(camH, camB, camF);
+  tunables.add({ label: 'Höhe', category: 'Kamera', value: camH, min: 8, max: 60, step: 1, onChange: (v) => { camH = v; applyCam(); } });
+  tunables.add({ label: 'Distanz', category: 'Kamera', value: camB, min: 5, max: 80, step: 1, onChange: (v) => { camB = v; applyCam(); } });
+  tunables.add({ label: 'Zoom (FOV)', category: 'Kamera', value: camF, min: 0.3, max: 1.0, step: 0.01, onChange: (v) => { camF = v; applyCam(); } });
+  tunables.add({ label: 'Schussweite', category: 'Kampf', value: shotRange, min: 8, max: 120, step: 1, onChange: (v) => { shotRange = v; } });
+  tunables.add({ label: 'Frontlage-Puls s', category: 'Doktrin', value: pulseLen, min: 10, max: 120, step: 5, onChange: (v) => { pulseLen = v; } });
+  createTuningPanel(tunables, { onChange: (label, value) => alog.log('regler', { label, value }) });
 
   // Inspizier-System (P0): M = Echtzeit-Übersichtskarte, I = modaler Tiefblick (Pause).
   const overviewMap = createOverviewMap();
