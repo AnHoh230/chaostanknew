@@ -1,102 +1,72 @@
 import type { PlayerStyleProfile } from './styleProfile';
 
-/** Stufen einer Doktrin (Spec §7.2). */
-export type DoctrineStage = 'inactive' | 'hint' | 'preparing' | 'active' | 'escalated';
-
-/** Ein Stil-Wert, der Hitze für eine Doktrin erzeugt (Schwellen in der Einheit des Feldes). */
+/** Ein Stil-Wert, der Heat für eine Richtung erzeugt (Schwellen in der Einheit des Feldes). */
 export interface DoctrineTrigger {
   field: keyof PlayerStyleProfile;
   mid: number; // ab hier „mittel"
   strong: number; // ab hier „stark"
 }
 
-/** Konfiguration einer Doktrin (Daten — die Engine ist generisch). */
+/**
+ * Konfiguration einer Spielstil-RICHTUNG (Daten — die Engine ist generisch).
+ * Heat dieser Richtung bestimmt, WELCHE Monster-Typen spawnen (pro Stufe) und WIE VIELE.
+ */
 export interface DoctrineConfig {
   id: string;
-  displayName: string; // „Störkrieg"
-  playerReason: string; // Frontlage-Erklärung (player-facing)
+  displayName: string; // „Störkrieg" (Info/HUD)
   triggers: DoctrineTrigger[];
-  enemyTemplateIds: string[]; // Doktrin-Gegner (P5)
-  fieldObjectId: string; // Quell-/Zielobjekt (P5)
-  objectiveText: string; // „Zerstöre das Signal-Relay"
-  lootMarkId: string; // Freischalt-Marke (P6)
-  shopUnlockIds: string[]; // Konter-Items (P6)
+  /** Stufe 0..3 → welche Monster-Typ-IDs in dieser Richtung auftauchen (R2 liefert die Typen). */
+  enemyTypesByStufe: string[][];
 }
 
-// — Heat-/Stage-Regeln (Spec §23) —
-export const HINT = 25;
-export const PREPARE = 50;
-export const ACTIVE = 75;
-export const ESCALATED = 90;
-export const HEAT_STRONG = 25;
-export const HEAT_MID = 15;
-export const HEAT_LIGHT = 8;
-export const HEAT_DECAY = -10;
-export const SABOTAGE = -30;
-export const PROVOKE = 25;
-export const COMMITMENT = 2; // Pulse, die eine aktive Doktrin mindestens bleibt
+// — Heat-Regeln (Defaults, live per Regler korrigierbar) —
+export const HEAT_STRONG = 25; // Anstieg/Puls bei starkem Stil-Signal
+export const HEAT_MID = 15; // Anstieg/Puls bei mittlerem Signal
+export const HEAT_LIGHT = 8; // Anstieg/Puls bei leichtem Signal
+export const DECAY = 5; // Abkühlung/Puls für ungenutzte Richtungen (asymmetrisch: deutlich < Anstieg)
+export const BANDS: readonly number[] = [30, 60, 85]; // Heat-Schwellen für Stufe 1 / 2 / 3
 
-/** Reihenfolge für Stufen-Vergleiche/Deckelung. */
-export const STAGE_ORDER: DoctrineStage[] = ['inactive', 'hint', 'preparing', 'active', 'escalated'];
-
-export function stageFromHeat(heat: number): DoctrineStage {
-  if (heat >= ESCALATED) return 'escalated';
-  if (heat >= ACTIVE) return 'active';
-  if (heat >= PREPARE) return 'preparing';
-  if (heat >= HINT) return 'hint';
-  return 'inactive';
+/** Stufe 0..3 aus dem Heat über die Bänder. */
+export function stufeFromHeat(heat: number, bands: readonly number[] = BANDS): number {
+  let s = 0;
+  for (const b of bands) if (heat >= b) s += 1;
+  return s;
 }
 
-/** Die 4 MVP-Doktrinen (Quelle der Wahrheit für die Engine). */
+/**
+ * Die 4 MVP-Richtungen (Quelle der Wahrheit für die Engine). Konter entsteht über das
+ * VERHALTEN der gewählten Monster-Typen (R2), nicht über an den Spieler balancierte Stats.
+ * Typ-IDs entsprechen Verhaltensmustern aus dem R2-Register (closer/flanker/swarm/disruptor/blocker).
+ */
 export const DOCTRINES: DoctrineConfig[] = [
   {
-    id: 'stoerkrieg',
+    id: 'stoerkrieg', // Auto-Turret-lastig → Typen, die in den Nahbereich/hinter die Wanne drängen
     displayName: 'Störkrieg',
-    playerReason: 'Feindliche Aufklärung hat starke automatische Waffen erkannt.',
     triggers: [{ field: 'autoTurretDamageRatio', mid: 0.35, strong: 0.55 }],
-    enemyTemplateIds: ['jammer_bike', 'stoerpanzer'],
-    fieldObjectId: 'signal_relay',
-    objectiveText: 'Zerstöre das Signal-Relay',
-    lootMarkId: 'stoerspule',
-    shopUnlockIds: ['turret_abschirmung'],
+    enemyTypesByStufe: [[], ['closer'], ['closer', 'flanker'], ['closer', 'flanker', 'swarm']],
   },
   {
-    id: 'belagerung',
+    id: 'belagerung', // Einbunkern → Typen, die die feste Stellung anstürmen/umstellen
     displayName: 'Belagerungsdruck',
-    playerReason: 'Die Feinde haben deine Stellung erkannt. Belagerungseinheiten rücken an.',
     triggers: [
       { field: 'stationaryRatio', mid: 0.4, strong: 0.6 },
       { field: 'timeInSameArea', mid: 20, strong: 40 },
     ],
-    enemyTemplateIds: ['beobachterwagen', 'belagerungspanzer'],
-    fieldObjectId: 'beobachtungsturm',
-    objectiveText: 'Schalte den Beobachter aus',
-    lootMarkId: 'optikmodul',
-    shopUnlockIds: ['zielwarn_empfaenger'],
+    enemyTypesByStufe: [[], ['disruptor'], ['disruptor', 'blocker'], ['disruptor', 'blocker', 'flanker']],
   },
   {
-    id: 'nebel',
-    displayName: 'Nebel & Aufklärung',
-    playerReason: 'Die Feinde verschleiern ihre Bewegung und schicken Aufklärer gegen deine Sichtlinien.',
+    id: 'nebel', // Distanz/Sniper → schnelle Typen, die die Distanz schließen / Sichtlinie brechen
+    displayName: 'Nahkampfdruck',
     triggers: [{ field: 'longRangeKillRatio', mid: 0.4, strong: 0.65 }],
-    enemyTemplateIds: ['rauchwerfer', 'scout_runner'],
-    fieldObjectId: 'rauchgenerator',
-    objectiveText: 'Zerstöre den Rauchgenerator',
-    lootMarkId: 'scout_optik',
-    shopUnlockIds: ['waermebild_optik'],
+    enemyTypesByStufe: [[], ['closer'], ['closer', 'flanker'], ['closer', 'flanker', 'swarm']],
   },
   {
-    id: 'sperrkrieg',
+    id: 'sperrkrieg', // Rush → Typen, die den Vorstoß stoppen / sich in den Weg stellen
     displayName: 'Sperrkrieg',
-    playerReason: 'Die Feinde legen Sperren, Minen und Köder aus, um deinen Vorstoß zu bremsen.',
     triggers: [
       { field: 'closeRangeKillRatio', mid: 0.4, strong: 0.6 },
       { field: 'avgSpeed', mid: 6, strong: 9 },
     ],
-    enemyTemplateIds: ['minenleger', 'blocker_panzer'],
-    fieldObjectId: 'minenleger_kommandowagen',
-    objectiveText: 'Zerstöre den Minenleger',
-    lootMarkId: 'minenkit',
-    shopUnlockIds: ['minenpflug'],
+    enemyTypesByStufe: [[], ['blocker'], ['blocker', 'swarm'], ['blocker', 'swarm', 'disruptor']],
   },
 ];

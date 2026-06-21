@@ -17,7 +17,7 @@ import { createProjectileView } from './combat/projectileView';
 import { createCombatSystem, type Combatant } from './combat/combat';
 import { createStyleTracker } from './doctrine/styleTracker';
 import { createDoctrineDirector } from './doctrine/doctrineDirector';
-import { DOCTRINES } from './doctrine/doctrineConfig';
+import { DOCTRINES, HEAT_STRONG, HEAT_MID, HEAT_LIGHT, DECAY, BANDS } from './doctrine/doctrineConfig';
 import { emptyProfile, STATIONARY_SPEED, type PlayerStyleProfile } from './doctrine/styleProfile';
 import { applyEnemyStats, type Enemy } from './enemy/enemy';
 import { pickDrop, enemyMk } from './enemy/equipment';
@@ -221,9 +221,22 @@ function boot(cls: TankClass): void {
   const PICKUP_REACH = TANK_RADIUS + 0.8;
   const lastDrops: string[] = []; // Verifikation: tatsächlich gedroppte Item-IDs
 
-  // — Reaktive Kriegsdoktrin (P1-P3): Stil messen → Heat/Stage je Frontlage-Puls —
+  // — Reaktive Schwarm-Welt (R1): Stil messen → Heat pro Richtung je Frontlage-Puls.
+  // Heat bestimmt, welche Monster-Typen + wie viele spawnen. Asymmetrischer Decay:
+  // genutzte Richtung heizt schnell, ungenutzte kühlt langsam → mehrere Richtungen gleichzeitig.
+  // Alle Heat-Zahlen sind Regler (Kategorie „Doktrin").
   const styleTracker = createStyleTracker();
-  const director = createDoctrineDirector(DOCTRINES);
+  const heatStrongGet = tunables.add({ label: 'Heat +stark', category: 'Doktrin', value: HEAT_STRONG, min: 1, max: 60, step: 1 });
+  const heatMidGet = tunables.add({ label: 'Heat +mittel', category: 'Doktrin', value: HEAT_MID, min: 1, max: 60, step: 1 });
+  const heatLightGet = tunables.add({ label: 'Heat +leicht', category: 'Doktrin', value: HEAT_LIGHT, min: 0, max: 40, step: 1 });
+  const decayGet = tunables.add({ label: 'Abkühlung/Puls', category: 'Doktrin', value: DECAY, min: 0, max: 40, step: 1 });
+  const band1Get = tunables.add({ label: 'Stufe-1-Schwelle', category: 'Doktrin', value: BANDS[0]!, min: 5, max: 95, step: 1 });
+  const band2Get = tunables.add({ label: 'Stufe-2-Schwelle', category: 'Doktrin', value: BANDS[1]!, min: 5, max: 99, step: 1 });
+  const band3Get = tunables.add({ label: 'Stufe-3-Schwelle', category: 'Doktrin', value: BANDS[2]!, min: 5, max: 100, step: 1 });
+  const director = createDoctrineDirector(DOCTRINES, {
+    heatStrong: heatStrongGet, heatMid: heatMidGet, heatLight: heatLightGet,
+    decay: decayGet, bands: () => [band1Get(), band2Get(), band3Get()],
+  });
   let playerStationary = false; // für „Schaden im Stand" + Stil
   let prevPx = 0, prevPz = 0, prevPosInit = false; // echtes Spielertempo aus Positionsdelta
   let pulseLen = 40; // Frontlage-Puls-Fensterlänge (s), live per Regler
@@ -763,10 +776,9 @@ function boot(cls: TankClass): void {
         x: +e.combatant.x.toFixed(1), z: +e.combatant.z.toFixed(1),
       })),
     // Reaktive Doktrin: Zustand lesen + (Test) einen Puls mit synthetischem Stil einspeisen.
-    doctrines: () => ({ active: director.activeId(), pulseCd: +pulseCd.toFixed(1), pulseLen, states: director.states() }),
+    doctrines: () => ({ pulseCd: +pulseCd.toFixed(1), pulseLen, states: director.states() }),
     feedPulse: (partial: Partial<PlayerStyleProfile>) => {
       director.evaluate({ ...emptyProfile(), ...partial });
-      director.tickCommitment();
       return director.states();
     },
     stats: () => loadout.stats(),
@@ -929,7 +941,6 @@ function boot(cls: TankClass): void {
     pulseCd -= simDt;
     if (pulseCd <= 0) {
       director.evaluate(styleTracker.snapshotAndReset());
-      director.tickCommitment();
       pulseCd = pulseLen;
     }
 
