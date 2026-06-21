@@ -262,6 +262,8 @@ function boot(cls: TankClass): void {
     flankerOrbit: tunables.add({ label: 'Flanker-Orbit', category: 'Gegner', value: 0.85, min: 0.3, max: 1.5, step: 0.05 }),
     blockerLead: tunables.add({ label: 'Blocker-Vorhalt', category: 'Gegner', value: 14, min: 0, max: 40, step: 1 }),
   };
+  // Fix A: wie stark Gegner das Spielerziel vorhalten (0 = auf Ist-Position, 1 = volle Lead-Korrektur).
+  const enemyLeadGet = tunables.add({ label: 'Vorhalt-Stärke', category: 'Gegner', value: 0.8, min: 0, max: 1.5, step: 0.05 });
   // — Gegner-Plan: Heat-Lage → Typ-MIX (welche Archetypen kontern deinen Stil). Die ZAHL ist
   // fest gedeckelt (Max Gegner), NICHT heat-getrieben → kein Dichte-Spiral, kein Schwarm.
   const swarmTuning = { base: maxEnemiesGet, perHeat: () => 0 };
@@ -1075,7 +1077,12 @@ function boot(cls: TankClass): void {
       { const yaw = Math.atan2(px - er.position.x, pz - er.position.z); e.view.turretNode.rotation.y = yaw - er.rotation.y; }
       e.fireCd -= simDt;
       if (distToPlayer <= shotRange && e.fireCd <= 0) {
-        enemyFire(er.position.x, er.position.z, px, pz, 'enemy', e.damage * mods.damageMul, e.typeId);
+        // Fix A: aufs vorausberechnete Ziel feuern (wohin der Spieler fährt), nicht auf die
+        // Ist-Position → reines Geradeausfahren ist keine Gratis-Unverwundbarkeit mehr.
+        const tLead = (distToPlayer / PROJECTILE_SPEED) * enemyLeadGet();
+        const aimX = px + playerVelX * tLead;
+        const aimZ = pz + playerVelZ * tLead;
+        enemyFire(er.position.x, er.position.z, aimX, aimZ, 'enemy', e.damage * mods.damageMul, e.typeId);
         e.fireCd = ENEMY_FIRE_COOLDOWN;
       }
       e.combatant.x = er.position.x;
