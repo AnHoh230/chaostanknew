@@ -598,9 +598,9 @@ function boot(combatStyle: CombatStyle): void {
   const enemyBars = createEnemyBars(scene, camera, engine); // HP-Balken über den Gegnern
   const swarmHud = createSwarmHud(); // Schwarm-Lage: Anzahl je Typ + Zieldichte
   const heatHud = createHeatHud(); // Heat je Stil-Richtung (warum dieser Mix)
-  // Spielernahe Namen der 4 Richtungen (was den Heat treibt).
+  // Spielernahe Namen der Richtungen (was den Heat treibt). Bunker entfernt (s. doctrineConfig).
   const STYLE_LABEL: Record<string, string> = {
-    stoerkrieg: 'Auto-Turret', belagerung: 'Bunkern', nebel: 'Distanz', sperrkrieg: 'Rush',
+    stoerkrieg: 'Auto-Turret', nebel: 'Distanz', sperrkrieg: 'Rush',
   };
   const lootLabels = createLootLabels(scene, camera, engine); // Item-Namen über den Loot-Würfeln
   // — Regler-Registry (R0): jede live-stellbare Magic Number wird hier registriert und

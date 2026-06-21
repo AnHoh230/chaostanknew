@@ -45,15 +45,9 @@ export const DOCTRINES: DoctrineConfig[] = [
     triggers: [{ field: 'autoTurretDamageRatio', mid: 0.35, strong: 0.55 }],
     enemyTypesByStufe: [[], ['closer'], ['closer', 'flanker'], ['closer', 'flanker', 'swarm']],
   },
-  {
-    id: 'belagerung', // Einbunkern → Typen, die die feste Stellung anstürmen/umstellen
-    displayName: 'Belagerungsdruck',
-    triggers: [
-      { field: 'stationaryRatio', mid: 0.4, strong: 0.6 },
-      { field: 'timeInSameArea', mid: 20, strong: 40 },
-    ],
-    enemyTypesByStufe: [[], ['disruptor'], ['disruptor', 'blocker'], ['disruptor', 'blocker', 'flanker']],
-  },
+  // 'belagerung' (Bunker) entfernt: stationäres Snipern triggerte es zusätzlich zu Distanz →
+  // zwei Konter für den Sniper. Bunker war zugleich der EINZIGE Trigger für AoE — der AoE-Konter
+  // muss daher neu durchdacht werden (offen). Bis dahin hat AoE keine eigene Heat-Richtung.
   {
     id: 'nebel', // Distanz/Sniper → schnelle Typen, die die Distanz schließen / Sichtlinie brechen
     displayName: 'Nahkampfdruck',
