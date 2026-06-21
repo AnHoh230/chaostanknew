@@ -258,7 +258,7 @@ function boot(cls: TankClass): void {
   // als Live-Regler (Kategorie „Gegner") — die zentralen Playtest-Stellschrauben des Konters.
   const behaviorTuning = {
     closerSpeed: tunables.add({ label: 'Closer-Tempo', category: 'Gegner', value: 1.4, min: 0.5, max: 3, step: 0.1 }),
-    flankerSpeed: tunables.add({ label: 'Flanker-Tempo', category: 'Gegner', value: 1.1, min: 0.5, max: 3, step: 0.1 }),
+    flankerSpeed: tunables.add({ label: 'Flanker-Tempo', category: 'Gegner', value: 0.7, min: 0.5, max: 3, step: 0.1 }),
     swarmSpeed: tunables.add({ label: 'Swarm-Tempo', category: 'Gegner', value: 0.9, min: 0.5, max: 3, step: 0.1 }),
     disruptorSpeed: tunables.add({ label: 'Disruptor-Tempo', category: 'Gegner', value: 1.8, min: 0.5, max: 3, step: 0.1 }),
     blockerSpeed: tunables.add({ label: 'Blocker-Tempo', category: 'Gegner', value: 1.3, min: 0.5, max: 3, step: 0.1 }),

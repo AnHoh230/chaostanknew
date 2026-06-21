@@ -33,7 +33,7 @@ export interface BehaviorTuning {
 
 export const DEFAULT_BEHAVIOR_TUNING: BehaviorTuning = {
   closerSpeed: () => 1.4,
-  flankerSpeed: () => 1.1,
+  flankerSpeed: () => 0.7,
   swarmSpeed: () => 0.9,
   disruptorSpeed: () => 1.8,
   blockerSpeed: () => 1.3,
