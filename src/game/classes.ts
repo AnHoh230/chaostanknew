@@ -12,33 +12,14 @@ export interface TankClass {
 }
 
 /**
- * Drei Startklassen, sichtbar aus verschiedenen Teilen komponiert und mit klarem
- * Stat-Profil (schnell-leicht ↔ langsam-schwer). Klasse ist nur ein Startpunkt —
- * Teile lassen sich später per Loot/Shop verändern.
+ * EINE Startklasse (Rogue-like-Fokus): der Panzer ist gesetzt, Fortschritt kommt über
+ * Fähigkeiten (Dash) + Loot, nicht über Klassenwahl. Die Multiklasse wurde entfernt.
  */
 export const TANK_CLASSES: readonly TankClass[] = [
   {
-    id: 'spaeher',
-    name: 'Späher',
-    beschreibung: 'Schnell und wendig, aber dünn gepanzert. Für Hit-and-Run.',
-    composition: { chassis: 'c_box', wheels: 'w_round', turret: 't_small', weapon: 'g_short' },
-    speed: 12,
-    maxHp: 70,
-    damage: 14,
-  },
-  {
-    id: 'allrounder',
-    name: 'Allrounder',
-    beschreibung: 'Ausgewogen in Tempo, Panzerung und Feuerkraft.',
-    composition: { chassis: 'c_box', wheels: 'w_tread', turret: 't_big', weapon: 'g_short' },
-    speed: 8,
-    maxHp: 110,
-    damage: 22,
-  },
-  {
     id: 'haubitze',
-    name: 'Haubitze',
-    beschreibung: 'Langsam und schwer, dafür dicke Panzerung und harte Schläge.',
+    name: 'Panzer',
+    beschreibung: 'Schwer gepanzert, harte Schläge. Weiche per Dash (Shift+WASD) aus.',
     composition: { chassis: 'c_wide', wheels: 'w_tread', turret: 't_big', weapon: 'g_long' },
     speed: 5,
     maxHp: 160,

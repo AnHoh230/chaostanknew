@@ -181,6 +181,11 @@ function boot(cls: TankClass): void {
   // Live einstellbar (Regler im Panel): Schussweite.
   let shotRange = 40; // Weltеinheiten, die ein Schuss fliegt (nicht über die ganze Map)
   let playerProjSpeed = 60; // Spieler-Projektiltempo (schneller als Gegner → bewegliche Ziele treffbar)
+  // Dash (Shift+WASD): kurzer Burst in Tasten-Richtung (heading-relativ), CD sichtbar im HUD.
+  let dashCd = 0, dashTimer = 0, dashDirX = 0, dashDirZ = 0;
+  let dashDist = 14, dashDur = 0.16, dashCdMax = 5;
+  // Vorerst deaktivierte Gegner-Typen (brauchen mehr Spieler-Gegenmittel, bevor sie fair sind).
+  const DISABLED_TYPES = new Set<string>(['flanker']);
 
   // Gegner werden dauerhaft nachgespawnt (feste Dichte; Steuerung kommt später über die Doktrin).
   const aiRng = createRng(SEED + 7);
@@ -275,7 +280,9 @@ function boot(cls: TankClass): void {
     const dirs: SwarmDirection[] = director.states().map((s) => ({
       id: s.id, heat: s.heat, stufe: s.stufe, typesByStufe: typesById.get(s.id) ?? [],
     }));
-    return planSwarm(dirs, swarmTuning);
+    const plan = planSwarm(dirs, swarmTuning);
+    for (const t of DISABLED_TYPES) delete plan.weights[t]; // deaktivierte Typen nicht spawnen
+    return plan;
   };
   let playerStationary = false; // für „Schaden im Stand" + Stil
   let prevPx = 0, prevPz = 0, prevPosInit = false; // echtes Spielertempo aus Positionsdelta
@@ -495,6 +502,23 @@ function boot(cls: TankClass): void {
     () => BASE_TURRET_SLEW * playerBuffs.aggregate().turretSlewMul,
   );
 
+  // Dash-Auslöser: Shift + W/A/S/D = kurzer Burst in die Richtung (heading-relativ).
+  window.addEventListener('keydown', (ev) => {
+    if (!ev.shiftKey || ev.repeat) return;
+    const k = ev.key.toLowerCase();
+    if (k !== 'w' && k !== 'a' && k !== 's' && k !== 'd') return;
+    if (dashCd > 0 || !playerCombatant.alive) return;
+    const yaw = tank.view.root.rotation.y;
+    const sin = Math.sin(yaw), cos = Math.cos(yaw);
+    if (k === 'w') { dashDirX = sin; dashDirZ = cos; } // vorwärts
+    else if (k === 's') { dashDirX = -sin; dashDirZ = -cos; } // rückwärts
+    else if (k === 'a') { dashDirX = -cos; dashDirZ = sin; } // links (strafe)
+    else { dashDirX = cos; dashDirZ = -sin; } // rechts (strafe)
+    dashTimer = dashDur;
+    dashCd = dashCdMax;
+    alog.log('dash', { dir: k });
+  });
+
   // OS-Mauszeiger über dem Canvas ausblenden — das Spiel zeichnet sein eigenes
   // Fadenkreuz, das frame-synchron mit dem Turm läuft (kein Render-Weg-Versatz).
   canvas.style.cursor = 'none';
@@ -522,6 +546,8 @@ function boot(cls: TankClass): void {
   tunables.add({ label: 'Zoom (FOV)', category: 'Kamera', value: camF, min: 0.3, max: 1.0, step: 0.01, onChange: (v) => { camF = v; applyCam(); } });
   tunables.add({ label: 'Schussweite', category: 'Kampf', value: shotRange, min: 8, max: 120, step: 1, onChange: (v) => { shotRange = v; } });
   tunables.add({ label: 'Spieler-Projektiltempo', category: 'Kampf', value: playerProjSpeed, min: 20, max: 120, step: 5, onChange: (v) => { playerProjSpeed = v; } });
+  tunables.add({ label: 'Dash-Distanz', category: 'Fähigkeiten', value: dashDist, min: 4, max: 40, step: 1, onChange: (v) => { dashDist = v; } });
+  tunables.add({ label: 'Dash-Cooldown s', category: 'Fähigkeiten', value: dashCdMax, min: 1, max: 15, step: 0.5, onChange: (v) => { dashCdMax = v; } });
   tunables.add({ label: 'Frontlage-Puls s', category: 'Doktrin', value: pulseLen, min: 2, max: 120, step: 2, onChange: (v) => { pulseLen = v; } });
   createTuningPanel(tunables, { onChange: (label, value) => alog.log('regler', { label, value }) });
 
@@ -583,6 +609,20 @@ function boot(cls: TankClass): void {
     }
   }
   updateBeltHud();
+  // Dash-Slot rechts neben dem Gürtel: zeigt Bereitschaft bzw. CD-Countdown.
+  const dashSlotEl = document.createElement('div');
+  dashSlotEl.style.cssText =
+    'min-width:78px;text-align:center;background:rgba(8,12,16,0.78);border:1px solid #2a343b;' +
+    'border-radius:7px;padding:5px 8px;font:600 10px system-ui,sans-serif;';
+  beltHud.appendChild(dashSlotEl);
+  function updateDashHud(): void {
+    const ready = dashCd <= 0;
+    dashSlotEl.style.borderColor = ready ? '#3c7d6e' : '#2a343b';
+    dashSlotEl.innerHTML =
+      `<div style="color:${ready ? '#7fd1c0' : '#7a8a86'};font-weight:800">⇄ Dash</div>` +
+      (ready ? `<div style="color:#cdd6dd">Shift+WASD</div>` : `<div style="color:#ffae5b;font-weight:800">${dashCd.toFixed(1)}s</div>`);
+  }
+  updateDashHud();
 
   function applyBooster(def: BoosterDef): void {
     const eff = def.effect;
@@ -993,6 +1033,15 @@ function boot(cls: TankClass): void {
     playerCombatant.incomingMul = pmods.incomingMul; // Verwundbarkeit (falls Gegner später markieren)
     buffHud.update(playerBuffs.active());
     input.update(simDt);
+    // Dash: kurzer Positions-Burst zusätzlich zur normalen Bewegung; CD läuft sichtbar runter.
+    dashCd = Math.max(0, dashCd - simDt);
+    if (dashTimer > 0 && simDt > 0) {
+      const step = (dashDist / dashDur) * simDt;
+      tank.view.root.position.x += dashDirX * step;
+      tank.view.root.position.z += dashDirZ * step;
+      dashTimer -= simDt;
+    }
+    updateDashHud();
     reticle.update(input.getAimTarget()); // gleicher Frame wie der Turm
     pool.update(simDt);
     updateFx(simDt); // Laser/Rauch-Effekte altern lassen
