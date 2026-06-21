@@ -186,7 +186,7 @@ function boot(cls: TankClass): void {
   const roster: Enemy[] = []; // lebende Gegner (dynamisch)
   // — Gegner-Aufkommen (Richtung A): feste, gedeckelte Zahl bedeutsamer Gegner-Panzer
   // (KEIN Schwarm/keine Dichte-aus-Heat mehr). Der Heat bestimmt nur noch die Typ-AUSWAHL.
-  const maxEnemiesGet = tunables.add({ label: 'Max Gegner', category: 'Gegner', value: 6, min: 1, max: 20, step: 1 });
+  const maxEnemiesGet = tunables.add({ label: 'Max Gegner', category: 'Gegner', value: 3, min: 1, max: 20, step: 1 });
   const swarmIntervalGet = tunables.add({ label: 'Spawn-Takt s', category: 'Gegner', value: 1.5, min: 0.2, max: 6, step: 0.1 });
   const enemyHpGet = tunables.add({ label: 'Gegner-HP-Faktor', category: 'Gegner', value: 0.5, min: 0.1, max: 2, step: 0.05 });
   const spawner = createSpawner(scene, TANK_RADIUS, () => aiRng.next(), {
