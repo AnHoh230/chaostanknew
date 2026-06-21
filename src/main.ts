@@ -45,7 +45,7 @@ import { createActionLog } from './debug/actionLog';
 import { createRunMetrics } from './debug/runMetrics';
 import { createTunables } from './ui/tunables';
 import { createTuningPanel } from './ui/tuningPanel';
-import { TANK_CLASSES, type TankClass } from './game/classes';
+import { TANK_CLASSES } from './game/classes';
 import { createPickupField } from './loot/pickups';
 import { createShopField } from './world/shopTiles';
 import { CATALOG, SLOT_SOCKET, catalogItem, cloneItem, mostExpensiveItemPrice, type ShopItem, type Slot } from './shop/catalog';
@@ -70,20 +70,19 @@ const PROJECTILE_RADIUS = 0.3;
 const HIT_DAMAGE = 20; // Schaden pro Treffer (100 HP -> 5 Treffer)
 const ENEMY_SPEED = 5; // langsamer als der Spieler (8)
 const ENEMY_FIRE_COOLDOWN = 1.4; // Sekunden zwischen Gegner-Schüssen
+const DAMAGE_TICK = 0.5; // Länge eines „Ticks" (s) für DoT/AoE-Schaden
+
+/** Kampfstil (Startwahl): bestimmt, wie der Hauptschuss wirkt. */
+export type CombatStyle = 'sniper' | 'aoe' | 'dot';
+const COMBAT_STYLES: { id: CombatStyle; name: string; desc: string }[] = [
+  { id: 'sniper', name: 'Sniper', desc: 'Rechte Maustaste halten: weiter zoomen + maximale Reichweite, aber kein Fahren. Loslassen = zurück.' },
+  { id: 'aoe', name: 'AoE', desc: 'Bogenlampe legt Flächen ab (kürzere Wurfweite). Gegner darin nehmen pro Tick Schaden. Unbegrenzt, halten 5 Ticks.' },
+  { id: 'dot', name: 'DoT', desc: 'Normaler Schuss, kein Soforttreffer — setzt Gift: tickt alle 2 Ticks. Nachschuss erneuert die Dauer.' },
+];
 
 const log = createLogger('main');
 
-function statBar(label: string, value: number, max: number, color: string): string {
-  const pct = Math.round((value / max) * 100);
-  return (
-    `<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font:600 11px/1.3 system-ui">` +
-    `<span style="width:48px;color:#9aa">${label}</span>` +
-    `<span style="flex:1;height:7px;background:#11151a;border-radius:4px;overflow:hidden">` +
-    `<span style="display:block;height:100%;width:${pct}%;background:${color}"></span></span></div>`
-  );
-}
-
-function mountStartScreen(onStart: (cls: TankClass) => void): void {
+function mountStartScreen(onStart: (style: CombatStyle) => void): void {
   const overlay = document.createElement('div');
   overlay.id = 'start-screen';
   overlay.style.cssText =
@@ -91,7 +90,7 @@ function mountStartScreen(onStart: (cls: TankClass) => void): void {
     'gap:20px;background:#0b0d10;z-index:10;font-family:system-ui,sans-serif;';
 
   const title = document.createElement('div');
-  title.textContent = 'Wähle deinen Panzer';
+  title.textContent = 'Wähle deinen Kampfstil';
   title.style.cssText = 'color:#f0e6cc;font-size:24px;font-weight:700;letter-spacing:0.5px;';
   overlay.appendChild(title);
 
@@ -99,29 +98,17 @@ function mountStartScreen(onStart: (cls: TankClass) => void): void {
   row.style.cssText = 'display:flex;gap:18px;flex-wrap:wrap;justify-content:center;';
   overlay.appendChild(row);
 
-  for (const cls of TANK_CLASSES) {
+  for (const s of COMBAT_STYLES) {
     const card = document.createElement('button');
     card.style.cssText =
-      'width:230px;text-align:left;cursor:pointer;border:2px solid #2a343b;background:#13171c;' +
+      'width:240px;text-align:left;cursor:pointer;border:2px solid #2a343b;background:#13171c;' +
       'color:#e8e0c8;border-radius:10px;padding:16px;transition:border-color 0.12s,transform 0.12s;';
-    card.onmouseenter = () => {
-      card.style.borderColor = '#d8b04a';
-      card.style.transform = 'translateY(-3px)';
-    };
-    card.onmouseleave = () => {
-      card.style.borderColor = '#2a343b';
-      card.style.transform = 'none';
-    };
+    card.onmouseenter = () => { card.style.borderColor = '#d8b04a'; card.style.transform = 'translateY(-3px)'; };
+    card.onmouseleave = () => { card.style.borderColor = '#2a343b'; card.style.transform = 'none'; };
     card.innerHTML =
-      `<div style="font-size:19px;font-weight:700;margin-bottom:4px">${cls.name}</div>` +
-      `<div style="font:13px/1.4 system-ui;color:#b9b29c;min-height:54px;margin-bottom:8px">${cls.beschreibung}</div>` +
-      statBar('Tempo', cls.speed, 12, '#4ea1ff') +
-      statBar('Panzer', cls.maxHp, 160, '#5fd06a') +
-      statBar('Schaden', cls.damage, 36, '#ff8a4e');
-    card.addEventListener('click', () => {
-      overlay.remove();
-      onStart(cls);
-    });
+      `<div style="font-size:20px;font-weight:700;margin-bottom:6px">${s.name}</div>` +
+      `<div style="font:13px/1.45 system-ui;color:#b9b29c;min-height:96px">${s.desc}</div>`;
+    card.addEventListener('click', () => { overlay.remove(); onStart(s.id); });
     row.appendChild(card);
   }
 
@@ -139,8 +126,9 @@ function getCanvas(): HTMLCanvasElement {
   return canvas;
 }
 
-function boot(cls: TankClass): void {
-  log.info('boot start', { seed: SEED, biome: BIOME_ID, klasse: cls.id });
+function boot(combatStyle: CombatStyle): void {
+  const cls = TANK_CLASSES[0]!; // feste Klasse; Wahl ist jetzt der Kampfstil
+  log.info('boot start', { seed: SEED, biome: BIOME_ID, stil: combatStyle });
 
   const canvas = getCanvas();
   const engine = new Engine(canvas, true);
@@ -186,6 +174,14 @@ function boot(cls: TankClass): void {
   let dashDist = 14, dashDur = 0.16, dashCdMax = 5;
   // Vorerst deaktivierte Gegner-Typen (brauchen mehr Spieler-Gegenmittel, bevor sie fair sind).
   const DISABLED_TYPES = new Set<string>(['flanker']);
+
+  // — Kampfstil-Werte (Regler, Kategorie „Stile") —
+  let sniperRange = 95, sniperCamBack = 110, sniperCamHeight = 70; // Scope: Reichweite + Kamera weit raus
+  let aoeRange = 26, aoeRadius = 4, aoeDmg = 14, aoeTickCount = 5; // AoE-Feld (Radius ~2 Späher)
+  let dotDmg = 36, dotEvery = DAMAGE_TICK * 2, dotDur = DAMAGE_TICK * 8; // DoT: alle 2 Ticks, 8 Ticks lang
+  let scopeActive = false; // Sniper: RMB gedrückt → Scope an (kein Fahren, weiter zoomen)
+  let scopeApplied = false, savedShotRange = 40; // Übergangs-Zustand für den Scope
+  const aoeFields: { x: number; z: number; r: number; left: number; tickCd: number; disc: Mesh }[] = [];
 
   // Gegner werden dauerhaft nachgespawnt (feste Dichte; Steuerung kommt später über die Doktrin).
   const aiRng = createRng(SEED + 7);
@@ -302,6 +298,10 @@ function boot(cls: TankClass): void {
       if (h.projectile.team === 'player') {
         styleTracker.onDamageDealt({ amount: h.damage, fromAutoTurret: h.projectile.auto });
         metrics.onHitDealt(h.damage);
+        if (combatStyle === 'dot' && !h.projectile.auto) {
+          const e = roster.find((r) => r.id === h.target.id); // Gift setzen/erneuern (kein Initial: 1. Tick nach dotEvery)
+          if (e) e.dot = { left: dotDur, tickCd: dotEvery };
+        }
       } else if (h.target.id === 'player') {
         styleTracker.onDamageTaken({ amount: h.damage, stationary: playerStationary });
         metrics.onDamageTaken(h.damage, h.projectile.ownerType);
@@ -314,37 +314,46 @@ function boot(cls: TankClass): void {
         return;
       }
       const e = roster.find((r) => r.id === t.id);
-      if (!e) return;
-
-      // Tod: NUR ein tatsächlich angelegtes Teil droppen (kein generierter Loot).
-      bus.emit('tank.died', { tankId: e.id });
-      const part = pickDrop(e.equipment, () => aiRng.next());
-      if (part) {
-        pickups.spawn(part, e.combatant.x, e.combatant.z);
-        lastDrops.push(part.id);
-        if (lastDrops.length > 200) lastDrops.shift();
-      }
-      // Spieler-Kill: Geld + XP (alle Gegner sind team 'enemy' → nur der Spieler killt).
-      if (killerTeam === 'player') {
-        metrics.onKill(e.typeId, runClock - (spawnTimes.get(e.id) ?? runClock));
-        styleTracker.onKill({ dist: Math.hypot(e.combatant.x - playerCombatant.x, e.combatant.z - playerCombatant.z) });
-        const reward = Math.round((e.combatant.lootValue ?? 0.4) * 120);
-        geld += reward;
-        const up = progression.addXp(Math.round(18 + (e.combatant.lootValue ?? 0.4) * 60));
-        if (up.gained > 0) {
-          const mkNote = up.newMkUnlocks.length ? ` — MK${up.newMkUnlocks[up.newMkUnlocks.length - 1]} frei!` : '';
-          showToast(`Level ${progression.level}${mkNote}`);
-        }
-        log.info('enemy died (Spieler)', { id: e.id, drop: part?.id ?? null, reward });
-      }
-
-      // Gegner endgültig weg, Nachschub rückt nach.
-      spawnTimes.delete(e.id);
-      e.view.root.dispose();
-      const idx = roster.indexOf(e);
-      if (idx >= 0) roster.splice(idx, 1);
+      if (e) killEnemy(e, killerTeam);
     },
   });
+
+  // Gegner-Tod (von Projektil-Treffer ODER Tick-Schaden aus DoT/AoE): Drop + Reward + entfernen.
+  function killEnemy(e: Enemy, killerTeam: string): void {
+    bus.emit('tank.died', { tankId: e.id });
+    const part = pickDrop(e.equipment, () => aiRng.next());
+    if (part) {
+      pickups.spawn(part, e.combatant.x, e.combatant.z);
+      lastDrops.push(part.id);
+      if (lastDrops.length > 200) lastDrops.shift();
+    }
+    if (killerTeam === 'player') {
+      metrics.onKill(e.typeId, runClock - (spawnTimes.get(e.id) ?? runClock));
+      styleTracker.onKill({ dist: Math.hypot(e.combatant.x - playerCombatant.x, e.combatant.z - playerCombatant.z) });
+      geld += Math.round((e.combatant.lootValue ?? 0.4) * 120);
+      const up = progression.addXp(Math.round(18 + (e.combatant.lootValue ?? 0.4) * 60));
+      if (up.gained > 0) {
+        const mkNote = up.newMkUnlocks.length ? ` — MK${up.newMkUnlocks[up.newMkUnlocks.length - 1]} frei!` : '';
+        showToast(`Level ${progression.level}${mkNote}`);
+      }
+    }
+    spawnTimes.delete(e.id);
+    e.view.root.dispose();
+    const idx = roster.indexOf(e);
+    if (idx >= 0) roster.splice(idx, 1);
+  }
+
+  // Tick-Schaden (DoT/AoE) direkt auf HP, Rüstung ignoriert; tötet bei <=0.
+  function damageEnemyTick(e: Enemy, dmg: number): void {
+    if (!e.combatant.alive) return;
+    e.combatant.hp -= dmg;
+    metrics.onHitDealt(dmg);
+    if (e.combatant.hp <= 0) {
+      e.combatant.hp = 0;
+      e.combatant.alive = false;
+      killEnemy(e, 'player');
+    }
+  }
 
   // Permanenter Schuss-Rekorder: friert pro Schuss alle Zahlen + Cursor ein.
   const recorder = createFireRecorder(scene, camera);
@@ -394,11 +403,22 @@ function boot(cls: TankClass): void {
       dx = fwd.x / len;
       dz = fwd.z / len;
     }
+    // AoE: KEIN Projektil — die Bogenlampe legt am Cursor ein Schadensfeld ab (Wurfweite begrenzt).
+    if (combatStyle === 'aoe') {
+      if (g) {
+        placeAoeField(g.x, g.z, origin.x, origin.z);
+        metrics.onShot();
+        lastFireClock = runClock;
+        alog.log('aoe', { x: +g.x.toFixed(1), z: +g.z.toFixed(1) });
+      }
+      return;
+    }
     let shotDamage = loadout.stats().damage;
     if (overpressureShots > 0) {
       shotDamage = Math.round(shotDamage * overpressureMul);
       overpressureShots -= 1;
     }
+    if (combatStyle === 'dot') shotDamage = 0; // DoT: kein Soforttreffer, nur Gift beim Treffer
     const p = pool.acquire({
       x: origin.x,
       y: 0.5,
@@ -406,7 +426,7 @@ function boot(cls: TankClass): void {
       dx,
       dz,
       speed: playerProjSpeed,
-      life: shotRange / playerProjSpeed, // begrenzte Schussweite (Reichweite bleibt gleich)
+      life: shotRange / playerProjSpeed, // begrenzte Schussweite (im Scope = sniperRange)
       team: 'player',
       damage: shotDamage,
     });
@@ -434,6 +454,23 @@ function boot(cls: TankClass): void {
     } else {
       log.warn('pool full, shot dropped', { capacity: PROJECTILE_CAPACITY });
     }
+  }
+
+  // AoE: Schadensfeld am (auf Wurfweite geklemmten) Cursor-Punkt anlegen; tickt in der Loop.
+  function placeAoeField(gx: number, gz: number, ox: number, oz: number): void {
+    const ddx = gx - ox, ddz = gz - oz;
+    const d = Math.hypot(ddx, ddz) || 1;
+    const cx = d > aoeRange ? ox + (ddx / d) * aoeRange : gx;
+    const cz = d > aoeRange ? oz + (ddz / d) * aoeRange : gz;
+    const disc = MeshBuilder.CreateCylinder('fx_aoe', { diameter: aoeRadius * 2, height: 0.3, tessellation: 28 }, scene);
+    disc.position.set(cx, 0.18, cz);
+    disc.isPickable = false;
+    const mat = new StandardMaterial('fx_aoe_mat', scene);
+    mat.emissiveColor = new Color3(1, 0.5, 0.12);
+    mat.disableLighting = true;
+    mat.alpha = 0.4;
+    disc.material = mat;
+    aoeFields.push({ x: cx, z: cz, r: aoeRadius, left: aoeTickCount * DAMAGE_TICK, tickCd: DAMAGE_TICK, disc });
   }
 
   // Gegner feuert auf sein Ziel — eigene Fraktion (team = Gegner-id) + Level-Schaden.
@@ -500,7 +537,15 @@ function boot(cls: TankClass): void {
   const input = createInput(
     scene, camera, tank, () => playerSpeed, fire,
     () => BASE_TURRET_SLEW * playerBuffs.aggregate().turretSlewMul,
+    () => !scopeActive, // Sniper-Scope hält den Panzer an
   );
+
+  // Sniper-Scope: rechte Maustaste halten → Scope an, loslassen → aus (nur im Sniper-Stil).
+  if (combatStyle === 'sniper') {
+    canvas.addEventListener('mousedown', (ev) => { if (ev.button === 2) scopeActive = true; });
+    canvas.addEventListener('mouseup', (ev) => { if (ev.button === 2) scopeActive = false; });
+    canvas.addEventListener('contextmenu', (ev) => ev.preventDefault()); // kein Browser-Menü auf RMB
+  }
 
   // Dash-Auslöser: Shift = kurzer Burst in Fahrtrichtung (der Panzer fährt eh vorwärts).
   window.addEventListener('keydown', (ev) => {
@@ -543,6 +588,11 @@ function boot(cls: TankClass): void {
   tunables.add({ label: 'Spieler-Projektiltempo', category: 'Kampf', value: playerProjSpeed, min: 20, max: 120, step: 5, onChange: (v) => { playerProjSpeed = v; } });
   tunables.add({ label: 'Dash-Distanz', category: 'Fähigkeiten', value: dashDist, min: 4, max: 40, step: 1, onChange: (v) => { dashDist = v; } });
   tunables.add({ label: 'Dash-Cooldown s', category: 'Fähigkeiten', value: dashCdMax, min: 1, max: 15, step: 0.5, onChange: (v) => { dashCdMax = v; } });
+  tunables.add({ label: 'Sniper-Reichweite', category: 'Stile', value: sniperRange, min: 40, max: 200, step: 5, onChange: (v) => { sniperRange = v; } });
+  tunables.add({ label: 'AoE-Wurfweite', category: 'Stile', value: aoeRange, min: 8, max: 60, step: 1, onChange: (v) => { aoeRange = v; } });
+  tunables.add({ label: 'AoE-Radius', category: 'Stile', value: aoeRadius, min: 1, max: 12, step: 0.5, onChange: (v) => { aoeRadius = v; } });
+  tunables.add({ label: 'AoE-Schaden/Tick', category: 'Stile', value: aoeDmg, min: 1, max: 60, step: 1, onChange: (v) => { aoeDmg = v; } });
+  tunables.add({ label: 'DoT-Schaden/Tick', category: 'Stile', value: dotDmg, min: 1, max: 80, step: 1, onChange: (v) => { dotDmg = v; } });
   tunables.add({ label: 'Frontlage-Puls s', category: 'Doktrin', value: pulseLen, min: 2, max: 120, step: 2, onChange: (v) => { pulseLen = v; } });
   createTuningPanel(tunables, { onChange: (label, value) => alog.log('regler', { label, value }) });
 
@@ -1159,6 +1209,38 @@ function boot(cls: TankClass): void {
     if (shop.isOpen() && !onShopTile && spawnGraceCd <= 0) shop.close(); // Feld verlassen → Shop schließt (außer in der Gnadenzeit)
     combat.update();
 
+    // Sniper-Scope: an = Reichweite hoch + Kamera weit raus; aus = alles zurück auf Default.
+    if (combatStyle === 'sniper') {
+      if (scopeActive && !scopeApplied) { savedShotRange = shotRange; shotRange = sniperRange; camApi?.set(sniperCamHeight, sniperCamBack, camF); scopeApplied = true; }
+      else if (!scopeActive && scopeApplied) { shotRange = savedShotRange; applyCam(); scopeApplied = false; }
+    }
+
+    // DoT-Ticks: Gift tickt pro Gegner runter (kann töten → rückwärts iterieren).
+    for (let i = roster.length - 1; i >= 0; i--) {
+      const e = roster[i];
+      if (!e || !e.combatant.alive || !e.dot) continue;
+      e.dot.left -= simDt;
+      e.dot.tickCd -= simDt;
+      if (e.dot.tickCd <= 0) { e.dot.tickCd += dotEvery; damageEnemyTick(e, dotDmg); }
+      if (e.combatant.alive && e.dot && e.dot.left <= 0) e.dot = undefined;
+    }
+
+    // AoE-Felder: ticken Schaden an alle Gegner im Radius; nach Ablauf entfernen.
+    for (let i = aoeFields.length - 1; i >= 0; i--) {
+      const f = aoeFields[i]!;
+      f.left -= simDt;
+      f.tickCd -= simDt;
+      if (f.tickCd <= 0) {
+        f.tickCd += DAMAGE_TICK;
+        for (let j = roster.length - 1; j >= 0; j--) {
+          const e = roster[j];
+          if (!e || !e.combatant.alive) continue;
+          if (Math.hypot(e.combatant.x - f.x, e.combatant.z - f.z) <= f.r) damageEnemyTick(e, aoeDmg);
+        }
+      }
+      if (f.left <= 0) { f.disc.dispose(); aoeFields.splice(i, 1); }
+    }
+
     // Beute einsammeln: fährt der Spieler über ein Teil → ins Inventar (Tasche).
     shopField.update();
     pickups.update(px, pz, PICKUP_REACH, collectLoot);
@@ -1321,4 +1403,4 @@ function boot(cls: TankClass): void {
 logConfig.enabled = true;
 logConfig.minLevel = 'debug';
 
-mountStartScreen((cls) => boot(cls));
+mountStartScreen((style) => boot(style));

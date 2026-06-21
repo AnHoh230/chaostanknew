@@ -22,6 +22,7 @@ export interface Enemy {
   typeId: string; // Gegner-Typ (bestimmt das Verhalten)
   behavior: EnemyBehavior; // Bewegungs-/Angriffsmuster
   phase: number; // 0..1 fester per-Gegner-Versatz (Orbit-Richtung / Schwarm-Streuung)
+  dot?: { left: number; tickCd: number }; // aktive DoT (Restdauer s + Zeit bis nächster Tick)
 }
 
 export interface EnemySpec {

@@ -33,6 +33,7 @@ export function createInput(
   speed: number | (() => number),
   onFire: () => void,
   turretSlew: number | (() => number) = Infinity,
+  canDrive: () => boolean = () => true, // false → Panzer steht (z. B. Sniper-Scope)
 ): { update(simDt: number): void; getAimTarget(): Vector3 | null } {
   const speedOf = (): number => (typeof speed === 'function' ? speed() : speed);
   const slewOf = (): number => (typeof turretSlew === 'function' ? turretSlew() : turretSlew);
@@ -67,7 +68,7 @@ export function createInput(
 
     // Steuerung: der Panzer fährt AUTOMATISCH vorwärts; A/D lenken (drehen den ganzen
     // Panzer). Kein W/S-Gasgeben mehr — konsistent, dazu Shift-Dash in Fahrtrichtung.
-    const throttle = 1;
+    const throttle = canDrive() ? 1 : 0; // Scope-Modus: stehen bleiben
     let steer = 0;
     if (keys['d']) steer += 1;
     if (keys['a']) steer -= 1; // A+D = 0 (geradeaus)
