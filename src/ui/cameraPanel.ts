@@ -6,6 +6,8 @@ interface CamApi {
 interface TuneApi {
   getShotRange(): number;
   setShotRange(v: number): void;
+  getPulse(): number;
+  setPulse(v: number): void;
 }
 
 /**
@@ -91,6 +93,7 @@ export function createCameraPanel(onChange?: (name: string, value: number) => vo
     sep.style.cssText = 'border-top:1px solid #2a343b;margin:8px 0 2px;';
     panel.appendChild(sep);
     slider('Schussweite', 12, 120, 1, () => t.getShotRange(), (v) => t.setShotRange(v));
+    slider('Frontlage-Puls s', 10, 120, 5, () => t.getPulse(), (v) => t.setPulse(v));
   }
 
   const hintRow = document.createElement('div');

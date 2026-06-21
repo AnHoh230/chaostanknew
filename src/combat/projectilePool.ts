@@ -5,6 +5,7 @@ export interface Projectile {
   state: ProjectileState;
   team: string; // wer gefeuert hat ('player' | 'enemy' | ...)
   damage: number; // Schaden dieses Schusses (0 = Pool-Default des Kampfsystems)
+  auto: boolean; // true = aus einer Sekundärwaffe (Auto-Turret), nicht manuell gefeuert
   x: number;
   y: number;
   z: number;
@@ -24,6 +25,7 @@ export interface SpawnArgs {
   life: number;
   team?: string; // Default 'player' (Slice 1a war nur Spieler)
   damage?: number; // Default 0 (Kampfsystem nutzt dann seinen Pool-Default)
+  auto?: boolean; // Default false; true für Auto-Turret-Schüsse
 }
 
 export interface ProjectilePool {
@@ -43,6 +45,7 @@ export function createProjectilePool(capacity: number): ProjectilePool {
       state: 'inactive',
       team: 'player',
       damage: 0,
+      auto: false,
       x: 0,
       y: 0,
       z: 0,
@@ -66,6 +69,7 @@ export function createProjectilePool(capacity: number): ProjectilePool {
         p.life = s.life;
         p.team = s.team ?? 'player';
         p.damage = s.damage ?? 0;
+        p.auto = s.auto ?? false;
         p.state = 'inflight';
         return p;
       }

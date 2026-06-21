@@ -15,6 +15,10 @@ import { createInput } from './input/input';
 import { createProjectilePool } from './combat/projectilePool';
 import { createProjectileView } from './combat/projectileView';
 import { createCombatSystem, type Combatant } from './combat/combat';
+import { createStyleTracker } from './doctrine/styleTracker';
+import { createDoctrineDirector } from './doctrine/doctrineDirector';
+import { DOCTRINES } from './doctrine/doctrineConfig';
+import { emptyProfile, STATIONARY_SPEED, type PlayerStyleProfile } from './doctrine/styleProfile';
 import { applyEnemyStats, type Enemy } from './enemy/enemy';
 import { pickDrop, enemyMk } from './enemy/equipment';
 import { stepAutoTurret, type AutoTurretState } from './combat/autoTurret';
@@ -215,6 +219,14 @@ function boot(cls: TankClass): void {
   const PICKUP_REACH = TANK_RADIUS + 0.8;
   const lastDrops: string[] = []; // Verifikation: tatsächlich gedroppte Item-IDs
 
+  // — Reaktive Kriegsdoktrin (P1-P3): Stil messen → Heat/Stage je Frontlage-Puls —
+  const styleTracker = createStyleTracker();
+  const director = createDoctrineDirector(DOCTRINES);
+  let playerStationary = false; // für „Schaden im Stand" + Stil
+  let prevPx = 0, prevPz = 0, prevPosInit = false; // echtes Spielertempo aus Positionsdelta
+  let pulseLen = 40; // Frontlage-Puls-Fensterlänge (s), live per Regler
+  let pulseCd = pulseLen;
+
   // Shop-Felder (S2): leuchtende Felder in der Welt. Shop nur dort, Welt läuft
   // weiter, auf dem Feld ist man unverwundbar.
   const shopField = createShopField(scene);
@@ -222,7 +234,15 @@ function boot(cls: TankClass): void {
   const combat = createCombatSystem(pool, liveCombatants, {
     damage: HIT_DAMAGE,
     projectileRadius: PROJECTILE_RADIUS,
-    onHit: (h) => log.debug('hit', { target: h.target.id, hp: h.target.hp, lethal: h.lethal }),
+    onHit: (h) => {
+      // Stil messen: ausgeteilter Spielerschaden (manuell vs. Auto-Turret) / erlittener Schaden.
+      if (h.projectile.team === 'player') {
+        styleTracker.onDamageDealt({ amount: h.damage, fromAutoTurret: h.projectile.auto });
+      } else if (h.target.id === 'player') {
+        styleTracker.onDamageTaken({ amount: h.damage, stationary: playerStationary });
+      }
+      log.debug('hit', { target: h.target.id, hp: h.target.hp, lethal: h.lethal });
+    },
     onDeath: (t, killerTeam) => {
       if (t.id === 'player') {
         log.warn('player died', {});
@@ -244,6 +264,7 @@ function boot(cls: TankClass): void {
       }
       // Spieler-Kill: Geld + XP (alle Gegner sind team 'enemy' → nur der Spieler killt).
       if (killerTeam === 'player') {
+        styleTracker.onKill({ dist: Math.hypot(e.combatant.x - playerCombatant.x, e.combatant.z - playerCombatant.z) });
         const reward = Math.round((e.combatant.lootValue ?? 0.4) * 120);
         geld += reward;
         const up = progression.addXp(Math.round(18 + (e.combatant.lootValue ?? 0.4) * 60));
@@ -399,7 +420,7 @@ function boot(cls: TankClass): void {
   function fireAutoTurret(ox: number, oz: number, dir: number, team: string, damage: number, range: number): void {
     const p = pool.acquire({
       x: ox, y: 0.5, z: oz, dx: Math.sin(dir), dz: Math.cos(dir),
-      speed: PROJECTILE_SPEED, life: range / PROJECTILE_SPEED, team, damage,
+      speed: PROJECTILE_SPEED, life: range / PROJECTILE_SPEED, team, damage, auto: true,
     });
     if (p) bus.emit('projectile.spawned', { id: p.id });
   }
@@ -424,6 +445,10 @@ function boot(cls: TankClass): void {
     getShotRange: () => shotRange,
     setShotRange: (v: number) => {
       shotRange = Math.max(8, v);
+    },
+    getPulse: () => pulseLen,
+    setPulse: (v: number) => {
+      pulseLen = Math.max(10, v);
     },
   };
   // Jede Regler-Änderung in den Run-Log schreiben (kein manuelles Durchgeben nötig).
@@ -543,6 +568,7 @@ function boot(cls: TankClass): void {
     const def = belt.trigger(i);
     if (!def) return;
     applyBooster(def);
+    styleTracker.onBoosterUsed(); // Stil: Booster-Nutzung (Rush-Signal)
     updateBeltHud();
   }
 
@@ -735,6 +761,13 @@ function boot(cls: TankClass): void {
         loot: e.combatant.lootValue, team: e.combatant.team,
         x: +e.combatant.x.toFixed(1), z: +e.combatant.z.toFixed(1),
       })),
+    // Reaktive Doktrin: Zustand lesen + (Test) einen Puls mit synthetischem Stil einspeisen.
+    doctrines: () => ({ active: director.activeId(), pulseCd: +pulseCd.toFixed(1), pulseLen, states: director.states() }),
+    feedPulse: (partial: Partial<PlayerStyleProfile>) => {
+      director.evaluate({ ...emptyProfile(), ...partial });
+      director.tickCommitment();
+      return director.states();
+    },
     stats: () => loadout.stats(),
     loadout: () => loadout.equippedList().map((it) => it.id),
     bag: () => loadout.bag().map((it) => it.id),
@@ -885,6 +918,19 @@ function boot(cls: TankClass): void {
 
     const px = tank.view.root.position.x;
     const pz = tank.view.root.position.z;
+
+    // Stil messen + Frontlage-Puls (P3). Echtes Tempo aus dem Positionsdelta.
+    if (!prevPosInit) { prevPx = px; prevPz = pz; prevPosInit = true; }
+    const actualSpeed = simDt > 0 ? Math.hypot(px - prevPx, pz - prevPz) / simDt : 0;
+    prevPx = px; prevPz = pz;
+    playerStationary = actualSpeed < STATIONARY_SPEED;
+    if (simDt > 0) styleTracker.onMove({ speed: actualSpeed, x: px, z: pz, dt: simDt });
+    pulseCd -= simDt;
+    if (pulseCd <= 0) {
+      director.evaluate(styleTracker.snapshotAndReset());
+      director.tickCommitment();
+      pulseCd = pulseLen;
+    }
 
     // SH3.5: Sekundärwaffe (Auto-Turret) feuert autonom auf den nächsten Gegner.
     const sek = loadout.get('sekundaer');
