@@ -189,11 +189,13 @@ function boot(cls: TankClass): void {
   const swarmBaseGet = tunables.add({ label: 'Grunddichte', category: 'Schwarm', value: 4, min: 0, max: 40, step: 1 });
   const swarmPerHeatGet = tunables.add({ label: 'Dichte je Heat', category: 'Schwarm', value: 0.1, min: 0, max: 0.6, step: 0.01 });
   const swarmIntervalGet = tunables.add({ label: 'Spawn-Takt s', category: 'Schwarm', value: 0.8, min: 0.1, max: 5, step: 0.1 });
+  const enemyHpGet = tunables.add({ label: 'Gegner-HP-Faktor', category: 'Schwarm', value: 1, min: 0.1, max: 2, step: 0.05 });
   const spawner = createSpawner(scene, TANK_RADIUS, () => aiRng.next(), {
     interval: swarmIntervalGet,
     radiusMin: 55, // größere, weiter gestreute Spawn-Area (kein Dauerfeuer auf der Stelle)
     radiusMax: 130,
     maxLevel: 3,
+    hpMul: enemyHpGet,
   });
 
   // Combatant des Spielers (Gegner-Combatants liefert der Roster dynamisch).

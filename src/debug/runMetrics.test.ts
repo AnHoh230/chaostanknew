@@ -43,7 +43,7 @@ describe('createRunMetrics', () => {
     expect(s.kpm).toBe(9.2); // 2 Kills / 13 s * 60 = 9.23 → 9.2
   });
 
-  it('Intervall-Zähler werden nach Snapshot zurückgesetzt', () => {
+  it('Intervall-Raten werden nach Snapshot zurückgesetzt (acc bleibt kumulativ)', () => {
     const m = createRunMetrics();
     for (let i = 0; i < 10; i++) m.frame(0.1, 5, 4);
     m.onShot(); m.onHitDealt(5);
@@ -51,9 +51,9 @@ describe('createRunMetrics', () => {
     // zweites Intervall ohne Aktion
     for (let i = 0; i < 10; i++) m.frame(0.1, 0, 4);
     const s2 = m.takeSnapshot(state());
-    expect(s2.dpsOut).toBe(0);
-    expect(s2.acc).toBe(0);
-    expect(s2.spd).toBe(0);
+    expect(s2.dpsOut).toBe(0); // Intervall-Rate zurückgesetzt
+    expect(s2.spd).toBe(0); // Intervall-Rate zurückgesetzt
+    expect(s2.acc).toBe(100); // kumulativ: 1 Treffer / 1 Schuss bleibt
   });
 
   it('Pause-Frames (dt<=0) zählen nicht', () => {

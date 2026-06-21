@@ -60,15 +60,15 @@ const r1 = (v: number): number => Math.round(v * 10) / 10;
 
 export function createRunMetrics(): RunMetrics {
   // kumuliert über den ganzen Run
-  let totalTime = 0, totalKills = 0, totalDeaths = 0;
+  let totalTime = 0, totalKills = 0, totalDeaths = 0, totalShots = 0, totalHits = 0;
   let sinceDeath = 0; // aktuelle Überlebenszeit
   // pro Intervall (Reset bei takeSnapshot)
   let iTime = 0, iSpeedSum = 0, iPeak = 0, iSpawns = 0;
-  let iKills = 0, iShots = 0, iHits = 0, iDmgOut = 0, iDmgIn = 0;
+  let iKills = 0, iDmgOut = 0, iDmgIn = 0;
 
   return {
-    onShot() { iShots += 1; },
-    onHitDealt(dmg) { iHits += 1; iDmgOut += dmg; },
+    onShot() { totalShots += 1; },
+    onHitDealt(dmg) { totalHits += 1; iDmgOut += dmg; },
     onDamageTaken(dmg) { iDmgIn += dmg; },
     onKill() { totalKills += 1; iKills += 1; },
     onDeath() { totalDeaths += 1; sinceDeath = 0; },
@@ -95,7 +95,7 @@ export function createRunMetrics(): RunMetrics {
         kpm: totalTime > 0 ? r1((totalKills / totalTime) * 60) : 0,
         dpsOut: iTime > 0 ? r1(iDmgOut / iTime) : 0,
         dpsIn: iTime > 0 ? r1(iDmgIn / iTime) : 0,
-        acc: iShots > 0 ? Math.round((iHits / iShots) * 100) : 0,
+        acc: totalShots > 0 ? Math.round((totalHits / totalShots) * 100) : 0, // kumuliert (kein Intervall-Artefakt >100%)
         geld: state.geld,
         level: state.level,
         mk: state.mk,
@@ -104,7 +104,7 @@ export function createRunMetrics(): RunMetrics {
       };
       // Intervall zurücksetzen (Peak startet beim aktuellen Stand)
       iTime = 0; iSpeedSum = 0; iPeak = state.alive; iSpawns = 0;
-      iKills = 0; iShots = 0; iHits = 0; iDmgOut = 0; iDmgIn = 0;
+      iKills = 0; iDmgOut = 0; iDmgIn = 0;
       return snap;
     },
   };

@@ -51,20 +51,22 @@ export function createEnemyEntity(
   spec: EnemySpec,
   radius: number,
   rng: () => number,
+  hpMul = 1, // Live-Balancing-Faktor auf die Gegner-HP (Schwarm-Tuning)
 ): Enemy {
   const view = createTankView(scene, spec.comp);
   view.root.position.set(spec.spawn.x, 0, spec.spawn.z);
   // Volles Basis-Set beim Erscheinen (ein Teil je Slot, ~15 % selten) → abwechslungsreiche Drops.
   const equipment = rollEnemyEquipment(spec.level, rng);
   const st = enemyCombatStats(equipment, spec.level);
+  const maxHp = Math.max(1, Math.round(st.maxHp * hpMul));
   const combatant: Combatant = {
     id: spec.id,
     team: 'enemy', // alle Gegner sind eine Fraktion → bekämpfen sich nicht gegenseitig
     x: spec.spawn.x,
     z: spec.spawn.z,
     radius,
-    hp: st.maxHp,
-    maxHp: st.maxHp,
+    hp: maxHp,
+    maxHp: maxHp,
     armor: st.armor,
     dodge: st.dodge,
     alive: true,

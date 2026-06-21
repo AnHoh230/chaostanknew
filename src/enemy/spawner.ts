@@ -8,6 +8,7 @@ export interface SpawnerOptions {
   radiusMin: number; // Spawn-Abstand zum Spieler (außer Sicht)
   radiusMax: number;
   maxLevel: number; // höchstes Spawn-Level
+  hpMul?: () => number; // Live-Faktor auf Gegner-HP (Schwarm-Tuning)
 }
 
 export interface Spawner {
@@ -54,7 +55,7 @@ export function createSpawner(
       typeId: type.id,
       behavior: type.behavior,
     };
-    return createEnemyEntity(scene, spec, tankRadius, rng);
+    return createEnemyEntity(scene, spec, tankRadius, rng, opts.hpMul ? opts.hpMul() : 1);
   }
 
   return { update };
