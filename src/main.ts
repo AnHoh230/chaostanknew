@@ -176,8 +176,8 @@ function boot(combatStyle: CombatStyle): void {
   const DISABLED_TYPES = new Set<string>(['flanker']);
 
   // — Kampfstil-Werte (Regler, Kategorie „Stile") —
-  let sniperRange = 95, sniperCamBack = 110, sniperCamHeight = 70; // Scope: Reichweite + Kamera weit raus
-  let scopeLookAhead = 45; // Scope: wie weit der Blick in Zielrichtung nach vorn gleitet
+  let sniperRange = 95, sniperCamBack = 150, sniperCamHeight = 95; // Scope: Reichweite + Kamera weit weg (mehr Gebiet)
+  let sniperDmgMul = 2; // Sniper schlägt härter — Faktor auf den normalen Schussschaden
   let aoeRange = 26, aoeRadius = 4, aoeDmg = 14, aoeTickCount = 5; // AoE-Feld (Radius ~2 Späher)
   let dotDmg = 36, dotEvery = DAMAGE_TICK * 2, dotDur = DAMAGE_TICK * 8; // DoT: alle 2 Ticks, 8 Ticks lang
   let scopeActive = false; // Sniper: RMB gedrückt → Scope an (kein Fahren, weiter zoomen)
@@ -419,6 +419,7 @@ function boot(combatStyle: CombatStyle): void {
       shotDamage = Math.round(shotDamage * overpressureMul);
       overpressureShots -= 1;
     }
+    if (combatStyle === 'sniper') shotDamage = Math.round(shotDamage * sniperDmgMul); // Sniper schlägt härter
     if (combatStyle === 'dot') shotDamage = 0; // DoT: kein Soforttreffer, nur Gift beim Treffer
     const p = pool.acquire({
       x: origin.x,
@@ -558,10 +559,16 @@ function boot(combatStyle: CombatStyle): void {
       scopeBadge.style.display = on ? 'block' : 'none';
       log.info('scope', { on });
     };
-    canvas.addEventListener('mousedown', (ev) => { if (ev.button === 2) setScope(true); });
-    canvas.addEventListener('mouseup', (ev) => { if (ev.button === 2) setScope(false); });
-    window.addEventListener('mouseup', (ev) => { if (ev.button === 2) setScope(false); }); // Release auch außerhalb Canvas
-    canvas.addEventListener('contextmenu', (ev) => ev.preventDefault()); // kein Browser-Menü auf RMB
+    // Auslöser bombenfest: window + Capture-Phase fängt das Event ganz oben ab, bevor
+    // irgendwer (Babylon, Canvas) es schlucken könnte. Maus- UND Pointer-Events als zwei
+    // unabhängige Wege; setScope ist idempotent, also stört Doppel-Feuern nicht.
+    const down = (b: number): void => { if (b === 2) setScope(true); };
+    const up = (b: number): void => { if (b === 2) setScope(false); };
+    window.addEventListener('mousedown', (ev) => down(ev.button), true);
+    window.addEventListener('mouseup', (ev) => up(ev.button), true);
+    window.addEventListener('pointerdown', (ev) => down(ev.button), true);
+    window.addEventListener('pointerup', (ev) => up(ev.button), true);
+    window.addEventListener('contextmenu', (ev) => ev.preventDefault(), true); // kein Browser-Menü auf RMB
   }
 
   // Dash-Auslöser: Shift = kurzer Burst in Fahrtrichtung (der Panzer fährt eh vorwärts).
@@ -606,9 +613,9 @@ function boot(combatStyle: CombatStyle): void {
   tunables.add({ label: 'Dash-Distanz', category: 'Fähigkeiten', value: dashDist, min: 4, max: 40, step: 1, onChange: (v) => { dashDist = v; } });
   tunables.add({ label: 'Dash-Cooldown s', category: 'Fähigkeiten', value: dashCdMax, min: 1, max: 15, step: 0.5, onChange: (v) => { dashCdMax = v; } });
   tunables.add({ label: 'Sniper-Reichweite', category: 'Stile', value: sniperRange, min: 40, max: 200, step: 5, onChange: (v) => { sniperRange = v; } });
-  tunables.add({ label: 'Sniper-Vorschub', category: 'Stile', value: scopeLookAhead, min: 0, max: 120, step: 5, onChange: (v) => { scopeLookAhead = v; } });
-  tunables.add({ label: 'Sniper-Kamera-Höhe', category: 'Stile', value: sniperCamHeight, min: 20, max: 140, step: 5, onChange: (v) => { sniperCamHeight = v; } });
-  tunables.add({ label: 'Sniper-Kamera-Distanz', category: 'Stile', value: sniperCamBack, min: 20, max: 200, step: 5, onChange: (v) => { sniperCamBack = v; } });
+  tunables.add({ label: 'Sniper-Schadensfaktor', category: 'Stile', value: sniperDmgMul, min: 1, max: 5, step: 0.5, onChange: (v) => { sniperDmgMul = v; } });
+  tunables.add({ label: 'Sniper-Kamera-Höhe', category: 'Stile', value: sniperCamHeight, min: 20, max: 200, step: 5, onChange: (v) => { sniperCamHeight = v; } });
+  tunables.add({ label: 'Sniper-Kamera-Distanz', category: 'Stile', value: sniperCamBack, min: 20, max: 260, step: 5, onChange: (v) => { sniperCamBack = v; } });
   tunables.add({ label: 'AoE-Wurfweite', category: 'Stile', value: aoeRange, min: 8, max: 60, step: 1, onChange: (v) => { aoeRange = v; } });
   tunables.add({ label: 'AoE-Radius', category: 'Stile', value: aoeRadius, min: 1, max: 12, step: 0.5, onChange: (v) => { aoeRadius = v; } });
   tunables.add({ label: 'AoE-Schaden/Tick', category: 'Stile', value: aoeDmg, min: 1, max: 60, step: 1, onChange: (v) => { aoeDmg = v; } });
@@ -1229,23 +1236,15 @@ function boot(combatStyle: CombatStyle): void {
     if (shop.isOpen() && !onShopTile && spawnGraceCd <= 0) shop.close(); // Feld verlassen → Shop schließt (außer in der Gnadenzeit)
     combat.update();
 
-    // Sniper-Scope: an = Reichweite hoch + Kamera weit raus + Blick gleitet in Zielrichtung
-    // nach vorn (Panzer rutscht an den Rand, man sieht weit ins Schussfeld). Aus = zurück.
+    // Sniper-Scope: an = Reichweite hoch + Kamera WEITER WEG (mehr Gebiet sichtbar, Panzer
+    // bleibt mittig — kein Ranzoomen, kein verschobener Blick). Aus = alles zurück auf Default.
     if (combatStyle === 'sniper') {
-      if (scopeActive) {
-        if (!scopeApplied) { savedShotRange = shotRange; shotRange = sniperRange; scopeApplied = true; }
+      if (scopeActive && !scopeApplied) {
+        savedShotRange = shotRange; shotRange = sniperRange;
         camApi?.set(sniperCamHeight, sniperCamBack, camF);
-        // Vorschub: Einheitsvektor Panzer→Cursor × scopeLookAhead. Jeden Frame frisch,
-        // damit der Blick der Maus folgt (man sweept die Richtung, in die man späht).
-        const aim = input.getAimTarget();
-        let ox = 0, oz = 0;
-        if (aim) {
-          const dx = aim.x - px, dz = aim.z - pz, l = Math.hypot(dx, dz);
-          if (l > 0.001) { ox = (dx / l) * scopeLookAhead; oz = (dz / l) * scopeLookAhead; }
-        }
-        camApi?.setOffset(ox, oz);
-      } else if (scopeApplied) {
-        shotRange = savedShotRange; camApi?.setOffset(0, 0); applyCam(); scopeApplied = false;
+        scopeApplied = true;
+      } else if (!scopeActive && scopeApplied) {
+        shotRange = savedShotRange; applyCam(); scopeApplied = false;
       }
     }
 
