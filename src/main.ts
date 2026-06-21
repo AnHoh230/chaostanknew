@@ -374,6 +374,7 @@ function boot(combatStyle: CombatStyle): void {
   // NICHT die (um einen Frame veraltete) Turm-Ausrichtung lesen. Sonst zielt der
   // Schuss aufs Ziel vom letzten Frame (bewiesen: aimErr 7-40° beim Bewegen).
   function fire(): void {
+    if (combatStyle === 'sniper' && !scopeActive) return; // Sniper feuert NUR im Scope (RMB) — kein Hüftschuss
     if (fireCd > 0) return; // Feuer-Cooldown (Kühlmittel senkt ihn)
     fireCd = PLAYER_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
     const root = tank.view.root;
