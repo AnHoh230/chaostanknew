@@ -42,6 +42,7 @@ import { createBelt } from './player/belt';
 import { createBuffHud } from './ui/buffHud';
 import { BOOSTERS, type BoosterDef } from './shop/boosters';
 import { createActionLog } from './debug/actionLog';
+import { createRunMetrics } from './debug/runMetrics';
 import { createTunables } from './ui/tunables';
 import { createTuningPanel } from './ui/tuningPanel';
 import { TANK_CLASSES, type TankClass } from './game/classes';
@@ -212,6 +213,9 @@ function boot(cls: TankClass): void {
   // Run-Action-Log: pro Run nach logs/run-<NNN>.log (Schüsse, Bewegung, Shop …).
   const alog = createActionLog();
   alog.log('class', { id: cls.id });
+  // Run-Diagnostik: sammelt Kennzahlen, loggt periodisch einen 'snap' (siehe Loop-Ende).
+  const metrics = createRunMetrics();
+  const snapIntervalGet = tunables.add({ label: 'Diagnose-Intervall s', category: 'Debug', value: 5, min: 1, max: 30, step: 1 });
 
   // SH2: Aktiv-Buffs + Sofort-Booster (Gürtel/Hotkeys 1-3) + Turm-Slew.
   const playerBuffs = createBuffStack();
@@ -283,14 +287,17 @@ function boot(cls: TankClass): void {
       // Stil messen: ausgeteilter Spielerschaden (manuell vs. Auto-Turret) / erlittener Schaden.
       if (h.projectile.team === 'player') {
         styleTracker.onDamageDealt({ amount: h.damage, fromAutoTurret: h.projectile.auto });
+        metrics.onHitDealt(h.damage);
       } else if (h.target.id === 'player') {
         styleTracker.onDamageTaken({ amount: h.damage, stationary: playerStationary });
+        metrics.onDamageTaken(h.damage);
       }
       log.debug('hit', { target: h.target.id, hp: h.target.hp, lethal: h.lethal });
     },
     onDeath: (t, killerTeam) => {
       if (t.id === 'player') {
         log.warn('player died', {});
+        metrics.onDeath();
         alog.log('player.death', {});
         bus.emit('tank.died', { tankId: 'player' });
         respawnPlayer();
@@ -309,6 +316,7 @@ function boot(cls: TankClass): void {
       }
       // Spieler-Kill: Geld + XP (alle Gegner sind team 'enemy' → nur der Spieler killt).
       if (killerTeam === 'player') {
+        metrics.onKill();
         styleTracker.onKill({ dist: Math.hypot(e.combatant.x - playerCombatant.x, e.combatant.z - playerCombatant.z) });
         const reward = Math.round((e.combatant.lootValue ?? 0.4) * 120);
         geld += reward;
@@ -332,7 +340,7 @@ function boot(cls: TankClass): void {
   let simTime = 0; // Sekunden seit Boot (Sim-Uhr), in der Loop akkumuliert
   let frame = 0;
   let shotSeq = 0;
-  let moveLogCd = 0; // Bewegung nur alle 0,5 s loggen (kein Frame-Spam)
+  let snapCd = 0; // Diagnose-Snapshot-Takt (s); Default/Regler unten
 
   // Feuern: Richtung im KLICK-Augenblick frisch aus dem aktuellen Cursor ableiten —
   // NICHT die (um einen Frame veraltete) Turm-Ausrichtung lesen. Sonst zielt der
@@ -388,6 +396,7 @@ function boot(cls: TankClass): void {
     if (p) {
       bus.emit('tank.fired', { tankId: tank.id });
       bus.emit('projectile.spawned', { id: p.id });
+      metrics.onShot();
       alog.log('shot', { x: +origin.x.toFixed(1), z: +origin.z.toFixed(1), dmg: shotDamage });
       // Schuss mit Zeitstempel + eingefrorenem Cursor protokollieren.
       recorder.recordShot({
@@ -703,6 +712,7 @@ function boot(cls: TankClass): void {
     playerCombatant.alive = true;
     playerCombatant.invulnerable = true; // sofort (schützt auch im selben combat-Frame)
     spawnGraceCd = 5; // Respawn = Erscheinen: 5s Invuln + Shop überall öffenbar
+    prevPosInit = false; // Teleport NICHT als Tempo werten (kein falsches Rush-Signal/Ø-Tempo-Spike)
     alog.log('player.respawn', { x: +playerCombatant.x.toFixed(1), z: +playerCombatant.z.toFixed(1) });
     showToast('Zerstört — neu aufgebaut');
   }
@@ -994,21 +1004,34 @@ function boot(cls: TankClass): void {
       playerTurretCd = st.cooldown;
       if (res.fire && res.dir != null) {
         fireAutoTurret(px, pz, res.dir, 'player', sek.autoFire.damage, sek.autoFire.range);
+        metrics.onShot();
         alog.log('autoturret', { team: 'player', dmg: sek.autoFire.damage });
       }
-    }
-
-    // Bewegung gesampelt loggen (simDt=0 bei Pause → kein Spam).
-    moveLogCd -= simDt;
-    if (moveLogCd <= 0) {
-      moveLogCd = 0.5;
-      alog.log('move', { x: +px.toFixed(1), z: +pz.toFixed(1), hp: Math.round(playerCombatant.hp), geld });
     }
 
     // Stil-getriebener Schwarm-Nachschub (R3): Dichte + Typ-Mix aus der Heat-Lage.
     const aliveCount = roster.reduce((n, e) => n + (e.combatant.alive ? 1 : 0), 0);
     const spawned = spawner.update(simDt, px, pz, aliveCount, currentSwarmPlan());
-    if (spawned) roster.push(spawned);
+    if (spawned) { roster.push(spawned); metrics.onSpawn(); }
+
+    // Run-Diagnostik: pro Frame messen, periodisch einen kompakten 'snap' loggen.
+    metrics.frame(simDt, actualSpeed, aliveCount);
+    snapCd -= simDt;
+    if (snapCd <= 0) {
+      snapCd = snapIntervalGet();
+      const plan = currentSwarmPlan();
+      const aliveByType: Record<string, number> = {};
+      for (const e of roster) if (e.combatant.alive) aliveByType[e.typeId] = (aliveByType[e.typeId] ?? 0) + 1;
+      const heat: Record<string, number> = {};
+      for (const s of director.states()) heat[STYLE_LABEL[s.id] ?? s.id] = Math.round(s.heat);
+      const snap = metrics.takeSnapshot({
+        alive: aliveCount, target: plan.targetCount,
+        hp: playerCombatant.hp, hpMax: playerCombatant.maxHp,
+        geld, level: progression.level, mk: progression.unlockedMk(),
+        heat, mix: aliveByType,
+      });
+      alog.log('snap', snap as unknown as Record<string, unknown>);
+    }
 
     // Gegner-Verhalten (R2): jeder Typ steuert nach seinem Muster auf einen Zielpunkt zu,
     // hält bei seinem Standoff und feuert in Schussweite. Konter = Verhalten, nicht Stats.
