@@ -4,7 +4,7 @@
  * zum Spieler, ab dem er hält und feuert). Der KONTER gegen eine Spielweise entsteht hier —
  * über das Verhalten —, nicht über an den Spieler balancierte Kampfwerte.
  */
-export type EnemyBehavior = 'closer' | 'flanker' | 'swarm' | 'disruptor' | 'blocker';
+export type EnemyBehavior = 'closer' | 'flanker' | 'swarm' | 'disruptor' | 'blocker' | 'racer';
 
 export interface BehaviorInput {
   ex: number; ez: number; // Gegner-Position
@@ -27,6 +27,7 @@ export interface BehaviorTuning {
   swarmSpeed(): number;
   disruptorSpeed(): number;
   blockerSpeed(): number;
+  racerSpeed(): number;
   flankerOrbit(): number; // Orbit-Radius als Faktor auf standoff
   blockerLead(): number; // Vorhalt-Distanz vor dem Spieler
 }
@@ -37,6 +38,7 @@ export const DEFAULT_BEHAVIOR_TUNING: BehaviorTuning = {
   swarmSpeed: () => 0.9,
   disruptorSpeed: () => 1.8,
   blockerSpeed: () => 1.3,
+  racerSpeed: () => 2.4,
   flankerOrbit: () => 0.85,
   blockerLead: () => 14,
 };
@@ -54,6 +56,9 @@ export function behaviorTarget(
 
     case 'disruptor': // stürmt am dichtesten ran, schnellster Typ — bestraft Stillstand
       return { tx: i.px, tz: i.pz, speedMul: tuning.disruptorSpeed(), standoff: i.standoff * 0.25 };
+
+    case 'racer': // sehr schnell stracks auf den Spieler — schließt die Distanz (Konter zum Sniper)
+      return { tx: i.px, tz: i.pz, speedMul: tuning.racerSpeed(), standoff: i.standoff * 0.3 };
 
     case 'swarm': { // konvergiert leicht gestreut auf mittlere Distanz
       const a = i.phase * Math.PI * 2;

@@ -266,6 +266,7 @@ function boot(combatStyle: CombatStyle): void {
     swarmSpeed: tunables.add({ label: 'Swarm-Tempo', category: 'Gegner', value: 0.9, min: 0.5, max: 3, step: 0.1 }),
     disruptorSpeed: tunables.add({ label: 'Disruptor-Tempo', category: 'Gegner', value: 1.8, min: 0.5, max: 3, step: 0.1 }),
     blockerSpeed: tunables.add({ label: 'Blocker-Tempo', category: 'Gegner', value: 1.3, min: 0.5, max: 3, step: 0.1 }),
+    racerSpeed: tunables.add({ label: 'Racer-Tempo', category: 'Gegner', value: 2.4, min: 0.5, max: 4, step: 0.1 }),
     flankerOrbit: tunables.add({ label: 'Flanker-Orbit', category: 'Gegner', value: 0.85, min: 0.3, max: 1.5, step: 0.05 }),
     blockerLead: tunables.add({ label: 'Blocker-Vorhalt', category: 'Gegner', value: 14, min: 0, max: 40, step: 1 }),
   };

@@ -58,7 +58,9 @@ export const DOCTRINES: DoctrineConfig[] = [
     id: 'nebel', // Distanz/Sniper → schnelle Typen, die die Distanz schließen / Sichtlinie brechen
     displayName: 'Nahkampfdruck',
     triggers: [{ field: 'longRangeKillRatio', mid: 0.4, strong: 0.65 }],
-    enemyTypesByStufe: [[], ['closer'], ['closer', 'flanker'], ['closer', 'flanker', 'swarm']],
+    // Konter zum Sniper = der schnelle Racer. In JEDER Stufe präsent → je höher der Distanz-Heat,
+    // desto mehr Racer (höherer targetCount + Anteil); ab Stufe 2/3 zusätzlich Closer/Flanker.
+    enemyTypesByStufe: [[], ['racer'], ['racer', 'closer'], ['racer', 'closer', 'flanker']],
   },
   {
     id: 'sperrkrieg', // Rush → Typen, die den Vorstoß stoppen / sich in den Weg stellen

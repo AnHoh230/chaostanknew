@@ -20,6 +20,7 @@ export const ENEMY_TYPES: Record<string, EnemyType> = {
   swarm: { id: 'swarm', behavior: 'swarm', label: 'Swarm', color: '#ffd166', comp: { chassis: 'c_box', wheels: 'w_tread', turret: 't_small', weapon: 'g_short' } },
   disruptor: { id: 'disruptor', behavior: 'disruptor', label: 'Disruptor', color: '#ff922b', comp: { chassis: 'c_wide', wheels: 'w_tread', turret: 't_big', weapon: 'g_short' } },
   blocker: { id: 'blocker', behavior: 'blocker', label: 'Blocker', color: '#4dabf7', comp: { chassis: 'c_wide', wheels: 'w_tread', turret: 't_big', weapon: 'g_long' } },
+  racer: { id: 'racer', behavior: 'racer', label: 'Racer', color: '#69db7c', comp: { chassis: 'c_box', wheels: 'w_round', turret: 't_small', weapon: 'g_short' } },
 };
 
 export const ENEMY_TYPE_IDS = Object.keys(ENEMY_TYPES);

@@ -50,10 +50,16 @@ describe('Gegner-Verhalten (reine Muster)', () => {
     expect(o.tx).toBe(0); expect(o.tz).toBe(0);
   });
 
+  it('racer stürmt direkt auf den Spieler und ist sehr schnell', () => {
+    const o = behaviorTarget('racer', base);
+    expect(o.tx).toBe(base.px); expect(o.tz).toBe(base.pz); // Ziel = Spieler
+    expect(o.speedMul).toBeGreaterThan(2); // schneller als alle anderen Defaults
+  });
+
   it('Tuning-Getter überschreiben Tempo/Orbit (Regler)', () => {
     const o = behaviorTarget('flanker', base, {
       closerSpeed: () => 1, flankerSpeed: () => 3, swarmSpeed: () => 1,
-      disruptorSpeed: () => 1, blockerSpeed: () => 1, flankerOrbit: () => 0.5, blockerLead: () => 10,
+      disruptorSpeed: () => 1, blockerSpeed: () => 1, racerSpeed: () => 1, flankerOrbit: () => 0.5, blockerLead: () => 10,
     });
     expect(o.speedMul).toBe(3);
     expect(distToPlayer(o)).toBeCloseTo(base.standoff * 0.5, 5);
