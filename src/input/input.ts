@@ -34,6 +34,7 @@ export function createInput(
   onFire: () => void,
   turretSlew: number | (() => number) = Infinity,
   canDrive: () => boolean = () => true, // false → Panzer steht (z. B. Sniper-Scope)
+  autoForward: () => boolean = () => true, // false → kein Auto-Vorwärts, W/S fahren manuell (Sniper)
 ): { update(simDt: number): void; getAimTarget(): Vector3 | null } {
   const speedOf = (): number => (typeof speed === 'function' ? speed() : speed);
   const slewOf = (): number => (typeof turretSlew === 'function' ? turretSlew() : turretSlew);
@@ -66,9 +67,15 @@ export function createInput(
   function update(simDt: number): void {
     const root = tank.view.root;
 
-    // Steuerung: der Panzer fährt AUTOMATISCH vorwärts; A/D lenken (drehen den ganzen
-    // Panzer). Kein W/S-Gasgeben mehr — konsistent, dazu Shift-Dash in Fahrtrichtung.
-    const throttle = canDrive() ? 1 : 0; // Scope-Modus: stehen bleiben
+    // Steuerung: standardmäßig fährt der Panzer AUTOMATISCH vorwärts; A/D lenken (drehen
+    // den ganzen Panzer), Shift-Dash in Fahrtrichtung. Im Sniper-Stil (autoForward=false)
+    // gibt es KEIN Auto-Vorwärts: der Panzer steht und fährt nur manuell per W/S — so kann
+    // man Distanz halten und picken. canDrive=false (Scope) friert immer komplett ein.
+    let throttle = 0;
+    if (canDrive()) {
+      if (autoForward()) throttle = 1;
+      else throttle = (keys['w'] ? 1 : 0) - (keys['s'] ? 1 : 0);
+    }
     let steer = 0;
     if (keys['d']) steer += 1;
     if (keys['a']) steer -= 1; // A+D = 0 (geradeaus)

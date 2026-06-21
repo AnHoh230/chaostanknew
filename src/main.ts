@@ -538,6 +538,7 @@ function boot(combatStyle: CombatStyle): void {
     scene, camera, tank, () => playerSpeed, fire,
     () => BASE_TURRET_SLEW * playerBuffs.aggregate().turretSlewMul,
     () => !scopeActive, // Sniper-Scope hält den Panzer an
+    () => combatStyle !== 'sniper', // Sniper: kein Auto-Vorwärts, manuell per W/S fahren
   );
 
   // Sniper-Scope: rechte Maustaste halten → Scope an, loslassen → aus (nur im Sniper-Stil).
