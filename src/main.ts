@@ -180,6 +180,7 @@ function boot(cls: TankClass): void {
 
   // Live einstellbar (Regler im Panel): Schussweite.
   let shotRange = 40; // Weltеinheiten, die ein Schuss fliegt (nicht über die ganze Map)
+  let playerProjSpeed = 60; // Spieler-Projektiltempo (schneller als Gegner → bewegliche Ziele treffbar)
 
   // Gegner werden dauerhaft nachgespawnt (feste Dichte; Steuerung kommt später über die Doktrin).
   const aiRng = createRng(SEED + 7);
@@ -397,8 +398,8 @@ function boot(cls: TankClass): void {
       z: origin.z,
       dx,
       dz,
-      speed: PROJECTILE_SPEED,
-      life: shotRange / PROJECTILE_SPEED, // begrenzte Schussweite
+      speed: playerProjSpeed,
+      life: shotRange / playerProjSpeed, // begrenzte Schussweite (Reichweite bleibt gleich)
       team: 'player',
       damage: shotDamage,
     });
@@ -484,7 +485,7 @@ function boot(cls: TankClass): void {
   function fireAutoTurret(ox: number, oz: number, dir: number, team: string, damage: number, range: number): void {
     const p = pool.acquire({
       x: ox, y: 0.5, z: oz, dx: Math.sin(dir), dz: Math.cos(dir),
-      speed: PROJECTILE_SPEED, life: range / PROJECTILE_SPEED, team, damage, auto: true,
+      speed: playerProjSpeed, life: range / playerProjSpeed, team, damage, auto: true,
     });
     if (p) bus.emit('projectile.spawned', { id: p.id });
   }
@@ -520,6 +521,7 @@ function boot(cls: TankClass): void {
   tunables.add({ label: 'Distanz', category: 'Kamera', value: camB, min: 5, max: 80, step: 1, onChange: (v) => { camB = v; applyCam(); } });
   tunables.add({ label: 'Zoom (FOV)', category: 'Kamera', value: camF, min: 0.3, max: 1.0, step: 0.01, onChange: (v) => { camF = v; applyCam(); } });
   tunables.add({ label: 'Schussweite', category: 'Kampf', value: shotRange, min: 8, max: 120, step: 1, onChange: (v) => { shotRange = v; } });
+  tunables.add({ label: 'Spieler-Projektiltempo', category: 'Kampf', value: playerProjSpeed, min: 20, max: 120, step: 5, onChange: (v) => { playerProjSpeed = v; } });
   tunables.add({ label: 'Frontlage-Puls s', category: 'Doktrin', value: pulseLen, min: 2, max: 120, step: 2, onChange: (v) => { pulseLen = v; } });
   createTuningPanel(tunables, { onChange: (label, value) => alog.log('regler', { label, value }) });
 
