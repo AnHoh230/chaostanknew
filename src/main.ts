@@ -213,7 +213,8 @@ function boot(combatStyle: CombatStyle): void {
   // Loadout (P4): ein Item je Slot, Stats = Klassen-Basis + bestückte Slots.
   const loadout = createLoadout({ damage: cls.damage, maxHp: cls.maxHp, speed: cls.speed, armor: 0 });
   let geld = mostExpensiveItemPrice(1); // Startbudget = teuerstes MK1-Item (symmetrisch zum Gegner)
-  let playerSpeed = cls.speed; // aus loadout.stats() abgeleitet (Räder) × Buffs
+  let playerSpeed = cls.speed; // aus loadout.stats() abgeleitet (Räder) × Buffs × Regler
+  let playerSpeedMul = 1; // Live-Regler auf die eigene Fahrgeschwindigkeit
   let playerTurretCd = 0; // Cooldown der Spieler-Sekundärwaffe (Auto-Turret)
   const progression = createProgression(); // Level/XP/MK (P2)
 
@@ -613,6 +614,7 @@ function boot(combatStyle: CombatStyle): void {
   tunables.add({ label: 'Schussweite', category: 'Kampf', value: shotRange, min: 8, max: 120, step: 1, onChange: (v) => { shotRange = v; } });
   tunables.add({ label: 'Gegner-Reichweite', category: 'Kampf', value: enemyShotRange, min: 8, max: 120, step: 1, onChange: (v) => { enemyShotRange = v; } });
   tunables.add({ label: 'Spieler-Projektiltempo', category: 'Kampf', value: playerProjSpeed, min: 20, max: 120, step: 5, onChange: (v) => { playerProjSpeed = v; } });
+  tunables.add({ label: 'Fahrgeschwindigkeit ×', category: 'Kampf', value: playerSpeedMul, min: 0.2, max: 4, step: 0.1, onChange: (v) => { playerSpeedMul = v; } });
   tunables.add({ label: 'Dash-Distanz', category: 'Fähigkeiten', value: dashDist, min: 4, max: 40, step: 1, onChange: (v) => { dashDist = v; } });
   tunables.add({ label: 'Dash-Cooldown s', category: 'Fähigkeiten', value: dashCdMax, min: 1, max: 15, step: 0.5, onChange: (v) => { dashCdMax = v; } });
   tunables.add({ label: 'Sniper-Reichweite', category: 'Stile', value: sniperRange, min: 40, max: 200, step: 5, onChange: (v) => { sniperRange = v; } });
@@ -1102,7 +1104,7 @@ function boot(combatStyle: CombatStyle): void {
     playerBuffs.tick(simDt);
     const pmods = playerBuffs.aggregate();
     const pst = loadout.stats();
-    playerSpeed = pst.speed * pmods.speedMul;
+    playerSpeed = pst.speed * pmods.speedMul * playerSpeedMul;
     playerCombatant.armor = pst.armor + pmods.armorAdd;
     playerCombatant.dodge = pst.dodge + pmods.dodgeAdd; // Ausweichen aus Modulen + Buffs
     playerCombatant.incomingMul = pmods.incomingMul; // Verwundbarkeit (falls Gegner später markieren)
