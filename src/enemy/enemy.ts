@@ -52,6 +52,7 @@ export function createEnemyEntity(
   radius: number,
   rng: () => number,
   hpMul = 1, // Live-Balancing-Faktor auf die Gegner-HP (Schwarm-Tuning)
+  dmgMul = 1, // Live-Balancing-Faktor auf den Gegner-Schaden
 ): Enemy {
   const view = createTankView(scene, spec.comp);
   view.root.position.set(spec.spawn.x, 0, spec.spawn.z);
@@ -77,7 +78,7 @@ export function createEnemyEntity(
     view,
     combatant,
     equipment,
-    damage: st.damage,
+    damage: Math.max(1, Math.round(st.damage * dmgMul)),
     fireCd: 0,
     displayName: spec.displayName,
     level: spec.level,
