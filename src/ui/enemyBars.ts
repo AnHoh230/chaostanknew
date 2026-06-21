@@ -9,6 +9,8 @@ export interface EnemyBarInfo {
   marks?: string; // aktive Debuff-Marken (🎯 markiert / 💨 vernebelt)
   level?: number; // eigenes Level (sichtbar machen: „was für ein Panzer")
   mk?: number; // MK-Stufe (aus dem Level abgeleitet)
+  typeLabel?: string; // Gegner-Typ (= Regler-Name) — macht sichtbar, was die Regler steuern
+  typeColor?: string;
 }
 
 export interface EnemyBars {
@@ -86,8 +88,11 @@ export function createEnemyBars(scene: Scene, camera: Camera, engine: Engine): E
       const tankTag = e.level != null && e.mk != null
         ? ` <span style="color:#ffcf6b;font-weight:800">L${e.level}·MK${e.mk}</span>`
         : '';
+      const typeTag = e.typeLabel
+        ? `<div style="color:${e.typeColor ?? '#fff'};font-weight:800;font-size:9px">${e.typeLabel}</div>`
+        : '';
       b.label.innerHTML =
-        `<span style="color:#cdd6dd">${e.marks ? e.marks + ' ' : ''}${e.name}</span>${tankTag}`;
+        `${typeTag}<span style="color:#cdd6dd">${e.marks ? e.marks + ' ' : ''}${e.name}</span>${tankTag}`;
     }
   }
 

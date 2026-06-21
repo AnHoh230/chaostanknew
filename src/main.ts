@@ -25,9 +25,11 @@ import { pickDrop, enemyMk } from './enemy/equipment';
 import { stepAutoTurret, type AutoTurretState } from './combat/autoTurret';
 import { createSpawner } from './enemy/spawner';
 import { behaviorTarget } from './enemy/enemyBehavior';
+import { ENEMY_TYPES } from './enemy/enemyTypes';
 import { createPlayerBar } from './ui/playerBar';
 import { createMinimap } from './ui/minimap';
 import { createEnemyBars } from './ui/enemyBars';
+import { createSwarmHud } from './ui/swarmHud';
 import { createOwnInventory, type OwnInvItem } from './ui/ownInventory';
 import { createLootLabels } from './ui/lootLabels';
 import { createOverviewMap, type MapBlip } from './ui/overviewMap';
@@ -481,6 +483,7 @@ function boot(cls: TankClass): void {
   const playerBar = createPlayerBar(scene, camera, engine); // HP+EP über dem eigenen Panzer
   const minimap = createMinimap();
   const enemyBars = createEnemyBars(scene, camera, engine); // HP-Balken über den Gegnern
+  const swarmHud = createSwarmHud(); // Schwarm-Lage: Anzahl je Typ + Zieldichte
   const lootLabels = createLootLabels(scene, camera, engine); // Item-Namen über den Loot-Würfeln
   // — Regler-Registry (R0): jede live-stellbare Magic Number wird hier registriert und
   // erscheint automatisch im filterbaren Tuning-HUD. Spielcode liest die Live-Getter.
@@ -1090,12 +1093,30 @@ function boot(cls: TankClass): void {
           name: e.displayName,
           level: e.level,
           mk: enemyMk(e.level),
+          typeLabel: ENEMY_TYPES[e.typeId]?.label,
+          typeColor: ENEMY_TYPES[e.typeId]?.color,
           marks: e.buffs.active().reduce(
             (s, b) => s + (b.id === 'markiert' ? '🎯' : b.id === 'vernebelt' ? '💨' : ''),
             '',
           ),
         })),
     );
+
+    // Schwarm-Lage anzeigen: Anzahl je Typ (lebend) + Zieldichte + aktuelles Mix-Gewicht.
+    {
+      const plan = currentSwarmPlan();
+      const aliveByType: Record<string, number> = {};
+      for (const e of roster) if (e.combatant.alive) aliveByType[e.typeId] = (aliveByType[e.typeId] ?? 0) + 1;
+      swarmHud.update({
+        alive: roster.reduce((n, e) => n + (e.combatant.alive ? 1 : 0), 0),
+        targetCount: plan.targetCount,
+        rows: Object.values(ENEMY_TYPES).map((t) => ({
+          label: t.label, color: t.color,
+          count: aliveByType[t.id] ?? 0,
+          weight: plan.weights[t.id] ?? 0,
+        })),
+      });
+    }
 
     // P0: Hover-Pick (Gegner unter dem Mauszeiger) + Übersichtskarte (M).
     const screenBlips: ScreenBlip[] = [];
