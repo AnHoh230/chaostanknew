@@ -167,7 +167,8 @@ function boot(combatStyle: CombatStyle): void {
   const projectileView = createProjectileView(scene, pool, PROJECTILE_CAPACITY);
 
   // Live einstellbar (Regler im Panel): Schussweite.
-  let shotRange = 40; // Weltеinheiten, die ein Schuss fliegt (nicht über die ganze Map)
+  let shotRange = 40; // Weltеinheiten, die ein SPIELER-Schuss fliegt (Scope erhöht NUR diese)
+  let enemyShotRange = 40; // Gegner-Feuerdistanz/Standoff/Projektilreichweite — UNABHÄNGIG vom Spieler-Scope
   let playerProjSpeed = 60; // Spieler-Projektiltempo (schneller als Gegner → bewegliche Ziele treffbar)
   // Dash (Shift+WASD): kurzer Burst in Tasten-Richtung (heading-relativ), CD sichtbar im HUD.
   let dashCd = 0, dashTimer = 0, dashDirX = 0, dashDirZ = 0;
@@ -482,7 +483,7 @@ function boot(combatStyle: CombatStyle): void {
     const l = Math.hypot(dx, dz) || 1;
     const p = pool.acquire({
       x: ox, y: 0.5, z: oz, dx: dx / l, dz: dz / l,
-      speed: PROJECTILE_SPEED, life: shotRange / PROJECTILE_SPEED, team, damage, ownerType,
+      speed: PROJECTILE_SPEED, life: enemyShotRange / PROJECTILE_SPEED, team, damage, ownerType,
     });
     if (p) bus.emit('projectile.spawned', { id: p.id });
   }
@@ -609,6 +610,7 @@ function boot(combatStyle: CombatStyle): void {
   tunables.add({ label: 'Distanz', category: 'Kamera', value: camB, min: 5, max: 80, step: 1, onChange: (v) => { camB = v; applyCam(); } });
   tunables.add({ label: 'Zoom (FOV)', category: 'Kamera', value: camF, min: 0.3, max: 1.0, step: 0.01, onChange: (v) => { camF = v; applyCam(); } });
   tunables.add({ label: 'Schussweite', category: 'Kampf', value: shotRange, min: 8, max: 120, step: 1, onChange: (v) => { shotRange = v; } });
+  tunables.add({ label: 'Gegner-Reichweite', category: 'Kampf', value: enemyShotRange, min: 8, max: 120, step: 1, onChange: (v) => { enemyShotRange = v; } });
   tunables.add({ label: 'Spieler-Projektiltempo', category: 'Kampf', value: playerProjSpeed, min: 20, max: 120, step: 5, onChange: (v) => { playerProjSpeed = v; } });
   tunables.add({ label: 'Dash-Distanz', category: 'Fähigkeiten', value: dashDist, min: 4, max: 40, step: 1, onChange: (v) => { dashDist = v; } });
   tunables.add({ label: 'Dash-Cooldown s', category: 'Fähigkeiten', value: dashCdMax, min: 1, max: 15, step: 0.5, onChange: (v) => { dashCdMax = v; } });
@@ -1199,7 +1201,7 @@ function boot(combatStyle: CombatStyle): void {
 
       const out = behaviorTarget(e.behavior, {
         ex: er.position.x, ez: er.position.z, px, pz,
-        pvx: playerVelX, pvz: playerVelZ, standoff: shotRange, phase: e.phase,
+        pvx: playerVelX, pvz: playerVelZ, standoff: enemyShotRange, phase: e.phase,
       }, behaviorTuning);
 
       const distToPlayer = Math.hypot(px - er.position.x, pz - er.position.z) || 1;
@@ -1214,7 +1216,7 @@ function boot(combatStyle: CombatStyle): void {
       // Turm zielt unabhängig vom Fahrwerk immer auf den Spieler.
       { const yaw = Math.atan2(px - er.position.x, pz - er.position.z); e.view.turretNode.rotation.y = yaw - er.rotation.y; }
       e.fireCd -= simDt;
-      if (distToPlayer <= shotRange && e.fireCd <= 0) {
+      if (distToPlayer <= enemyShotRange && e.fireCd <= 0) {
         // Fix A: aufs vorausberechnete Ziel feuern (wohin der Spieler fährt), nicht auf die
         // Ist-Position → reines Geradeausfahren ist keine Gratis-Unverwundbarkeit mehr.
         const tLead = (distToPlayer / PROJECTILE_SPEED) * enemyLeadGet();
