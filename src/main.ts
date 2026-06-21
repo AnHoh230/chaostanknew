@@ -502,21 +502,16 @@ function boot(cls: TankClass): void {
     () => BASE_TURRET_SLEW * playerBuffs.aggregate().turretSlewMul,
   );
 
-  // Dash-Auslöser: Shift + W/A/S/D = kurzer Burst in die Richtung (heading-relativ).
+  // Dash-Auslöser: Shift = kurzer Burst in Fahrtrichtung (der Panzer fährt eh vorwärts).
   window.addEventListener('keydown', (ev) => {
-    if (!ev.shiftKey || ev.repeat) return;
-    const k = ev.key.toLowerCase();
-    if (k !== 'w' && k !== 'a' && k !== 's' && k !== 'd') return;
+    if (ev.key !== 'Shift' || ev.repeat) return;
     if (dashCd > 0 || !playerCombatant.alive) return;
     const yaw = tank.view.root.rotation.y;
-    const sin = Math.sin(yaw), cos = Math.cos(yaw);
-    if (k === 'w') { dashDirX = sin; dashDirZ = cos; } // vorwärts
-    else if (k === 's') { dashDirX = -sin; dashDirZ = -cos; } // rückwärts
-    else if (k === 'a') { dashDirX = -cos; dashDirZ = sin; } // links (strafe)
-    else { dashDirX = cos; dashDirZ = -sin; } // rechts (strafe)
+    dashDirX = Math.sin(yaw); // vorwärts entlang Heading
+    dashDirZ = Math.cos(yaw);
     dashTimer = dashDur;
     dashCd = dashCdMax;
-    alog.log('dash', { dir: k });
+    alog.log('dash', {});
   });
 
   // OS-Mauszeiger über dem Canvas ausblenden — das Spiel zeichnet sein eigenes
@@ -620,7 +615,7 @@ function boot(cls: TankClass): void {
     dashSlotEl.style.borderColor = ready ? '#3c7d6e' : '#2a343b';
     dashSlotEl.innerHTML =
       `<div style="color:${ready ? '#7fd1c0' : '#7a8a86'};font-weight:800">⇄ Dash</div>` +
-      (ready ? `<div style="color:#cdd6dd">Shift+WASD</div>` : `<div style="color:#ffae5b;font-weight:800">${dashCd.toFixed(1)}s</div>`);
+      (ready ? `<div style="color:#cdd6dd">Shift</div>` : `<div style="color:#ffae5b;font-weight:800">${dashCd.toFixed(1)}s</div>`);
   }
   updateDashHud();
 

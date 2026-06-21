@@ -65,14 +65,12 @@ export function createInput(
   function update(simDt: number): void {
     const root = tank.view.root;
 
-    // WASD steuert die WANNE (schweres Fahrzeug): W/S = vor/zurück entlang Heading,
-    // A/D = Wanne drehen. Trägheit + kein Sofort-Richtungswechsel (siehe chassis.ts).
-    let throttle = 0;
-    if (keys['w']) throttle += 1;
-    if (keys['s']) throttle -= 1; // W+S = 0 (bremsen über Reibung)
+    // Steuerung: der Panzer fährt AUTOMATISCH vorwärts; A/D lenken (drehen den ganzen
+    // Panzer). Kein W/S-Gasgeben mehr — konsistent, dazu Shift-Dash in Fahrtrichtung.
+    const throttle = 1;
     let steer = 0;
     if (keys['d']) steer += 1;
-    if (keys['a']) steer -= 1; // A+D = 0
+    if (keys['a']) steer -= 1; // A+D = 0 (geradeaus)
     const next = stepChassis(chassis, { throttle, steer }, chassisCfgFor(speedOf()), simDt);
     chassis.heading = next.heading;
     chassis.velocity = next.velocity;
