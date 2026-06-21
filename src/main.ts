@@ -277,7 +277,7 @@ function boot(cls: TankClass): void {
   let playerStationary = false; // für „Schaden im Stand" + Stil
   let prevPx = 0, prevPz = 0, prevPosInit = false; // echtes Spielertempo aus Positionsdelta
   let playerVelX = 0, playerVelZ = 0; // Spieler-Geschwindigkeit (blocker-Verhalten)
-  let pulseLen = 40; // Frontlage-Puls-Fensterlänge (s), live per Regler
+  let pulseLen = 10; // Frontlage-Puls (s): so kurz, dass der Stil-Konter INNERHALB eines Lebens rampt
   let pulseCd = pulseLen;
 
   // Shop-Felder (S2): leuchtende Felder in der Welt. Shop nur dort, Welt läuft
@@ -518,7 +518,7 @@ function boot(cls: TankClass): void {
   tunables.add({ label: 'Distanz', category: 'Kamera', value: camB, min: 5, max: 80, step: 1, onChange: (v) => { camB = v; applyCam(); } });
   tunables.add({ label: 'Zoom (FOV)', category: 'Kamera', value: camF, min: 0.3, max: 1.0, step: 0.01, onChange: (v) => { camF = v; applyCam(); } });
   tunables.add({ label: 'Schussweite', category: 'Kampf', value: shotRange, min: 8, max: 120, step: 1, onChange: (v) => { shotRange = v; } });
-  tunables.add({ label: 'Frontlage-Puls s', category: 'Doktrin', value: pulseLen, min: 10, max: 120, step: 5, onChange: (v) => { pulseLen = v; } });
+  tunables.add({ label: 'Frontlage-Puls s', category: 'Doktrin', value: pulseLen, min: 2, max: 120, step: 2, onChange: (v) => { pulseLen = v; } });
   createTuningPanel(tunables, { onChange: (label, value) => alog.log('regler', { label, value }) });
 
   // Inspizier-System (P0): M = Echtzeit-Übersichtskarte, I = modaler Tiefblick (Pause).
