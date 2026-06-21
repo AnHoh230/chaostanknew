@@ -177,6 +177,7 @@ function boot(combatStyle: CombatStyle): void {
 
   // — Kampfstil-Werte (Regler, Kategorie „Stile") —
   let sniperRange = 95, sniperCamBack = 110, sniperCamHeight = 70; // Scope: Reichweite + Kamera weit raus
+  let scopeLookAhead = 45; // Scope: wie weit der Blick in Zielrichtung nach vorn gleitet
   let aoeRange = 26, aoeRadius = 4, aoeDmg = 14, aoeTickCount = 5; // AoE-Feld (Radius ~2 Späher)
   let dotDmg = 36, dotEvery = DAMAGE_TICK * 2, dotDur = DAMAGE_TICK * 8; // DoT: alle 2 Ticks, 8 Ticks lang
   let scopeActive = false; // Sniper: RMB gedrückt → Scope an (kein Fahren, weiter zoomen)
@@ -543,8 +544,23 @@ function boot(combatStyle: CombatStyle): void {
 
   // Sniper-Scope: rechte Maustaste halten → Scope an, loslassen → aus (nur im Sniper-Stil).
   if (combatStyle === 'sniper') {
-    canvas.addEventListener('mousedown', (ev) => { if (ev.button === 2) scopeActive = true; });
-    canvas.addEventListener('mouseup', (ev) => { if (ev.button === 2) scopeActive = false; });
+    // Sichtbarer Scope-Indikator — sonst rät man, ob RMB ankam (Debug: erst sichtbar machen).
+    const scopeBadge = document.createElement('div');
+    scopeBadge.textContent = '🔭 SCOPE';
+    scopeBadge.style.cssText =
+      'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:50;background:#16240fee;' +
+      'color:#9be36b;border:1px solid #9be36b;border-radius:6px;padding:4px 14px;display:none;' +
+      'font:700 13px system-ui,sans-serif;letter-spacing:1.5px;pointer-events:none;';
+    document.body.appendChild(scopeBadge);
+    const setScope = (on: boolean): void => {
+      if (on === scopeActive) return;
+      scopeActive = on;
+      scopeBadge.style.display = on ? 'block' : 'none';
+      log.info('scope', { on });
+    };
+    canvas.addEventListener('mousedown', (ev) => { if (ev.button === 2) setScope(true); });
+    canvas.addEventListener('mouseup', (ev) => { if (ev.button === 2) setScope(false); });
+    window.addEventListener('mouseup', (ev) => { if (ev.button === 2) setScope(false); }); // Release auch außerhalb Canvas
     canvas.addEventListener('contextmenu', (ev) => ev.preventDefault()); // kein Browser-Menü auf RMB
   }
 
@@ -578,7 +594,7 @@ function boot(combatStyle: CombatStyle): void {
   const lootLabels = createLootLabels(scene, camera, engine); // Item-Namen über den Loot-Würfeln
   // — Regler-Registry (R0): jede live-stellbare Magic Number wird hier registriert und
   // erscheint automatisch im filterbaren Tuning-HUD. Spielcode liest die Live-Getter.
-  const camApi = (window as unknown as { __cam?: { set(h: number, b: number, f?: number): void; get(): { height: number; back: number; fov: number } } }).__cam;
+  const camApi = (window as unknown as { __cam?: { set(h: number, b: number, f?: number): void; setOffset(ox: number, oz: number): void; get(): { height: number; back: number; fov: number } } }).__cam;
   const cam0 = camApi?.get() ?? { height: 25, back: 55, fov: 0.87 };
   let camH = cam0.height, camB = cam0.back, camF = cam0.fov;
   const applyCam = (): void => camApi?.set(camH, camB, camF);
@@ -590,6 +606,9 @@ function boot(combatStyle: CombatStyle): void {
   tunables.add({ label: 'Dash-Distanz', category: 'Fähigkeiten', value: dashDist, min: 4, max: 40, step: 1, onChange: (v) => { dashDist = v; } });
   tunables.add({ label: 'Dash-Cooldown s', category: 'Fähigkeiten', value: dashCdMax, min: 1, max: 15, step: 0.5, onChange: (v) => { dashCdMax = v; } });
   tunables.add({ label: 'Sniper-Reichweite', category: 'Stile', value: sniperRange, min: 40, max: 200, step: 5, onChange: (v) => { sniperRange = v; } });
+  tunables.add({ label: 'Sniper-Vorschub', category: 'Stile', value: scopeLookAhead, min: 0, max: 120, step: 5, onChange: (v) => { scopeLookAhead = v; } });
+  tunables.add({ label: 'Sniper-Kamera-Höhe', category: 'Stile', value: sniperCamHeight, min: 20, max: 140, step: 5, onChange: (v) => { sniperCamHeight = v; } });
+  tunables.add({ label: 'Sniper-Kamera-Distanz', category: 'Stile', value: sniperCamBack, min: 20, max: 200, step: 5, onChange: (v) => { sniperCamBack = v; } });
   tunables.add({ label: 'AoE-Wurfweite', category: 'Stile', value: aoeRange, min: 8, max: 60, step: 1, onChange: (v) => { aoeRange = v; } });
   tunables.add({ label: 'AoE-Radius', category: 'Stile', value: aoeRadius, min: 1, max: 12, step: 0.5, onChange: (v) => { aoeRadius = v; } });
   tunables.add({ label: 'AoE-Schaden/Tick', category: 'Stile', value: aoeDmg, min: 1, max: 60, step: 1, onChange: (v) => { aoeDmg = v; } });
@@ -1210,10 +1229,24 @@ function boot(combatStyle: CombatStyle): void {
     if (shop.isOpen() && !onShopTile && spawnGraceCd <= 0) shop.close(); // Feld verlassen → Shop schließt (außer in der Gnadenzeit)
     combat.update();
 
-    // Sniper-Scope: an = Reichweite hoch + Kamera weit raus; aus = alles zurück auf Default.
+    // Sniper-Scope: an = Reichweite hoch + Kamera weit raus + Blick gleitet in Zielrichtung
+    // nach vorn (Panzer rutscht an den Rand, man sieht weit ins Schussfeld). Aus = zurück.
     if (combatStyle === 'sniper') {
-      if (scopeActive && !scopeApplied) { savedShotRange = shotRange; shotRange = sniperRange; camApi?.set(sniperCamHeight, sniperCamBack, camF); scopeApplied = true; }
-      else if (!scopeActive && scopeApplied) { shotRange = savedShotRange; applyCam(); scopeApplied = false; }
+      if (scopeActive) {
+        if (!scopeApplied) { savedShotRange = shotRange; shotRange = sniperRange; scopeApplied = true; }
+        camApi?.set(sniperCamHeight, sniperCamBack, camF);
+        // Vorschub: Einheitsvektor Panzer→Cursor × scopeLookAhead. Jeden Frame frisch,
+        // damit der Blick der Maus folgt (man sweept die Richtung, in die man späht).
+        const aim = input.getAimTarget();
+        let ox = 0, oz = 0;
+        if (aim) {
+          const dx = aim.x - px, dz = aim.z - pz, l = Math.hypot(dx, dz);
+          if (l > 0.001) { ox = (dx / l) * scopeLookAhead; oz = (dz / l) * scopeLookAhead; }
+        }
+        camApi?.setOffset(ox, oz);
+      } else if (scopeApplied) {
+        shotRange = savedShotRange; camApi?.setOffset(0, 0); applyCam(); scopeApplied = false;
+      }
     }
 
     // DoT-Ticks: Gift tickt pro Gegner runter (kann töten → rückwärts iterieren).
