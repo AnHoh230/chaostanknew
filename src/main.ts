@@ -30,6 +30,7 @@ import { createPlayerBar } from './ui/playerBar';
 import { createMinimap } from './ui/minimap';
 import { createEnemyBars } from './ui/enemyBars';
 import { createSwarmHud } from './ui/swarmHud';
+import { createHeatHud } from './ui/heatHud';
 import { createOwnInventory, type OwnInvItem } from './ui/ownInventory';
 import { createLootLabels } from './ui/lootLabels';
 import { createOverviewMap, type MapBlip } from './ui/overviewMap';
@@ -484,6 +485,11 @@ function boot(cls: TankClass): void {
   const minimap = createMinimap();
   const enemyBars = createEnemyBars(scene, camera, engine); // HP-Balken über den Gegnern
   const swarmHud = createSwarmHud(); // Schwarm-Lage: Anzahl je Typ + Zieldichte
+  const heatHud = createHeatHud(); // Heat je Stil-Richtung (warum dieser Mix)
+  // Spielernahe Namen der 4 Richtungen (was den Heat treibt).
+  const STYLE_LABEL: Record<string, string> = {
+    stoerkrieg: 'Auto-Turret', belagerung: 'Bunkern', nebel: 'Distanz', sperrkrieg: 'Rush',
+  };
   const lootLabels = createLootLabels(scene, camera, engine); // Item-Namen über den Loot-Würfeln
   // — Regler-Registry (R0): jede live-stellbare Magic Number wird hier registriert und
   // erscheint automatisch im filterbaren Tuning-HUD. Spielcode liest die Live-Getter.
@@ -1116,6 +1122,9 @@ function boot(cls: TankClass): void {
           weight: plan.weights[t.id] ?? 0,
         })),
       });
+      heatHud.update(director.states().map((s) => ({
+        label: STYLE_LABEL[s.id] ?? s.id, heat: Math.round(s.heat), stufe: s.stufe,
+      })));
     }
 
     // P0: Hover-Pick (Gegner unter dem Mauszeiger) + Übersichtskarte (M).
