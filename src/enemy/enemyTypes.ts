@@ -1,0 +1,23 @@
+import type { TankComposition } from '../tank/sockets';
+import type { EnemyBehavior } from './enemyBehavior';
+
+/**
+ * Ein Gegner-Typ = eine Optik + ein Verhaltensmuster. Mehr nicht: Kampfwerte kommen
+ * weiterhin aus Ausrüstung + Level (enemyStats), NICHT aus dem Typ. Typen unterscheiden
+ * sich also rein darüber, WIE sie sich bewegen/angreifen.
+ */
+export interface EnemyType {
+  id: string;
+  behavior: EnemyBehavior;
+  comp: TankComposition; // Optik, damit die Muster im Spiel unterscheidbar sind
+}
+
+export const ENEMY_TYPES: Record<string, EnemyType> = {
+  closer: { id: 'closer', behavior: 'closer', comp: { chassis: 'c_box', wheels: 'w_round', turret: 't_small', weapon: 'g_short' } },
+  flanker: { id: 'flanker', behavior: 'flanker', comp: { chassis: 'c_box', wheels: 'w_round', turret: 't_small', weapon: 'g_long' } },
+  swarm: { id: 'swarm', behavior: 'swarm', comp: { chassis: 'c_box', wheels: 'w_tread', turret: 't_small', weapon: 'g_short' } },
+  disruptor: { id: 'disruptor', behavior: 'disruptor', comp: { chassis: 'c_wide', wheels: 'w_tread', turret: 't_big', weapon: 'g_short' } },
+  blocker: { id: 'blocker', behavior: 'blocker', comp: { chassis: 'c_wide', wheels: 'w_tread', turret: 't_big', weapon: 'g_long' } },
+};
+
+export const ENEMY_TYPE_IDS = Object.keys(ENEMY_TYPES);

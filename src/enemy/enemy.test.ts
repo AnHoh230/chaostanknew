@@ -13,6 +13,8 @@ function specAtLevel(level: number): EnemySpec {
     spawn: { x: 10, z: 20 },
     level,
     displayName: 'Panzer 1',
+    typeId: 'closer',
+    behavior: 'closer',
   };
 }
 

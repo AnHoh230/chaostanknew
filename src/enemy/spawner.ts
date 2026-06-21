@@ -1,13 +1,6 @@
 import type { Scene } from '@babylonjs/core';
 import { createEnemyEntity, type Enemy, type EnemySpec } from './enemy';
-import type { TankComposition } from '../tank/sockets';
-
-/** Feste Standard-Kompositionen — rotiert für etwas Optik-Abwechslung. */
-const COMPS: TankComposition[] = [
-  { chassis: 'c_box', wheels: 'w_round', turret: 't_small', weapon: 'g_short' },
-  { chassis: 'c_wide', wheels: 'w_tread', turret: 't_big', weapon: 'g_long' },
-  { chassis: 'c_box', wheels: 'w_tread', turret: 't_big', weapon: 'g_short' },
-];
+import { ENEMY_TYPES, ENEMY_TYPE_IDS } from './enemyTypes';
 
 export interface SpawnerOptions {
   maxAlive: number; // wie viele gleichzeitig leben dürfen
@@ -51,12 +44,17 @@ export function createSpawner(
     const z = pz + Math.sin(ang) * r;
 
     const level = 1 + Math.floor(rng() * opts.maxLevel);
+    // R2: alle Typen durchrotieren, damit jedes Verhalten sichtbar ist (R3 ersetzt das durch
+    // stil-gewichtete Auswahl). Optik + Verhalten kommen aus dem Typ-Register.
+    const type = ENEMY_TYPES[ENEMY_TYPE_IDS[compSeq++ % ENEMY_TYPE_IDS.length]!]!;
     const spec: EnemySpec = {
       id: 'e' + seq++,
-      comp: COMPS[compSeq++ % COMPS.length]!,
+      comp: type.comp,
       spawn: { x, z },
       level,
       displayName: 'Panzer ' + ++nameSeq,
+      typeId: type.id,
+      behavior: type.behavior,
     };
     return createEnemyEntity(scene, spec, tankRadius, rng);
   }

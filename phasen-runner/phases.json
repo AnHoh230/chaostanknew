@@ -1,0 +1,15 @@
+{
+  "_hinweis": "Ein Eintrag = eine Phase. Der Orchestrator ruft pro Eintrag genau einmal `claude -p --resume` auf und zaehlt selbst. Ersetze die Beispiele durch deine echten 10 Phasen. Tipp: Jede Phase klar abgrenzen und mit 'Stoppe danach.' enden, damit ein Aufruf = eine Phase bleibt.",
+  "phases": [
+    "Phase 1: <Beschreibung der ersten Phase>. Stoppe danach.",
+    "Phase 2: <Beschreibung>. Stoppe danach.",
+    "Phase 3: <Beschreibung>. Stoppe danach.",
+    "Phase 4: <Beschreibung>. Stoppe danach.",
+    "Phase 5: <Beschreibung>. Stoppe danach.",
+    "Phase 6: <Beschreibung>. Stoppe danach.",
+    "Phase 7: <Beschreibung>. Stoppe danach.",
+    "Phase 8: <Beschreibung>. Stoppe danach.",
+    "Phase 9: <Beschreibung>. Stoppe danach.",
+    "Phase 10: <Beschreibung>. Stoppe danach."
+  ]
+}

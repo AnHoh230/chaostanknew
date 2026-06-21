@@ -6,8 +6,9 @@ import type { ShopItem } from '../shop/catalog';
 import { rollEnemyEquipment } from './equipment';
 import { enemyCombatStats } from './enemyStats';
 import { createBuffStack, type BuffStack } from '../combat/buffs';
+import type { EnemyBehavior } from './enemyBehavior';
 
-/** Ein lebender Gegner: schlanker Combatant — Optik + Trefferdaten + Ausrüstung. */
+/** Ein lebender Gegner: schlanker Combatant — Optik + Trefferdaten + Ausrüstung + Verhalten. */
 export interface Enemy {
   id: string;
   view: TankView;
@@ -18,6 +19,9 @@ export interface Enemy {
   displayName: string; // generischer "Panzer N"-Name
   level: number; // eigenes Level (steuert Stats über die Ausrüstung)
   buffs: BuffStack; // passiver Empfänger der Spieler-Debuffs (Zielmarkierung/Rauch)
+  typeId: string; // Gegner-Typ (bestimmt das Verhalten)
+  behavior: EnemyBehavior; // Bewegungs-/Angriffsmuster
+  phase: number; // 0..1 fester per-Gegner-Versatz (Orbit-Richtung / Schwarm-Streuung)
 }
 
 export interface EnemySpec {
@@ -26,6 +30,8 @@ export interface EnemySpec {
   spawn: { x: number; z: number };
   level: number;
   displayName: string;
+  typeId: string;
+  behavior: EnemyBehavior;
 }
 
 /** Combatant-Stats eines Gegners NEU aus seiner Ausrüstung berechnen. HP wird voll aufgefüllt. */
@@ -74,5 +80,8 @@ export function createEnemyEntity(
     displayName: spec.displayName,
     level: spec.level,
     buffs: createBuffStack(),
+    typeId: spec.typeId,
+    behavior: spec.behavior,
+    phase: rng(),
   };
 }

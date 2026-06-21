@@ -23,6 +23,7 @@ import { applyEnemyStats, type Enemy } from './enemy/enemy';
 import { pickDrop, enemyMk } from './enemy/equipment';
 import { stepAutoTurret, type AutoTurretState } from './combat/autoTurret';
 import { createSpawner } from './enemy/spawner';
+import { behaviorTarget } from './enemy/enemyBehavior';
 import { createPlayerBar } from './ui/playerBar';
 import { createMinimap } from './ui/minimap';
 import { createEnemyBars } from './ui/enemyBars';
@@ -222,7 +223,7 @@ function boot(cls: TankClass): void {
   const lastDrops: string[] = []; // Verifikation: tatsächlich gedroppte Item-IDs
 
   // — Reaktive Schwarm-Welt (R1): Stil messen → Heat pro Richtung je Frontlage-Puls.
-  // Heat bestimmt, welche Monster-Typen + wie viele spawnen. Asymmetrischer Decay:
+  // Heat bestimmt, welche Gegner-Typen + wie viele spawnen. Asymmetrischer Decay:
   // genutzte Richtung heizt schnell, ungenutzte kühlt langsam → mehrere Richtungen gleichzeitig.
   // Alle Heat-Zahlen sind Regler (Kategorie „Doktrin").
   const styleTracker = createStyleTracker();
@@ -237,8 +238,20 @@ function boot(cls: TankClass): void {
     heatStrong: heatStrongGet, heatMid: heatMidGet, heatLight: heatLightGet,
     decay: decayGet, bands: () => [band1Get(), band2Get(), band3Get()],
   });
+  // — Gegner-Verhalten (R2): jeder Typ bewegt sich nach seinem Muster. Tempo/Orbit/Vorhalt
+  // als Live-Regler (Kategorie „Gegner") — die zentralen Playtest-Stellschrauben des Konters.
+  const behaviorTuning = {
+    closerSpeed: tunables.add({ label: 'Closer-Tempo', category: 'Gegner', value: 1.4, min: 0.5, max: 3, step: 0.1 }),
+    flankerSpeed: tunables.add({ label: 'Flanker-Tempo', category: 'Gegner', value: 1.1, min: 0.5, max: 3, step: 0.1 }),
+    swarmSpeed: tunables.add({ label: 'Swarm-Tempo', category: 'Gegner', value: 0.9, min: 0.5, max: 3, step: 0.1 }),
+    disruptorSpeed: tunables.add({ label: 'Disruptor-Tempo', category: 'Gegner', value: 1.8, min: 0.5, max: 3, step: 0.1 }),
+    blockerSpeed: tunables.add({ label: 'Blocker-Tempo', category: 'Gegner', value: 1.3, min: 0.5, max: 3, step: 0.1 }),
+    flankerOrbit: tunables.add({ label: 'Flanker-Orbit', category: 'Gegner', value: 0.85, min: 0.3, max: 1.5, step: 0.05 }),
+    blockerLead: tunables.add({ label: 'Blocker-Vorhalt', category: 'Gegner', value: 14, min: 0, max: 40, step: 1 }),
+  };
   let playerStationary = false; // für „Schaden im Stand" + Stil
   let prevPx = 0, prevPz = 0, prevPosInit = false; // echtes Spielertempo aus Positionsdelta
+  let playerVelX = 0, playerVelZ = 0; // Spieler-Geschwindigkeit (blocker-Verhalten)
   let pulseLen = 40; // Frontlage-Puls-Fensterlänge (s), live per Regler
   let pulseCd = pulseLen;
 
@@ -770,7 +783,7 @@ function boot(cls: TankClass): void {
     enemies: roster.map((e) => e.combatant),
     roster: () =>
       roster.map((e) => ({
-        id: e.id, level: e.level,
+        id: e.id, level: e.level, behavior: e.behavior,
         hp: e.combatant.hp, alive: e.combatant.alive,
         loot: e.combatant.lootValue, team: e.combatant.team,
         x: +e.combatant.x.toFixed(1), z: +e.combatant.z.toFixed(1),
@@ -935,6 +948,7 @@ function boot(cls: TankClass): void {
     // Stil messen + Frontlage-Puls (P3). Echtes Tempo aus dem Positionsdelta.
     if (!prevPosInit) { prevPx = px; prevPz = pz; prevPosInit = true; }
     const actualSpeed = simDt > 0 ? Math.hypot(px - prevPx, pz - prevPz) / simDt : 0;
+    if (simDt > 0) { playerVelX = (px - prevPx) / simDt; playerVelZ = (pz - prevPz) / simDt; }
     prevPx = px; prevPz = pz;
     playerStationary = actualSpeed < STATIONARY_SPEED;
     if (simDt > 0) styleTracker.onMove({ speed: actualSpeed, x: px, z: pz, dt: simDt });
@@ -972,26 +986,33 @@ function boot(cls: TankClass): void {
     const spawned = spawner.update(simDt, px, pz, aliveCount);
     if (spawned) roster.push(spawned);
 
-    // Gegner-Verhalten (Platzhalter bis P5 — wird dort GELÖSCHT, kein Legacy):
+    // Gegner-Verhalten (R2): jeder Typ steuert nach seinem Muster auf einen Zielpunkt zu,
+    // hält bei seinem Standoff und feuert in Schussweite. Konter = Verhalten, nicht Stats.
     for (const e of roster) {
       if (!e.combatant.alive) continue;
       const er = e.view.root;
-      const ex = er.position.x;
-      const ez = er.position.z;
       e.buffs.tick(simDt); // empfängt Spieler-Debuffs (Zielmarkierung/Rauch)
       const mods = e.buffs.aggregate();
       e.combatant.incomingMul = mods.incomingMul;
-      const dx = px - ex, dz = pz - ez;
-      const dist = Math.hypot(dx, dz) || 1;
-      if (dist > shotRange) {
-        const step = ENEMY_SPEED * mods.speedMul * simDt;
-        er.position.x += (dx / dist) * step;
-        er.position.z += (dz / dist) * step;
-        er.rotation.y = Math.atan2(dx, dz);
+
+      const out = behaviorTarget(e.behavior, {
+        ex: er.position.x, ez: er.position.z, px, pz,
+        pvx: playerVelX, pvz: playerVelZ, standoff: shotRange, phase: e.phase,
+      }, behaviorTuning);
+
+      const distToPlayer = Math.hypot(px - er.position.x, pz - er.position.z) || 1;
+      if (distToPlayer > out.standoff) {
+        const tdx = out.tx - er.position.x, tdz = out.tz - er.position.z;
+        const tl = Math.hypot(tdx, tdz) || 1;
+        const step = ENEMY_SPEED * out.speedMul * mods.speedMul * simDt;
+        er.position.x += (tdx / tl) * step;
+        er.position.z += (tdz / tl) * step;
+        er.rotation.y = Math.atan2(tdx, tdz);
       }
+      // Turm zielt unabhängig vom Fahrwerk immer auf den Spieler.
       { const yaw = Math.atan2(px - er.position.x, pz - er.position.z); e.view.turretNode.rotation.y = yaw - er.rotation.y; }
       e.fireCd -= simDt;
-      if (dist <= shotRange && e.fireCd <= 0) {
+      if (distToPlayer <= shotRange && e.fireCd <= 0) {
         enemyFire(er.position.x, er.position.z, px, pz, 'enemy', e.damage * mods.damageMul);
         e.fireCd = ENEMY_FIRE_COOLDOWN;
       }
