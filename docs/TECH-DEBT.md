@@ -157,3 +157,22 @@ sichtbar (Typ-Label, Schwarm-/Stil-Heat-HUD) und über Regler stellbar (persisti
   zusammenlegen.
 
 **Status:** Kern fertig & verifiziert; Survival-Gerüst offen (eigene Session).
+
+---
+
+## TD-7 — Lauf-Shop ist das falsche Progressions-Vehikel (nicht weiter investieren)
+
+**Empirischer Befund (Run 059):** Gold lief 138→642 und blieb komplett ungenutzt; MK
+blieb 1. Ursache ist NICHT „Spieler vergisst zu kaufen", sondern: ein Shop, zu dem man
+**mitten im Echtzeitkampf hinfahren und ein Menü durchklicken** muss, reißt aus dem
+Moment-zu-Moment-Loop (fahren/zielen/schießen) — Reibung zu hoch, passt nicht zum Genre.
+Vgl. VS (Auto-Aufsammeln + Mini-Wahl im Lauf) / Brotato (Shop nur in der Wellen-Pause).
+
+**Entscheidung (2026-06-21):** Lauf-Shop als Progressions-Vehikel **fallen lassen, nicht
+weiter ausbauen.** Ersatz (zu Richtung A), später festzulegen, wenn der Kampf selbst trägt:
+- reibungsfrei im Kampf: Loot, über den man fährt, **rüstet sofort auf** (nutzt bestehendes
+  Drop-System); oder
+- bei späterer Wellen-Struktur: Shop **nur zwischen Wellen** (Kampf pausiert).
+
+**Status:** markiert als raus; Rückbau/Ersatz erst nach Kampf-Feel (Fix A/B). Siehe
+[[balancing-strukturschluss]].
