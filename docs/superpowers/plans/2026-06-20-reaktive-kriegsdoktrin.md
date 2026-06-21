@@ -65,10 +65,25 @@ Player-facing-Texte nach §20 (kein „Heat/Doctrine/Director" sichtbar; „Fron
 
 ---
 
-## Phase 0 — Demolition (Nemesis/Promotion + veraltete Regler)
+## Phase 0 — Demolition + Strip auf schlanke Basis
 
 > **Prinzip (Nutzer):** Aus dem *aktuellen Stand* löschen, keine Deaktivierung + Fallbacks.
-> Git behält die Historie — keine Angst vor Spurenlosigkeit.
+> Git behält die Historie. Auch das Platzhalter-Verhalten ist **inline & minimal** und wird
+> in P5 **gelöscht** (kein inaktiver Legacy-Code).
+
+**Voller Lösch-Umfang (bestätigt):**
+- **Nemesis:** `named/` (promotion, revealText, akte), `reveal/` + Referenzen (named/respawnTimer/prevTargetVisible/akteBuch/smite/reveal/„named=rot").
+- **Alt-KI & Persönlichkeiten:** `ai/enemyBrain.ts`, `ai/utility.ts`, `ai/aiTypes.ts`, `ai/motives.ts`, `ai/engagement.ts`, `enemy/targeting.ts` (+ alle Tests).
+- **Gegner-Selbst-Ökonomie:** `enemy/enemyEconomy.ts` (+test); Enemy-Felder `prog/credits/shopState/dwellTimer/shopGoal/beltCd/belt/overShots/overMul/autoTurretCd/scoutDir/scoutCd/mode/brain/traits/action/motiveId/spawnInvulnCd`; in `main.ts` Shop-Trip-State-Machine, Gegner-Booster-KI, Kill→XP/Credits, Engagement/Targeting/Ökonomie-Block, Fraktions-Kampf.
+- **Veraltete Regler:** „Max Gegner", „Spawn-Intervall" (+ `__tune`-Getter/Setter).
+
+**Bestätigte Design-Schnitte:** Gegner bekämpfen sich NICHT mehr (alle `team:'enemy'`, zielen nur auf Spieler); Gegner-Stats kommen aus per Spawn zugewiesenem Gear (`rollEnemyEquipment` + `enemyCombatStats`), kein XP/MK-Selbstaufstieg.
+
+**Bleibt (generisch):** `combat/` (combat, projectilePool, projectileView, buffs, accuracy, autoTurret, areaTargeting, hitMath) · `enemy/enemyStats.ts` + `equipment.ts` · `spawner.ts` (vereinfacht, ohne Motive) · `enemy.ts` schlank · Spieler/Shop/Inventar/Loot/Welt/Kamera. **`enemy.buffs` bleibt** (passiver Empfänger der Spieler-Debuffs Zielmarkierung/Rauch → `combatant.incomingMul`).
+
+**Schlanker Enemy:** `{ id, view, combatant(team:'enemy'), equipment, damage, fireCd, displayName, level, buffs }`.
+
+**Platzhalter-Verhalten (inline im Loop, P5 löscht es):** auf Spieler zufahren → in Reichweite feuern → `buffs.tick` + `combatant.incomingMul` setzen → bei Tod Loot droppen + Spieler-Reward.
 
 **Files:**
 - Delete: `src/named/promotion.ts` `src/named/promotion.test.ts` `src/named/revealText.ts` `src/named/revealText.test.ts` `src/named/akte.ts` `src/named/akte.test.ts` `src/reveal/reveal.ts`
