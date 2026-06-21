@@ -184,12 +184,11 @@ function boot(cls: TankClass): void {
   // Gegner werden dauerhaft nachgespawnt (feste Dichte; Steuerung kommt später über die Doktrin).
   const aiRng = createRng(SEED + 7);
   const roster: Enemy[] = []; // lebende Gegner (dynamisch)
-  // — Schwarm-Dichte/Takt (R3): wie viele Gegner gleichzeitig leben + wie schnell nachrücken.
-  // Alles als Live-Regler (Kategorie „Schwarm").
-  const swarmBaseGet = tunables.add({ label: 'Grunddichte', category: 'Schwarm', value: 4, min: 0, max: 40, step: 1 });
-  const swarmPerHeatGet = tunables.add({ label: 'Dichte je Heat', category: 'Schwarm', value: 0.1, min: 0, max: 0.6, step: 0.01 });
-  const swarmIntervalGet = tunables.add({ label: 'Spawn-Takt s', category: 'Schwarm', value: 0.8, min: 0.1, max: 5, step: 0.1 });
-  const enemyHpGet = tunables.add({ label: 'Gegner-HP-Faktor', category: 'Schwarm', value: 1, min: 0.1, max: 2, step: 0.05 });
+  // — Gegner-Aufkommen (Richtung A): feste, gedeckelte Zahl bedeutsamer Gegner-Panzer
+  // (KEIN Schwarm/keine Dichte-aus-Heat mehr). Der Heat bestimmt nur noch die Typ-AUSWAHL.
+  const maxEnemiesGet = tunables.add({ label: 'Max Gegner', category: 'Gegner', value: 6, min: 1, max: 20, step: 1 });
+  const swarmIntervalGet = tunables.add({ label: 'Spawn-Takt s', category: 'Gegner', value: 1.5, min: 0.2, max: 6, step: 0.1 });
+  const enemyHpGet = tunables.add({ label: 'Gegner-HP-Faktor', category: 'Gegner', value: 1, min: 0.1, max: 2, step: 0.05 });
   const spawner = createSpawner(scene, TANK_RADIUS, () => aiRng.next(), {
     interval: swarmIntervalGet,
     radiusMin: 55, // größere, weiter gestreute Spawn-Area (kein Dauerfeuer auf der Stelle)
@@ -263,8 +262,9 @@ function boot(cls: TankClass): void {
     flankerOrbit: tunables.add({ label: 'Flanker-Orbit', category: 'Gegner', value: 0.85, min: 0.3, max: 1.5, step: 0.05 }),
     blockerLead: tunables.add({ label: 'Blocker-Vorhalt', category: 'Gegner', value: 14, min: 0, max: 40, step: 1 }),
   };
-  // — Schwarm-Plan (R3): Heat-Lage → Dichte + Typ-Mix. Pro Frame neu, treibt den Spawner.
-  const swarmTuning = { base: swarmBaseGet, perHeat: swarmPerHeatGet };
+  // — Gegner-Plan: Heat-Lage → Typ-MIX (welche Archetypen kontern deinen Stil). Die ZAHL ist
+  // fest gedeckelt (Max Gegner), NICHT heat-getrieben → kein Dichte-Spiral, kein Schwarm.
+  const swarmTuning = { base: maxEnemiesGet, perHeat: () => 0 };
   const typesById = new Map(DOCTRINES.map((d) => [d.id, d.enemyTypesByStufe]));
   const currentSwarmPlan = () => {
     const dirs: SwarmDirection[] = director.states().map((s) => ({
@@ -298,11 +298,7 @@ function boot(cls: TankClass): void {
     },
     onDeath: (t, killerTeam) => {
       if (t.id === 'player') {
-        log.warn('player died', {});
-        metrics.onDeath();
-        alog.log('player.death', {});
-        bus.emit('tank.died', { tankId: 'player' });
-        respawnPlayer();
+        killPlayer('schuss');
         return;
       }
       const e = roster.find((r) => r.id === t.id);
@@ -704,6 +700,19 @@ function boot(cls: TankClass): void {
 
   // Spieler-Respawn: bei 0 HP nicht „tot weiterballern", sondern neu aufbauen —
   // volle HP, an eine neue zufällige Position, mit kurzer Mercy-Unverwundbarkeit.
+  function killPlayer(cause: string): void {
+    // Doppel-Auslösung im selben Frame verhindern (nach Respawn ist man invulnerable).
+    // NICHT auf alive prüfen: combat.ts setzt alive=false VOR onDeath → würde echten Tod schlucken.
+    if (playerCombatant.invulnerable) return;
+    playerCombatant.hp = 0;
+    playerCombatant.alive = false;
+    log.warn('player died', { cause });
+    metrics.onDeath();
+    alog.log('player.death', { cause });
+    bus.emit('tank.died', { tankId: 'player' });
+    respawnPlayer();
+  }
+
   function respawnPlayer(): void {
     const ang = aiRng.next() * Math.PI * 2;
     const r = 50 + aiRng.next() * 30;

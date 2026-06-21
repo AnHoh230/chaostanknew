@@ -49,16 +49,16 @@ export function behaviorTarget(
   tuning: BehaviorTuning = DEFAULT_BEHAVIOR_TUNING,
 ): BehaviorOutput {
   switch (b) {
-    case 'closer': // fährt direkt auf den Spieler, schließt die Distanz, hält erst nah
-      return { tx: i.px, tz: i.pz, speedMul: tuning.closerSpeed(), standoff: i.standoff * 0.6 };
+    case 'closer': // drängt auf kurze Distanz heran und hält dort (aggressives Duell)
+      return { tx: i.px, tz: i.pz, speedMul: tuning.closerSpeed(), standoff: i.standoff * 0.5 };
 
-    case 'disruptor': // rammt bis auf Tuchfühlung, schnellster Typ — bestraft Stillstand
-      return { tx: i.px, tz: i.pz, speedMul: tuning.disruptorSpeed(), standoff: 0 };
+    case 'disruptor': // stürmt am dichtesten ran, schnellster Typ — bestraft Stillstand
+      return { tx: i.px, tz: i.pz, speedMul: tuning.disruptorSpeed(), standoff: i.standoff * 0.25 };
 
-    case 'swarm': { // konvergiert in Masse, leicht gestreut, kein Finassieren
+    case 'swarm': { // konvergiert leicht gestreut auf mittlere Distanz
       const a = i.phase * Math.PI * 2;
       const r = i.standoff * 0.4;
-      return { tx: i.px + Math.cos(a) * r, tz: i.pz + Math.sin(a) * r, speedMul: tuning.swarmSpeed(), standoff: i.standoff * 0.9 };
+      return { tx: i.px + Math.cos(a) * r, tz: i.pz + Math.sin(a) * r, speedMul: tuning.swarmSpeed(), standoff: i.standoff * 0.7 };
     }
 
     case 'flanker': { // umkreist den Spieler an festem Radius (Seite/Rücken statt frontal)
@@ -72,9 +72,9 @@ export function behaviorTarget(
       const pv = Math.hypot(i.pvx, i.pvz);
       const lead = tuning.blockerLead();
       if (pv > 0.1) {
-        return { tx: i.px + (i.pvx / pv) * lead, tz: i.pz + (i.pvz / pv) * lead, speedMul: tuning.blockerSpeed(), standoff: i.standoff * 0.8 };
+        return { tx: i.px + (i.pvx / pv) * lead, tz: i.pz + (i.pvz / pv) * lead, speedMul: tuning.blockerSpeed(), standoff: i.standoff * 0.6 };
       }
-      return { tx: i.px, tz: i.pz, speedMul: tuning.blockerSpeed(), standoff: i.standoff * 0.8 };
+      return { tx: i.px, tz: i.pz, speedMul: tuning.blockerSpeed(), standoff: i.standoff * 0.6 };
     }
   }
 }

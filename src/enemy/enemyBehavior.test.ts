@@ -13,10 +13,10 @@ describe('Gegner-Verhalten (reine Muster)', () => {
     expect(o.standoff).toBeLessThan(base.standoff); // näher als ein Sniper es will
   });
 
-  it('disruptor rammt bis Standoff 0 und ist der schnellste Typ', () => {
+  it('disruptor stürmt am dichtesten ran und ist der schnellste Typ', () => {
     const o = behaviorTarget('disruptor', base);
     const c = behaviorTarget('closer', base);
-    expect(o.standoff).toBe(0);
+    expect(o.standoff).toBeLessThan(c.standoff); // näher als der closer
     expect(o.speedMul).toBeGreaterThan(c.speedMul);
   });
 

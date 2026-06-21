@@ -33,7 +33,7 @@ export function createSwarmHud(): SwarmHud {
   document.body.appendChild(panel);
 
   function update(info: SwarmHudInfo): void {
-    head.textContent = `Schwarm ${info.alive}/${info.targetCount}`;
+    head.textContent = `Gegner ${info.alive}/${info.targetCount}`;
     const rows = info.rows.filter((r) => r.count > 0 || r.weight > 0);
     body.innerHTML = rows
       .map((r) => {
