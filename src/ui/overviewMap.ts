@@ -8,8 +8,7 @@ export interface MapBlip {
   color: string;
   r?: number;
   name?: string;
-  isNamed?: boolean;
-  sub?: string; // "Lvl 4 · MK2 · Aasgeier"
+  sub?: string; // "Lvl 4 · MK2"
   hpFrac?: number;
 }
 
@@ -96,9 +95,9 @@ export function createOverviewMap(): OverviewMap {
       const hp = hb.hpFrac == null ? '' :
         `<div style="height:5px;background:#0006;border-radius:3px;margin-top:4px;overflow:hidden">` +
         `<div style="height:100%;width:${Math.max(0, Math.min(1, hb.hpFrac)) * 100}%;` +
-        `background:${hb.isNamed ? '#ff3b30' : 'hsl(' + Math.round(Math.max(0, Math.min(1, hb.hpFrac)) * 120) + ',70%,45%)'}"></div></div>`;
+        `background:hsl(${Math.round(Math.max(0, Math.min(1, hb.hpFrac)) * 120)},70%,45%)"></div></div>`;
       tip.innerHTML =
-        `<div style="color:${hb.isNamed ? '#ff8a72' : '#f0e6cc'};font-weight:800">${hb.name ?? '?'}</div>` +
+        `<div style="color:#f0e6cc;font-weight:800">${hb.name ?? '?'}</div>` +
         (hb.sub ? `<div style="color:#8aa;font-size:10px;margin-top:1px">${hb.sub}</div>` : '') +
         hp;
       tip.style.left = pointerX + 14 + 'px';

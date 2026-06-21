@@ -5,9 +5,7 @@ export interface EnemyBarInfo {
   x: number;
   z: number;
   hpFrac: number;
-  name: string; // "Panzer N" oder Named-Name — wird IMMER angezeigt
-  isNamed: boolean; // true = benannter Rivale (rot + fett)
-  mode?: string; // aktueller KI-Modus (scout/annähern/feuern/…) — Mess-Overlay
+  name: string; // "Panzer N" — wird IMMER angezeigt
   marks?: string; // aktive Debuff-Marken (🎯 markiert / 💨 vernebelt)
   level?: number; // eigenes Level (sichtbar machen: „was für ein Panzer")
   mk?: number; // MK-Stufe (aus dem Level abgeleitet)
@@ -26,7 +24,6 @@ interface Bar {
   wrap: HTMLElement;
   fill: HTMLElement;
   label: HTMLElement;
-  mode: HTMLElement;
 }
 
 /**
@@ -51,14 +48,10 @@ export function createEnemyBars(scene: Scene, camera: Camera, engine: Engine): E
     const fill = document.createElement('div');
     fill.style.cssText = 'height:100%;width:100%;';
     track.appendChild(fill);
-    const mode = document.createElement('div');
-    mode.style.cssText =
-      'font:600 8px/1.1 system-ui,sans-serif;color:#9fb0c0;text-shadow:0 1px 2px #000;margin-top:1px;white-space:nowrap;';
     wrap.appendChild(label);
     wrap.appendChild(track);
-    wrap.appendChild(mode);
     document.body.appendChild(wrap);
-    return { wrap, fill, label, mode };
+    return { wrap, fill, label };
   }
 
   function project(x: number, z: number): { sx: number; sy: number; visible: boolean } {
@@ -89,15 +82,12 @@ export function createEnemyBars(scene: Scene, camera: Camera, engine: Engine): E
       b.wrap.style.left = p.sx + 'px';
       b.wrap.style.top = p.sy + 'px';
       b.fill.style.width = Math.max(0, Math.min(1, e.hpFrac) * 100) + '%';
-      b.fill.style.background = e.isNamed ? '#ff3b30' : hpColor(e.hpFrac);
-      const nameColor = e.isNamed ? '#ff8a72' : '#cdd6dd';
+      b.fill.style.background = hpColor(e.hpFrac);
       const tankTag = e.level != null && e.mk != null
         ? ` <span style="color:#ffcf6b;font-weight:800">L${e.level}·MK${e.mk}</span>`
         : '';
       b.label.innerHTML =
-        `<span style="color:${nameColor}">${e.marks ? e.marks + ' ' : ''}${e.name}</span>${tankTag}`;
-      b.label.style.fontSize = e.isNamed ? '11px' : '9px';
-      b.mode.textContent = e.mode ?? '';
+        `<span style="color:#cdd6dd">${e.marks ? e.marks + ' ' : ''}${e.name}</span>${tankTag}`;
     }
   }
 

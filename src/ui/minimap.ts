@@ -12,9 +12,8 @@ export interface Minimap {
 }
 
 /**
- * Kleine runde Minimap unten rechts. Spieler ist die Mitte; Gegner/Named als
- * Punkte relativ dazu. Named (der Rasende) = roter Punkt = „Wiedererkennung auf
- * der Karte". Läuft in Echtzeit (DOM/Canvas).
+ * Kleine runde Minimap unten rechts. Spieler ist die Mitte; Gegner als
+ * einheitliche Punkte relativ dazu. Läuft in Echtzeit (DOM/Canvas).
  */
 export function createMinimap(sizePx = 168, rangeWorld = 60): Minimap {
   const cv = document.createElement('canvas');

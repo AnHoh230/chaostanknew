@@ -15,18 +15,10 @@ import { createInput } from './input/input';
 import { createProjectilePool } from './combat/projectilePool';
 import { createProjectileView } from './combat/projectileView';
 import { createCombatSystem, type Combatant } from './combat/combat';
-import { createEnemyBrain } from './ai/enemyBrain';
-import { MOTIV_LABEL } from './ai/motives';
-import { engagementStep } from './ai/engagement';
 import { applyEnemyStats, type Enemy } from './enemy/enemy';
-import { rollEnemyEquipment, pickDrop, enemyMk } from './enemy/equipment';
-import { planPurchases, shouldStartShopTrip, pickBoosterToUse } from './enemy/enemyEconomy';
+import { pickDrop, enemyMk } from './enemy/equipment';
 import { stepAutoTurret, type AutoTurretState } from './combat/autoTurret';
 import { createSpawner } from './enemy/spawner';
-import { pickTarget, type TargetInfo } from './enemy/targeting';
-import { createAkteBuch } from './named/akte';
-import { generateNamed, istKnapperSieg } from './named/promotion';
-import { createReveal } from './reveal/reveal';
 import { createPlayerBar } from './ui/playerBar';
 import { createMinimap } from './ui/minimap';
 import { createEnemyBars } from './ui/enemyBars';
@@ -44,7 +36,7 @@ import { createActionLog } from './debug/actionLog';
 import { createCameraPanel } from './ui/cameraPanel';
 import { TANK_CLASSES, type TankClass } from './game/classes';
 import { createPickupField } from './loot/pickups';
-import { createShopField, TILE_RADIUS } from './world/shopTiles';
+import { createShopField } from './world/shopTiles';
 import { CATALOG, SLOT_SOCKET, catalogItem, cloneItem, mostExpensiveItemPrice, type ShopItem, type Slot } from './shop/catalog';
 import { createShop } from './shop/shop';
 import { sellValue } from './shop/buyLogic';
@@ -66,17 +58,7 @@ const TANK_RADIUS = 1.5; // Treffer-Radius eines Panzers (XZ)
 const PROJECTILE_RADIUS = 0.3;
 const HIT_DAMAGE = 20; // Schaden pro Treffer (100 HP -> 5 Treffer)
 const ENEMY_SPEED = 5; // langsamer als der Spieler (8)
-const ENEMY_SIGHT = 60; // Sichtweite auf das Ziel
-const ENEMY_KEEP_DIST = 7; // beim Annähern nicht in den Spieler hineinlaufen
 const ENEMY_FIRE_COOLDOWN = 1.4; // Sekunden zwischen Gegner-Schüssen
-const SHOP_DWELL = 2.5; // Sekunden Einkaufs-Verweildauer am Shop-Feld (simuliert den Einkauf)
-const ENEMY_INTERRUPT_HP = 0.2; // ein Störer unter dieser HP-Fraktion wird auf dem Shop-Trip noch erledigt
-const BELT_USE_CD = 4; // Sperre zwischen zwei Booster-Zündungen eines Gegners
-const LOOT_SIGHT_HUNTER = 34; // Schatzjäger jagen Beute aus großer Distanz
-const LOOT_SIGHT_NEAR = 9; // andere Gegner sammeln Beute nur in der Nähe auf
-const ENEMY_BAG_MAX = 6; // so viele Teile trägt ein Gegner, dann verkauft er erst
-const NAMED_RESPAWN = 6; // Sekunden, bis ein gefallener benannter Rivale zurückkehrt
-const LEBENSSCHUB = 40; // HP-Schub bei Promotion (statt Tod)
 
 const log = createLogger('main');
 
@@ -180,24 +162,19 @@ function boot(cls: TankClass): void {
   // Kamera auf den Panzer-Root
   const camera = createCameraRig(scene, tank.view.root);
 
-  // Reveal-Inszenierung (Slowmo + Highlight + Spruch) für Promotions.
-  const reveal = createReveal(scene, camera, engine, clock);
-
   // Projektil-Pool (rein logisch) + sichtbare Mesh-Brücke
   const pool = createProjectilePool(PROJECTILE_CAPACITY);
   const projectileView = createProjectileView(scene, pool, PROJECTILE_CAPACITY);
 
-  // Live einstellbar (Regler im Panel): Schussweite + max. Gegner + Spawn-Intervall.
+  // Live einstellbar (Regler im Panel): Schussweite.
   let shotRange = 40; // Weltеinheiten, die ein Schuss fliegt (nicht über die ganze Map)
-  let maxEnemies = 4; // gleichzeitig lebende Gegner
-  let spawnInterval = 3.5; // Sekunden zwischen Spawns
 
-  // Gegner werden NICHT mehr fest gesetzt, sondern dauerhaft nachgespawnt (P1).
+  // Gegner werden dauerhaft nachgespawnt (feste Dichte; Steuerung kommt später über die Doktrin).
   const aiRng = createRng(SEED + 7);
-  const roster: Enemy[] = []; // lebende + frisch promotete Gegner (dynamisch)
+  const roster: Enemy[] = []; // lebende Gegner (dynamisch)
   const spawner = createSpawner(scene, TANK_RADIUS, () => aiRng.next(), {
-    maxAlive: maxEnemies,
-    interval: spawnInterval, // langsamer nachspawnen (per Regler änderbar)
+    maxAlive: 4,
+    interval: 3.5,
     radiusMin: 55, // größere, weiter gestreute Spawn-Area (kein Dauerfeuer auf der Stelle)
     radiusMax: 130,
     maxLevel: 3,
@@ -209,9 +186,6 @@ function boot(cls: TankClass): void {
     alive: true, lootValue: 1.0,
   };
   const liveCombatants = (): Combatant[] => [playerCombatant, ...roster.map((e) => e.combatant)];
-
-  // Duell-Gedächtnis (vor dem Kampf-System: dessen Tod-Handler nutzt es).
-  const akteBuch = createAkteBuch();
 
   // Loadout (P4): ein Item je Slot, Stats = Klassen-Basis + bestückte Slots.
   const loadout = createLoadout({ damage: cls.damage, maxHp: cls.maxHp, speed: cls.speed, armor: 0 });
@@ -259,30 +233,8 @@ function boot(cls: TankClass): void {
       }
       const e = roster.find((r) => r.id === t.id);
       if (!e) return;
-      const byPlayer = killerTeam === 'player';
 
-      // PROMOTION nur bei knappem SPIELER-Sieg (Lebensschub statt Tod).
-      if (byPlayer) {
-        const playerFrac = playerCombatant.hp / playerCombatant.maxHp;
-        akteBuch.record(e.id, { ausgang: 'sieg', playerHpFrac: playerFrac });
-        if (istKnapperSieg(playerFrac) && !e.named) {
-          const named = generateNamed('knapper_sieg', MOTIV_LABEL[e.motiveId] ?? 'Aasgeier', () => aiRng.next());
-          akteBuch.promote(e.id, named);
-          e.named = named;
-          e.displayName = named.name; // "Panzer N" → "Garfild der Aasgeier"
-          alog.log('promotion', { id: e.id, name: named.name, motiv: e.motiveId });
-          e.traits = { ...e.traits, ...named.traitOverlay };
-          e.brain = createEnemyBrain(e.traits, () => aiRng.next());
-          e.combatant.alive = true;
-          e.combatant.hp = LEBENSSCHUB;
-          log.info('PROMOTION', { id: e.id, name: named.name });
-          reveal.triggerReveal(named, e.view.root, akteBuch.get(e.id)!);
-          return;
-        }
-      }
-
-      // Normaler Tod: NUR ein tatsächlich angelegtes Teil droppen (kein generierter Loot).
-      // Eingesammelte Beute in der Tasche fällt ebenfalls zurück in die Welt.
+      // Tod: NUR ein tatsächlich angelegtes Teil droppen (kein generierter Loot).
       bus.emit('tank.died', { tankId: e.id });
       const part = pickDrop(e.equipment, () => aiRng.next());
       if (part) {
@@ -290,12 +242,9 @@ function boot(cls: TankClass): void {
         lastDrops.push(part.id);
         if (lastDrops.length > 200) lastDrops.shift();
       }
-      for (const carried of e.bag) pickups.spawn(carried, e.combatant.x, e.combatant.z);
-      e.bag = [];
-      const reward = Math.round((e.combatant.lootValue ?? 0.4) * 120);
-
-      if (byPlayer) {
-        // Spieler-Kill: Geld + XP.
+      // Spieler-Kill: Geld + XP (alle Gegner sind team 'enemy' → nur der Spieler killt).
+      if (killerTeam === 'player') {
+        const reward = Math.round((e.combatant.lootValue ?? 0.4) * 120);
         geld += reward;
         const up = progression.addXp(Math.round(18 + (e.combatant.lootValue ?? 0.4) * 60));
         if (up.gained > 0) {
@@ -303,29 +252,12 @@ function boot(cls: TankClass): void {
           showToast(`Level ${progression.level}${mkNote}`);
         }
         log.info('enemy died (Spieler)', { id: e.id, drop: part?.id ?? null, reward });
-      } else {
-        // Gegner-killt-Gegner: der Sieger bekommt Credits UND XP (→ MK-Aufstieg wie der Spieler).
-        const killer = roster.find((r) => r.id === killerTeam);
-        if (killer) {
-          killer.credits += reward;
-          const up = killer.prog.addXp(Math.round(18 + (e.combatant.lootValue ?? 0.4) * 60));
-          if (up.newMkUnlocks.length) applyEnemyStats(killer); // neue MK → frische Stats/HP
-        }
-        log.debug('enemy killed enemy', { tot: e.id, sieger: killerTeam });
       }
 
-      if (e.named) {
-        // Benannter Rivale: stirbt, KEHRT aber zurück (Nemesis) — bleibt im Roster.
-        e.combatant.alive = false;
-        e.view.root.setEnabled(false);
-        e.respawnTimer = NAMED_RESPAWN;
-        log.info('Rivale gefallen — kehrt zurück', { name: e.displayName });
-      } else {
-        // Normaler Gegner: endgültig weg, Nachschub rückt nach.
-        e.view.root.dispose();
-        const idx = roster.indexOf(e);
-        if (idx >= 0) roster.splice(idx, 1);
-      }
+      // Gegner endgültig weg, Nachschub rückt nach.
+      e.view.root.dispose();
+      const idx = roster.indexOf(e);
+      if (idx >= 0) roster.splice(idx, 1);
     },
   });
 
@@ -493,16 +425,6 @@ function boot(cls: TankClass): void {
     setShotRange: (v: number) => {
       shotRange = Math.max(8, v);
     },
-    getMaxEnemies: () => maxEnemies,
-    setMaxEnemies: (v: number) => {
-      maxEnemies = Math.max(0, Math.round(v));
-      spawner.setMaxAlive(maxEnemies);
-    },
-    getSpawnInterval: () => spawnInterval,
-    setSpawnInterval: (v: number) => {
-      spawnInterval = Math.max(0.2, v);
-      spawner.setInterval(spawnInterval);
-    },
   };
   // Jede Regler-Änderung in den Run-Log schreiben (kein manuelles Durchgeben nötig).
   createCameraPanel((name, value) => alog.log('regler', { name, value }));
@@ -531,7 +453,7 @@ function boot(cls: TankClass): void {
   function openInspect(id: string): void {
     const e = roster.find((r) => r.id === id && r.combatant.alive);
     if (!e) return;
-    const info = buildEnemyInfo({ ...e, speed: ENEMY_SPEED, level: e.prog.level, activeBuffs: e.buffs.active().map((b) => b.label ?? b.id) }, akteBuch.get(e.id) ?? null);
+    const info = buildEnemyInfo({ ...e, speed: ENEMY_SPEED, activeBuffs: e.buffs.active().map((b) => b.label ?? b.id) });
     prevSimSpeed = clock.simSpeed;
     clock.simSpeed = 0; // Welt pausiert; beim Schließen wird prevSimSpeed wiederhergestellt
     inspecting = true;
@@ -622,21 +544,6 @@ function boot(cls: TankClass): void {
     if (!def) return;
     applyBooster(def);
     updateBeltHud();
-  }
-
-  /** Booster-Effekt auf einen Gegner anwenden (symmetrisch zu applyBooster). */
-  function applyEnemyBooster(e: Enemy, def: BoosterDef): void {
-    const eff = def.effect;
-    if (eff.kind === 'buff') {
-      if (eff.onlyLowHp && e.combatant.hp / e.combatant.maxHp >= 0.2) { e.belt.add(def); return; }
-      e.buffs.add({ ...eff.buff, label: def.name });
-    } else if (eff.kind === 'tempHp') {
-      e.combatant.hp = Math.min(e.combatant.maxHp, e.combatant.hp + eff.amount);
-    } else if (eff.kind === 'nextShots') {
-      e.overShots = eff.shots;
-      e.overMul = eff.damageMul;
-    }
-    alog.log('enemy.booster', { id: e.id, booster: def.id });
   }
 
   // Eigenes Live-Inventar (Taste „I" ohne anvisierten Gegner) — OHNE Pause.
@@ -817,31 +724,28 @@ function boot(cls: TankClass): void {
   // Mess-Overlay (Phase 1 Debugging): macht Cursor-Bodenpunkt, Ziel und Schussrichtung sichtbar.
   const aimDebug = createAimDebug(scene, camera, tank, () => input.getAimTarget());
 
-  // Debug-Hooks für deterministische Verifikation (Promotion etc.).
+  // Debug-Hooks für deterministische Verifikation.
   (window as unknown as { __dbg: unknown }).__dbg = {
     player: playerCombatant,
     enemies: roster.map((e) => e.combatant),
     roster: () =>
       roster.map((e) => ({
-        id: e.id, motive: e.motiveId, mode: e.mode, level: e.prog.level,
-        credits: e.credits, hp: e.combatant.hp, alive: e.combatant.alive,
+        id: e.id, level: e.level,
+        hp: e.combatant.hp, alive: e.combatant.alive,
         loot: e.combatant.lootValue, team: e.combatant.team,
         x: +e.combatant.x.toFixed(1), z: +e.combatant.z.toFixed(1),
-        named: e.named?.name ?? null,
       })),
-    akte: () => akteBuch.all(),
     stats: () => loadout.stats(),
     loadout: () => loadout.equippedList().map((it) => it.id),
     bag: () => loadout.bag().map((it) => it.id),
     equippedBySlot: () => Object.fromEntries(SLOTS.map((s) => [s, loadout.get(s)?.id ?? null])),
     enemyEquip: (id: string) => roster.find((r) => r.id === id)?.equipment.map((i) => i.id) ?? null,
-    enemyBag: (id: string) => roster.find((r) => r.id === id)?.bag.map((i) => i.id) ?? null,
     // Verifikations-Sonden (Observability): Gegner-Kampfwerte lesen + Gear setzen.
     enemyCombat: (id: string) => {
       const e = roster.find((r) => r.id === id);
       if (!e) return null;
       return {
-        level: e.prog.level,
+        level: e.level,
         hp: Math.round(e.combatant.hp),
         maxHp: Math.round(e.combatant.maxHp),
         armor: Math.round(e.combatant.armor ?? 0),
@@ -858,19 +762,12 @@ function boot(cls: TankClass): void {
       e.equipment = (['waffe', 'wanne', 'turm', 'raeder', 'ruestung'] as Slot[]).map((s) =>
         catalogItem(`${s}_mk${mkStr}_normal`),
       );
-      applyEnemyStats(e); // Stats aus der Ausrüstung neu berechnen (nach dem Fix)
+      applyEnemyStats(e); // Stats aus der Ausrüstung neu berechnen
       const e2 = roster.find((r) => r.id === id)!;
       return {
-        level: e2.prog.level, maxHp: Math.round(e2.combatant.maxHp),
+        level: e2.level, maxHp: Math.round(e2.combatant.maxHp),
         armor: Math.round(e2.combatant.armor ?? 0), equipMk: e2.equipment.map((i) => i.mk),
       };
-    },
-    // SH3.5: einem Gegner eine Sekundärwaffe (Auto-Turret) geben (manueller Test).
-    giveEnemyAutoTurret: (id: string, turretId = 'autoturret_mk05') => {
-      const e = roster.find((r) => r.id === id);
-      if (!e) return 'nicht gefunden';
-      e.equipment.push(cloneItem(catalogItem(turretId)));
-      return { id: e.id, equip: e.equipment.map((i) => i.id) };
     },
     // SH3.5: Spieler ein Item in die Tasche legen UND anlegen (manueller Test, z. B. Auto-Turret).
     giveAndEquip: (id: string) => {
@@ -915,37 +812,7 @@ function boot(cls: TankClass): void {
     openInspect: (id: string) => { openInspect(id); return { open: inspecting, simSpeed: clock.simSpeed }; },
     enemyInfoOf: (id: string) => {
       const e = roster.find((r) => r.id === id);
-      return e ? buildEnemyInfo({ ...e, speed: ENEMY_SPEED, level: e.prog.level, activeBuffs: e.buffs.active().map((b) => b.label ?? b.id) }, akteBuch.get(e.id) ?? null) : null;
-    },
-    enemyState: (id: string) => {
-      const e = roster.find((r) => r.id === id);
-      return e
-        ? {
-            id: e.id, name: e.displayName, level: e.prog.level, mk: e.prog.unlockedMk(),
-            credits: e.credits, shopState: e.shopState,
-            bag: e.bag.map((i) => i.id), equip: e.equipment.map((i) => i.id),
-            shopGoal: e.shopGoal, x: +e.combatant.x.toFixed(1), z: +e.combatant.z.toFixed(1),
-          }
-        : null;
-    },
-    shoppers: () =>
-      roster
-        .filter((e) => e.shopGoal)
-        .map((e) => ({ id: e.id, name: e.displayName, goal: e.shopGoal, bag: e.bag.length })),
-    seedEnemyShop: (id?: string, nearTile = true) => {
-      const e = id ? roster.find((r) => r.id === id) : roster.find((r) => r.combatant.alive);
-      if (!e) return 'none';
-      e.bag.push(catalogItem('waffe_mk01_normal'), catalogItem('turm_mk01_normal'));
-      e.credits += 500;
-      e.shopState = 'shop_anfahrt';
-      e.shopGoal = null;
-      if (nearTile) {
-        const t = shopField.positions[0]!; // (40,0): Gegner knapp daneben absetzen → schnelle Ankunft
-        e.view.root.position.set(t.x - 9, 0, t.z);
-        e.combatant.x = t.x - 9;
-        e.combatant.z = t.z;
-      }
-      return { id: e.id, name: e.displayName, bagNow: e.bag.length, credits: e.credits };
+      return e ? buildEnemyInfo({ ...e, speed: ENEMY_SPEED, activeBuffs: e.buffs.active().map((b) => b.label ?? b.id) }) : null;
     },
     teleportToTile: () => {
       const t = shopField.positions[0]!;
@@ -989,13 +856,7 @@ function boot(cls: TankClass): void {
     }),
     addXp: (n: number) => progression.addXp(n),
     rosterFull: () =>
-      roster.map((e) => ({ name: e.displayName, alive: e.combatant.alive, respawn: +e.respawnTimer.toFixed(1), named: e.named !== null })),
-    smite: (name: string) => {
-      const e = roster.find((r) => r.displayName === name && r.combatant.alive);
-      if (!e) return 'nicht gefunden';
-      pool.acquire({ x: e.combatant.x, y: 0.5, z: e.combatant.z, dx: 1, dz: 0, speed: 1, life: 0.5, team: 'player', damage: 999999 });
-      return 'smite ' + name;
-    },
+      roster.map((e) => ({ name: e.displayName, alive: e.combatant.alive, level: e.level })),
   };
 
   // §21.5-Sichtbarkeitszähler periodisch loggen (aktiv == sichtbar)
@@ -1048,208 +909,34 @@ function boot(cls: TankClass): void {
       alog.log('move', { x: +px.toFixed(1), z: +pz.toFixed(1), hp: Math.round(playerCombatant.hp), geld });
     }
 
-    // Permanenter Nachschub (P1): VOR dem KI-/Promotion-Teil.
+    // Permanenter Nachschub (P1): VOR dem Gegner-Verhalten.
     const aliveCount = roster.reduce((n, e) => n + (e.combatant.alive ? 1 : 0), 0);
     const spawned = spawner.update(simDt, px, pz, aliveCount);
     if (spawned) roster.push(spawned);
 
-    // Gegner-KI (M2): jeder Gegner jagt den lohnendsten Ziel-Panzer (Beutewert).
-    const allC = liveCombatants();
+    // Gegner-Verhalten (Platzhalter bis P5 — wird dort GELÖSCHT, kein Legacy):
     for (const e of roster) {
-      if (!e.combatant.alive) {
-        // Gefallener benannter Rivale: Countdown bis zur Rückkehr (Nemesis).
-        if (e.respawnTimer > 0) {
-          e.respawnTimer -= simDt;
-          if (e.respawnTimer <= 0) {
-            const ang = aiRng.next() * Math.PI * 2;
-            const rr = 60 + aiRng.next() * 70; // zufällige, weit gestreute Rückkehr-Position
-            e.view.root.position.set(px + Math.cos(ang) * rr, 0, pz + Math.sin(ang) * rr);
-            e.equipment = rollEnemyEquipment(e.prog.level, () => aiRng.next()); // frische Ausrüstung passend zum aktuellen Level
-            applyEnemyStats(e); // Stats aus der frischen Ausrüstung (HP voll)
-            e.combatant.alive = true;
-            e.spawnInvulnCd = 5; // Wiederkehr = Erscheinen → 5s Gnadenzeit
-            e.view.root.setEnabled(true);
-            e.prevTargetVisible = false; // Wiedererkennungs-Spruch beim nächsten Sichtkontakt
-            log.info('Rivale kehrt zurück', { name: e.displayName });
-          }
-        }
-        continue;
-      }
+      if (!e.combatant.alive) continue;
       const er = e.view.root;
       const ex = er.position.x;
       const ez = er.position.z;
-
-      e.spawnInvulnCd = Math.max(0, e.spawnInvulnCd - simDt); // 5s Gnadenzeit nach Erscheinen
-      e.combatant.invulnerable = e.spawnInvulnCd > 0; // (Shop-Dwell setzt unten ggf. wieder true)
-      e.buffs.tick(simDt); // Booster-Buffs altern jeden Frame
-
-      // Ziel wählen (Beutewert) — zuerst, da Shop-Trip UND Engagement es brauchen.
-      const cands: TargetInfo[] = [];
-      for (const c of allC) {
-        if (c.id === e.id) continue;
-        cands.push({ id: c.id, team: c.team, x: c.x, z: c.z, lootValue: c.lootValue ?? 0, alive: c.alive });
-      }
-      const target = pickTarget(ex, ez, e.combatant.team, ENEMY_SIGHT, cands);
-      const targetComb = target ? allC.find((c) => c.id === target.id) ?? null : null;
-      const targetHpFrac = targetComb && targetComb.maxHp > 0 ? targetComb.hp / targetComb.maxHp : 1;
-      const targetDist = target ? Math.hypot(target.x - ex, target.z - ez) : Infinity;
-
-      // — Shop-Trip: Dwell (Einkauf am Feld, Schutzzone) —
-      if (e.shopState === 'shop_dwell') {
-        e.mode = 'einkauf';
-        e.combatant.invulnerable = true;
-        e.dwellTimer -= simDt;
-        if (e.dwellTimer <= 0) {
-          const res = planPurchases({
-            credits: e.credits, equipment: e.equipment, mk: e.prog.unlockedMk(),
-            bag: e.bag, beltFree: e.belt.slots().filter((s) => s === null).length,
-          });
-          e.credits = res.credits;
-          e.bag = [];
-          if (res.bought > 0) { e.equipment = res.equipment; applyEnemyStats(e); }
-          for (const b of res.boostersBought) e.belt.add(b);
-          e.shopGoal = null;
-          e.shopState = 'kaempfen';
-          e.combatant.invulnerable = false;
-          log.debug('Gegner geshoppt', {
-            id: e.id, gekauft: res.bought, booster: res.boostersBought.length, rest: res.credits,
-          });
-        }
-        e.combatant.x = er.position.x; e.combatant.z = er.position.z;
-        continue;
-      }
-      // — Shop-Trip: Anfahrt (nicht unterbrechbar, außer durch kaum-HP-Störer) —
-      if (e.shopState === 'shop_anfahrt') {
-        if (!e.shopGoal) {
-          const t = shopField.nearest(ex, ez);
-          if (t) e.shopGoal = { x: t.x, z: t.z };
-          else e.shopState = 'kaempfen'; // kein Feld erreichbar → normal weiter
-        }
-        const weakIntruder = target != null && targetDist <= shotRange && targetHpFrac < ENEMY_INTERRUPT_HP;
-        if (e.shopGoal && !weakIntruder) {
-          e.mode = 'zum_shop';
-          const sgx = e.shopGoal.x - ex, sgz = e.shopGoal.z - ez;
-          const sd = Math.hypot(sgx, sgz) || 1;
-          if (sd <= TILE_RADIUS) {
-            e.shopState = 'shop_dwell'; e.dwellTimer = SHOP_DWELL;
-          } else {
-            const step = ENEMY_SPEED * simDt;
-            er.position.x += (sgx / sd) * step;
-            er.position.z += (sgz / sd) * step;
-            er.rotation.y = Math.atan2(sgx, sgz);
-          }
-          e.combatant.x = er.position.x; e.combatant.z = er.position.z;
-          continue; // Trip nicht durch normale Gegner unterbrechen
-        }
-        // weakIntruder in Reichweite → unten normal kämpfen (Trip bleibt 'shop_anfahrt')
-      }
-
-      // S4: Beute einsammeln (Schatzjäger jagen aktiv aus der Ferne, andere nur ganz nah) — nicht auf dem Shop-Trip.
-      if ((e.shopState === 'kaempfen' || e.shopState === 'streifen') && e.bag.length < ENEMY_BAG_MAX) {
-        const lootSight = e.motiveId === 'schatzjaeger' ? LOOT_SIGHT_HUNTER : LOOT_SIGHT_NEAR;
-        const loot = pickups.nearest(ex, ez, lootSight);
-        if (loot) {
-          if (loot.dist <= PICKUP_REACH) {
-            const got = pickups.collectAt(ex, ez, PICKUP_REACH);
-            if (got) {
-              e.bag.push(got);
-              log.debug('Gegner sammelt Beute', { id: e.id, item: got.id, bag: e.bag.length });
-            }
-          } else {
-            const step = ENEMY_SPEED * simDt;
-            er.position.x += ((loot.x - ex) / loot.dist) * step;
-            er.position.z += ((loot.z - ez) / loot.dist) * step;
-            er.rotation.y = Math.atan2(loot.x - ex, loot.z - ez);
-            e.combatant.x = er.position.x;
-            e.combatant.z = er.position.z;
-            continue; // jagt Beute statt zu kämpfen
-          }
-        }
-      }
-
-      // (Ziel bereits oben gewählt: target / targetDist / targetHpFrac.)
-
-      // Engagement-Zonen-KI (erste Fassung): jede Lage erzeugt Bewegung — kein totes
-      // Stehen. Kein Ziel in Sicht → scouten (in eine Richtung fahren, neue Ziele finden).
-      e.scoutCd -= simDt;
-      if (e.scoutCd <= 0) {
-        e.scoutCd = 3 + aiRng.next() * 3;
-        e.scoutDir = aiRng.next() * Math.PI * 2;
-      }
-      const out = engagementStep({
-        selfX: ex,
-        selfZ: ez,
-        target: target ? { x: target.x, z: target.z, dist: Math.hypot(target.x - ex, target.z - ez) } : null,
-        hpFrac: e.combatant.hp / e.combatant.maxHp,
-        fireRange: shotRange,
-        keepDist: ENEMY_KEEP_DIST,
-        fleeHp: 0.25,
-        scoutDir: e.scoutDir,
-      });
-      e.mode = out.mode;
-
+      e.buffs.tick(simDt); // empfängt Spieler-Debuffs (Zielmarkierung/Rauch)
       const mods = e.buffs.aggregate();
-      e.combatant.incomingMul = mods.incomingMul; // Zielmarkierung → verwundbar
-      if (out.moveX !== 0 || out.moveZ !== 0) {
+      e.combatant.incomingMul = mods.incomingMul;
+      const dx = px - ex, dz = pz - ez;
+      const dist = Math.hypot(dx, dz) || 1;
+      if (dist > shotRange) {
         const step = ENEMY_SPEED * mods.speedMul * simDt;
-        er.position.x += out.moveX * step;
-        er.position.z += out.moveZ * step;
-        er.rotation.y = Math.atan2(out.moveX, out.moveZ); // Chassis in Laufrichtung
+        er.position.x += (dx / dist) * step;
+        er.position.z += (dz / dist) * step;
+        er.rotation.y = Math.atan2(dx, dz);
       }
-      // Turm auf den Blickpunkt richten (Ziel bzw. Scout-Richtung), Chassis herausgerechnet.
-      {
-        const yaw = Math.atan2(out.faceX - er.position.x, out.faceZ - er.position.z);
-        e.view.turretNode.rotation.y = yaw - er.rotation.y;
-      }
+      { const yaw = Math.atan2(px - er.position.x, pz - er.position.z); e.view.turretNode.rotation.y = yaw - er.rotation.y; }
       e.fireCd -= simDt;
-      if (out.fire && e.fireCd <= 0) {
-        const dmg = e.damage * mods.damageMul * (e.overShots > 0 ? e.overMul : 1);
-        if (e.overShots > 0) e.overShots--;
-        enemyFire(er.position.x, er.position.z, out.faceX, out.faceZ, e.combatant.team, dmg);
-        e.fireCd = ENEMY_FIRE_COOLDOWN / mods.fireRateMul;
+      if (dist <= shotRange && e.fireCd <= 0) {
+        enemyFire(er.position.x, er.position.z, px, pz, 'enemy', e.damage * mods.damageMul);
+        e.fireCd = ENEMY_FIRE_COOLDOWN;
       }
-
-      // Booster-Einsatz-KI: nach HP/Modus zünden (mit Sperre dazwischen).
-      e.beltCd = Math.max(0, e.beltCd - simDt);
-      if (e.beltCd <= 0 && e.belt.count() > 0) {
-        const inCombat = e.mode === 'feuern' || e.mode === 'abstand';
-        const idx = pickBoosterToUse(e.belt.slots(), {
-          hpFrac: e.combatant.hp / e.combatant.maxHp, inCombat, mode: e.mode,
-        });
-        if (idx >= 0) {
-          const def = e.belt.trigger(idx);
-          if (def) { applyEnemyBooster(e, def); e.beltCd = BELT_USE_CD; }
-        }
-      }
-
-      // SH3.5: Sekundärwaffe (Auto-Turret) des Gegners — feuert autonom auf fremde Teams.
-      const esek = e.equipment.find((it) => it.autoFire);
-      if (esek?.autoFire) {
-        const st2: AutoTurretState = {
-          cooldown: e.autoTurretCd, range: esek.autoFire.range,
-          fireInterval: esek.autoFire.fireInterval, damage: esek.autoFire.damage,
-          accuracy: Math.max(0, Math.min(1, esek.autoFire.accuracy + mods.accuracyAdd)), // Rauch senkt Treffsicherheit
-        };
-        const ecands = allC.filter((c) => c.team !== e.combatant.team && c.alive).map((c) => ({ x: c.x, z: c.z }));
-        const r2 = stepAutoTurret(er.position.x, er.position.z, st2, ecands, simDt, () => aiRng.next());
-        e.autoTurretCd = st2.cooldown;
-        if (r2.fire && r2.dir != null) {
-          fireAutoTurret(er.position.x, er.position.z, r2.dir, e.combatant.team, esek.autoFire.damage, esek.autoFire.range);
-          alog.log('autoturret', { team: e.combatant.team, dmg: esek.autoFire.damage });
-        }
-      }
-
-      // Trip-Auslöser: genug Geld (~2 Items) & gerade Ruhe → zum nächsten Shop-Feld.
-      if (e.shopState === 'kaempfen' || e.shopState === 'streifen') {
-        const inCombat = target != null && targetDist <= shotRange;
-        if (shouldStartShopTrip({ credits: e.credits, mk: e.prog.unlockedMk(), inCombat })) {
-          const t = shopField.nearest(ex, ez);
-          if (t) { e.shopGoal = { x: t.x, z: t.z }; e.shopState = 'shop_anfahrt'; }
-        }
-      }
-
-      // (Reveal nur EINMAL bei der Promotion — kein wiederholter Wiedererkennungs-Spruch.)
-
       e.combatant.x = er.position.x;
       e.combatant.z = er.position.z;
     }
@@ -1272,7 +959,6 @@ function boot(cls: TankClass): void {
     ground.update();
     projectileView.sync();
     aimDebug.update();
-    reveal.update(engine.getDeltaTime() / 1000); // Echtzeit (HUD/Slowmo-Fade läuft real)
 
     // HUD zeigt den nächsten lebenden Gegner; Minimap zeigt ALLE.
     let hudEnemy: Enemy | null = null;
@@ -1297,7 +983,7 @@ function boot(cls: TankClass): void {
       ...shopField.positions.map((t) => ({ x: t.x, z: t.z, color: '#22b0e6', r: 4.5 })),
       ...roster
         .filter((e) => e.combatant.alive)
-        .map((e) => ({ x: e.combatant.x, z: e.combatant.z, color: e.named ? '#ff3b30' : '#e8a23c' })),
+        .map((e) => ({ x: e.combatant.x, z: e.combatant.z, color: '#e8a23c' })),
     ]);
     // HP-Balken schweben über den Gegnern.
     enemyBars.update(
@@ -1308,10 +994,8 @@ function boot(cls: TankClass): void {
           z: e.combatant.z,
           hpFrac: e.combatant.hp / e.combatant.maxHp,
           name: e.displayName,
-          isNamed: e.named !== null,
-          mode: e.mode,
-          level: e.prog.level,
-          mk: e.prog.unlockedMk(),
+          level: e.level,
+          mk: enemyMk(e.level),
           marks: e.buffs.active().reduce(
             (s, b) => s + (b.id === 'markiert' ? '🎯' : b.id === 'vernebelt' ? '💨' : ''),
             '',
@@ -1347,9 +1031,9 @@ function boot(cls: TankClass): void {
           .filter((e) => e.combatant.alive)
           .map((e) => ({
             id: e.id, x: e.combatant.x, z: e.combatant.z,
-            color: e.named ? '#ff3b30' : '#e8a23c', r: e.named ? 6 : 4,
-            name: e.displayName, isNamed: e.named !== null,
-            sub: `Lvl ${e.prog.level} · MK${enemyMk(e.prog.level)} · ${MOTIV_LABEL[e.motiveId] ?? e.motiveId}`,
+            color: '#e8a23c', r: 4,
+            name: e.displayName,
+            sub: `Lvl ${e.level} · MK${enemyMk(e.level)}`,
             hpFrac: e.combatant.hp / e.combatant.maxHp,
           })),
       ];
@@ -1375,8 +1059,6 @@ function boot(cls: TankClass): void {
       nearestEnemyId: hudEnemy?.id ?? null,
       enemyHp: hudEnemy ? hudEnemy.combatant.hp : 0,
       enemyAlive: hudEnemy !== null,
-      enemyNamed: hudEnemy?.named?.name ?? null,
-      enemyMode: hudEnemy?.mode ?? 'none',
       enemyX: hudEnemy ? +hudEnemy.combatant.x.toFixed(2) : 0,
       enemyZ: hudEnemy ? +hudEnemy.combatant.z.toFixed(2) : 0,
       enemyScreen: (() => {

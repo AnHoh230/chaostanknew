@@ -1,70 +1,36 @@
 import type { Scene } from '@babylonjs/core';
 import { createTankView, type TankView } from '../tank/tankFactory';
 import type { TankComposition } from '../tank/sockets';
-import { createEnemyBrain, type EnemyBrain } from '../ai/enemyBrain';
-import type { TraitProfile, AiAction } from '../ai/aiTypes';
 import type { Combatant } from '../combat/combat';
-import type { Named } from '../named/promotion';
 import type { ShopItem } from '../shop/catalog';
 import { rollEnemyEquipment } from './equipment';
 import { enemyCombatStats } from './enemyStats';
-import { createProgression, type Progression } from '../progression/progression';
-import { createBelt, type Belt } from '../player/belt';
 import { createBuffStack, type BuffStack } from '../combat/buffs';
-import type { BoosterDef } from '../shop/boosters';
 
-/** Phase im Shop-Trip eines Gegners. */
-export type EnemyShopState = 'kaempfen' | 'streifen' | 'shop_anfahrt' | 'shop_dwell';
-
-/** Ein lebender Gegner: Optik + Trefferdaten + Gehirn + Level/Credits + Promotion. */
+/** Ein lebender Gegner: schlanker Combatant — Optik + Trefferdaten + Ausrüstung. */
 export interface Enemy {
   id: string;
-  motiveId: string;
   view: TankView;
   combatant: Combatant;
-  traits: TraitProfile;
-  brain: EnemyBrain;
-  home: { x: number; z: number };
-  fireCd: number;
-  action: AiAction | 'idle';
-  named: Named | null;
-  displayName: string; // "Panzer N" — bei Promotion der Named-Name
-  prevTargetVisible: boolean;
-  prog: Progression; // eigenes Level/XP/MK — gleiche Progression wie der Spieler
-  credits: number; // verdient durch eigene Kills → Aufrüstung
-  respawnTimer: number; // >0 = tot, kehrt als benannter Rivale zurück (Nemesis)
   equipment: ShopItem[]; // tatsächlich angelegte Teile — NUR diese kann er droppen
-  bag: ShopItem[]; // eingesammelter Loot (Schatzjäger) — wird beim Shoppen verkauft
-  shopGoal: { x: number; z: number } | null; // Ziel-Shop-Feld, wenn er gerade shoppen fährt
-  shopState: EnemyShopState; // Phase im Shop-Trip
-  dwellTimer: number; // Sekunden Rest am Shop-Feld (Einkauf simuliert)
-  beltCd: number; // Sperre bis zur nächsten Booster-Zündung
-  overShots: number; // Überdruck-Munition: Rest-Schüsse mit Bonus
-  overMul: number; // Überdruck-Munition: Schadens-Multiplikator
-  autoTurretCd: number; // Cooldown der Sekundärwaffe (Auto-Turret), falls ausgerüstet
-  spawnInvulnCd: number; // 5s Unverwundbarkeit nach dem Erscheinen (Spawn/Respawn)
-  belt: Belt<BoosterDef>; // gekaufte Consumables (Gürtel-Ladungen)
-  buffs: BuffStack; // aktive Booster-Buffs
   damage: number; // Schaden pro Schuss — AUS DER AUSRÜSTUNG abgeleitet (nicht aus dem Level)
-  scoutDir: number; // Scout-Heading (rad), wenn kein Ziel in Sicht
-  scoutCd: number; // Sekunden bis zum nächsten Scout-Richtungswechsel
-  mode: string; // aktueller Engagement-Modus (für Overlay/Debug)
+  fireCd: number; // Sekunden bis zum nächsten Schuss
+  displayName: string; // generischer "Panzer N"-Name
+  level: number; // eigenes Level (steuert Stats über die Ausrüstung)
+  buffs: BuffStack; // passiver Empfänger der Spieler-Debuffs (Zielmarkierung/Rauch)
 }
 
 export interface EnemySpec {
   id: string;
-  motiveId: string;
-  traits: TraitProfile;
   comp: TankComposition;
   spawn: { x: number; z: number };
   level: number;
   displayName: string;
 }
 
-/** Combatant-Stats eines Gegners NEU aus seiner Ausrüstung berechnen (Erzeugung,
- *  Shop-Aufrüstung, Respawn, Debug). HP wird dabei voll aufgefüllt. */
+/** Combatant-Stats eines Gegners NEU aus seiner Ausrüstung berechnen. HP wird voll aufgefüllt. */
 export function applyEnemyStats(e: Enemy): void {
-  const st = enemyCombatStats(e.equipment, e.prog.level);
+  const st = enemyCombatStats(e.equipment, e.level);
   e.combatant.maxHp = st.maxHp;
   e.combatant.hp = st.maxHp;
   e.combatant.armor = st.armor;
@@ -73,7 +39,7 @@ export function applyEnemyStats(e: Enemy): void {
   e.damage = st.damage;
 }
 
-/** Erzeugt einen Gegner inkl. Mesh, Combatant und frischem Gehirn. */
+/** Erzeugt einen Gegner inkl. Mesh und Combatant (team fest 'enemy'). */
 export function createEnemyEntity(
   scene: Scene,
   spec: EnemySpec,
@@ -82,14 +48,12 @@ export function createEnemyEntity(
 ): Enemy {
   const view = createTankView(scene, spec.comp);
   view.root.position.set(spec.spawn.x, 0, spec.spawn.z);
-  // Volles Basis-Set beim Erscheinen (ein Teil je Slot, ~15 % selten) → abwechslungsreiche
-  // Drops. Aufrüsten passiert später über Shop-Fahrten (verdiente Credits).
+  // Volles Basis-Set beim Erscheinen (ein Teil je Slot, ~15 % selten) → abwechslungsreiche Drops.
   const equipment = rollEnemyEquipment(spec.level, rng);
-  const prog = createProgression(spec.level);
   const st = enemyCombatStats(equipment, spec.level);
   const combatant: Combatant = {
     id: spec.id,
-    team: spec.id, // jeder Gegner = eigene Fraktion → kann andere treffen
+    team: 'enemy', // alle Gegner sind eine Fraktion → bekämpfen sich nicht gegenseitig
     x: spec.spawn.x,
     z: spec.spawn.z,
     radius,
@@ -99,39 +63,16 @@ export function createEnemyEntity(
     dodge: st.dodge,
     alive: true,
     lootValue: st.lootValue,
-    invulnerable: true, // 5s Spawn-Gnadenzeit (siehe spawnInvulnCd)
   };
   return {
     id: spec.id,
-    motiveId: spec.motiveId,
     view,
     combatant,
-    traits: { ...spec.traits },
-    brain: createEnemyBrain({ ...spec.traits }, rng),
-    home: { x: spec.spawn.x, z: spec.spawn.z },
-    fireCd: 0,
-    action: 'idle',
-    named: null,
-    displayName: spec.displayName,
-    prevTargetVisible: false,
-    prog,
-    credits: 0, // verdient Credits über Kills → spätere Aufrüstung im Shop
-    respawnTimer: 0,
     equipment,
-    bag: [],
-    shopGoal: null,
-    shopState: 'kaempfen', // sofort kampfbereit; weitere Käufe per Shop-Fahrt
-    dwellTimer: 0,
-    beltCd: 0,
-    overShots: 0,
-    overMul: 1,
-    autoTurretCd: 0,
-    spawnInvulnCd: 5,
-    belt: createBelt<BoosterDef>(3),
-    buffs: createBuffStack(),
     damage: st.damage,
-    scoutDir: rng() * Math.PI * 2,
-    scoutCd: 0,
-    mode: 'scout',
+    fireCd: 0,
+    displayName: spec.displayName,
+    level: spec.level,
+    buffs: createBuffStack(),
   };
 }

@@ -1,5 +1,4 @@
 import { enemyMk } from '../enemy/equipment';
-import { MOTIV_LABEL } from '../ai/motives';
 import type { Slot } from '../shop/catalog';
 
 /** Schmale strukturelle Typen — koppeln enemyInfo NICHT an die volle Enemy-Klasse. */
@@ -15,21 +14,12 @@ export interface EnemyLikeItem {
 export interface EnemyLike {
   id: string;
   displayName: string;
-  named: { archetyp: string } | null;
-  motiveId: string;
   level: number;
   damage: number; // Schaden pro Schuss (aus der Ausrüstung)
   speed?: number; // Tempo (vom Aufrufer; Gegner haben aktuell ein gemeinsames Tempo)
   combatant: { hp: number; maxHp: number; armor?: number; lootValue?: number; dodge?: number };
   equipment: ReadonlyArray<EnemyLikeItem>;
-  bag: ReadonlyArray<{ name: string }>;
   activeBuffs?: ReadonlyArray<string>; // Labels aktiver Buffs/Debuffs (Markiert, Vernebelt, …)
-}
-export interface AkteLike {
-  begegnungen: number;
-  siege: number;
-  niederlagen: number;
-  knappsterSieg: number;
 }
 
 export interface EnemyInfoEquip {
@@ -37,19 +27,9 @@ export interface EnemyInfoEquip {
   name: string;
   stat: string;
 }
-export interface EnemyInfoHistory {
-  hasHistory: boolean;
-  begegnungen: number;
-  siege: number;
-  niederlagen: number;
-  knappsterSiegPct: number;
-}
 export interface EnemyInfo {
   id: string;
   name: string;
-  isNamed: boolean;
-  motiv: string;
-  archetyp: string | null;
   level: number;
   mk: number;
   hp: number;
@@ -60,9 +40,7 @@ export interface EnemyInfo {
   speed: number;
   lootValue: number;
   equipment: EnemyInfoEquip[];
-  bag: string[];
-  boosters: string[]; // vorerst immer [] (kommt mit SH2)
-  history: EnemyInfoHistory;
+  boosters: string[]; // aktive Buffs/Debuffs
 }
 
 function statText(it: EnemyLikeItem): string {
@@ -75,14 +53,10 @@ function statText(it: EnemyLikeItem): string {
 }
 
 /** Eingefrorener Lese-Snapshot eines Gegners für M-Tooltip und I-Karte. */
-export function buildEnemyInfo(e: EnemyLike, akte: AkteLike | null): EnemyInfo {
-  const hasHistory = akte !== null && akte.begegnungen > 0;
+export function buildEnemyInfo(e: EnemyLike): EnemyInfo {
   return {
     id: e.id,
     name: e.displayName,
-    isNamed: e.named !== null,
-    motiv: MOTIV_LABEL[e.motiveId] ?? e.motiveId,
-    archetyp: e.named ? e.named.archetyp : null,
     level: e.level,
     mk: enemyMk(e.level),
     hp: e.combatant.hp,
@@ -93,16 +67,6 @@ export function buildEnemyInfo(e: EnemyLike, akte: AkteLike | null): EnemyInfo {
     speed: e.speed ?? 0,
     lootValue: e.combatant.lootValue ?? 0,
     equipment: e.equipment.map((it) => ({ slot: it.slot, name: it.name, stat: statText(it) })),
-    bag: e.bag.map((it) => it.name),
     boosters: e.activeBuffs ? [...e.activeBuffs] : [],
-    history: hasHistory
-      ? {
-          hasHistory: true,
-          begegnungen: akte!.begegnungen,
-          siege: akte!.siege,
-          niederlagen: akte!.niederlagen,
-          knappsterSiegPct: Math.round(akte!.knappsterSieg * 100),
-        }
-      : { hasHistory: false, begegnungen: 0, siege: 0, niederlagen: 0, knappsterSiegPct: 0 },
   };
 }

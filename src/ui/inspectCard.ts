@@ -64,14 +64,10 @@ export function createInspectCard(): InspectCard {
   }
 
   function render(info: EnemyInfo): void {
-    const nameColor = info.isNamed ? '#ff8a72' : '#f0e6cc';
     const head =
       `<div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">` +
-      `<div style="font-size:19px;font-weight:800;color:${nameColor}">${info.name}</div>` +
-      `<div style="color:#9aa;white-space:nowrap">Lvl ${info.level} · MK${info.mk}</div></div>` +
-      `<div style="color:#9aa;font-size:12px;margin-top:2px">Motiv: ${info.motiv}` +
-      (info.archetyp ? ` · Archetyp: ${info.archetyp}` : '') +
-      `</div>`;
+      `<div style="font-size:19px;font-weight:800;color:#f0e6cc">${info.name}</div>` +
+      `<div style="color:#9aa;white-space:nowrap">Lvl ${info.level} · MK${info.mk}</div></div>`;
 
     const stats = section(
       'Stats',
@@ -92,13 +88,6 @@ export function createInspectCard(): InspectCard {
         : `<div style="color:#677">— keine —</div>`,
     );
 
-    const bag = section(
-      `Inventar (${info.bag.length})`,
-      info.bag.length
-        ? `<div style="color:#cdd6dd">${info.bag.join(', ')}</div>`
-        : `<div style="color:#677">leer</div>`,
-    );
-
     const boosters = section(
       'Aktive Effekte',
       info.boosters.length
@@ -106,17 +95,8 @@ export function createInspectCard(): InspectCard {
         : `<div style="color:#677">— keine —</div>`,
     );
 
-    const history = section(
-      'Historie',
-      info.history.hasHistory
-        ? row('Begegnungen', String(info.history.begegnungen)) +
-            row('Siege / Niederlagen', `${info.history.siege} / ${info.history.niederlagen}`) +
-            row('knappster Sieg', `${info.history.knappsterSiegPct}% HP`)
-        : `<div style="color:#677">Noch keine Geschichte mit diesem Gegner.</div>`,
-    );
-
     card.innerHTML =
-      head + stats + equip + bag + boosters + history +
+      head + stats + equip + boosters +
       `<div style="text-align:center;color:#778;font-size:11px;margin-top:14px">[I] / [Esc] schließen</div>`;
   }
 
