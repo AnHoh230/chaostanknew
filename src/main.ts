@@ -344,6 +344,10 @@ function boot(cls: TankClass): void {
   let snapCd = 0; // Diagnose-Snapshot-Takt (s); Default/Regler unten
   let runClock = 0; // Laufzeit-Uhr (Summe simDt) für Gegner-Lebensdauer
   const spawnTimes = new Map<string, number>(); // Gegner-ID → Spawn-Zeitpunkt (für Ø-Lebensdauer)
+  // Idle-Erkennung: kein Fahren + kein manuelles Feuern + keine Zielbewegung = „Hände weg"
+  // (Spieler tippt/will Analyse). idleFor wird in Snapshots + Tode gestempelt → Analyse ignoriert idle.
+  let idleFor = 0, lastFireClock = -99;
+  let prevAimX = 0, prevAimZ = 0, prevAimInit = false;
 
   // Feuern: Richtung im KLICK-Augenblick frisch aus dem aktuellen Cursor ableiten —
   // NICHT die (um einen Frame veraltete) Turm-Ausrichtung lesen. Sonst zielt der
@@ -400,6 +404,7 @@ function boot(cls: TankClass): void {
       bus.emit('tank.fired', { tankId: tank.id });
       bus.emit('projectile.spawned', { id: p.id });
       metrics.onShot();
+      lastFireClock = runClock; // manuelles Feuern = aktiver Input (für Idle-Erkennung)
       alog.log('shot', { x: +origin.x.toFixed(1), z: +origin.z.toFixed(1), dmg: shotDamage });
       // Schuss mit Zeitstempel + eingefrorenem Cursor protokollieren.
       recorder.recordShot({
@@ -713,7 +718,7 @@ function boot(cls: TankClass): void {
     playerCombatant.alive = false;
     log.warn('player died', { cause });
     metrics.onDeath();
-    alog.log('player.death', { cause, byType: metrics.lastDamager() }); // welcher Typ den Spieler erlegte
+    alog.log('player.death', { cause, byType: metrics.lastDamager(), idle: Math.round(idleFor) }); // byType=Schädiger; idle≥2s = „Hände weg", nicht werten
     bus.emit('tank.died', { tankId: 'player' });
     respawnPlayer();
   }
@@ -1031,6 +1036,13 @@ function boot(cls: TankClass): void {
     const spawned = spawner.update(simDt, px, pz, aliveCount, currentSwarmPlan());
     if (spawned) { roster.push(spawned); metrics.onSpawn(spawned.typeId); spawnTimes.set(spawned.id, runClock); }
 
+    // Idle-Erkennung: aktiver Input = Fahren ODER kürzlich manuell gefeuert ODER Ziel bewegt.
+    const aimT = input.getAimTarget();
+    const aimMoved = prevAimInit && aimT != null ? Math.hypot(aimT.x - prevAimX, aimT.z - prevAimZ) > 0.5 : aimT != null;
+    if (aimT) { prevAimX = aimT.x; prevAimZ = aimT.z; prevAimInit = true; }
+    const activeInput = actualSpeed > 0.3 || (runClock - lastFireClock) < 0.4 || aimMoved;
+    idleFor = activeInput ? 0 : idleFor + simDt;
+
     // Run-Diagnostik: pro Frame messen, periodisch einen kompakten 'snap' loggen.
     metrics.frame(simDt, actualSpeed, aliveCount);
     snapCd -= simDt;
@@ -1047,7 +1059,8 @@ function boot(cls: TankClass): void {
         geld, level: progression.level, mk: progression.unlockedMk(),
         px, pz, heat, mix: aliveByType,
       });
-      alog.log('snap', snap as unknown as Record<string, unknown>);
+      // idle = Sekunden ohne Input; ab ~2 s ist „Hände weg" → Analyse ignoriert diese Zeilen.
+      alog.log('snap', { ...(snap as unknown as Record<string, unknown>), idle: Math.round(idleFor) });
     }
 
     // Gegner-Verhalten (R2): jeder Typ steuert nach seinem Muster auf einen Zielpunkt zu,
