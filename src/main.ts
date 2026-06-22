@@ -42,6 +42,7 @@ import { createTuningPanel } from './ui/tuningPanel';
 import { TANK_CLASSES } from './game/classes';
 import { computeFlowState, pruneDeathTimes, type FlowState } from './game/flowState';
 import { ROSTER, DEFAULT_ESCALATION, scaleStats } from './enemy/roster';
+import type { TuningProfile } from './evolution/profiles';
 import { createProgression } from './progression/progression';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
@@ -241,8 +242,7 @@ function boot(combatStyle: CombatStyle): void {
   const PLAYER_FIRE_BASE = 0.28; // s zwischen Schüssen bei fireRate 1
   const BASE_TURRET_SLEW = 22; // rad/s Turm-Dreh-Tempo (Turmservo verdoppelt; Schüsse bleiben pixelgenau)
   let spawnGraceCd = 5; // 5s nach Erscheinen: unverwundbar (Spawn & Respawn)
-  // — Schicht 0: Bauprofil + Flow-State-Maschine (Loop muss zuerst tragen) —
-  type TuningProfile = 'LOOP_TEST' | 'EVOLUTION_TEST' | 'FULL_RUN';
+  // — Schicht 0/1: Bauprofil (aus evolution/profiles) + Flow-State-Maschine —
   const currentTuningProfile: TuningProfile = 'LOOP_TEST'; // bis der Loop 5+ min stabil trägt
   const deathTimes: number[] = []; // Zeitstempel jüngster Tode (runClock) für Deathloop-Erkennung
   let lastRespawnAt = 0; // runClock des letzten Respawns (Respawn-Schonfrist)
