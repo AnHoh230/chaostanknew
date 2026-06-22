@@ -170,8 +170,7 @@ function boot(combatStyle: CombatStyle): void {
   // — Kampfstil-Werte (Regler, Kategorie „Stile") —
   let sniperRange = 95, sniperCamBack = 150, sniperCamHeight = 95; // Scope: Reichweite + Kamera weit weg (mehr Gebiet)
   let sniperDmgMul = 2; // Sniper schlägt härter — Faktor auf den normalen Schussschaden
-  let sniperSnapRadius = 220; // px: max. Cursor-Abstand, in dem ein Gegner angevisiert wird
-  let sniperTargets: string[] = []; // Ziele, die der nächste Schuss trifft (Auto-Snap, jeden Frame neu bestimmt)
+  let sniperTargets: string[] = []; // Ziele, die der nächste Schuss trifft (Auto-Targeting, jeden Frame neu)
   let returnBoostCd = 0; // Kern-Stufe 3: kurzes Tempo-Fenster nach dem Auspacken
   let sniperCrosshair: HTMLDivElement | null = null; // Cursor-Fadenkreuz (grün=bereit / orange=nachladen)
   let markPool: HTMLDivElement[] = []; // Ziel-Ringe um die getroffenen Gegner (1..maxMarks)
@@ -526,20 +525,17 @@ function boot(combatStyle: CombatStyle): void {
     const i = order.indexOf(typeId);
     return i < 0 ? order.length : i; // unbekannter Typ = niedrigste Prio
   };
-  // Auto-Snap: bis zu n VERSCHIEDENE lebende Gegner in Snap-Reichweite vom Cursor, primär nach
-  // Ziel-Priorität (Stufe), sekundär nach Cursor-Nähe. Liefert weniger als n, wenn nicht genug da
-  // sind (→ kein Multishot bei nur einem Ziel). Nie dasselbe Ziel doppelt.
-  function pickTargets(
-    n: number, stage: number, mx: number, my: number,
-    blips: { id: string; sx: number; sy: number }[], radius: number,
-  ): string[] {
+  // Auto-Targeting OHNE Cursor-Bezug: alle lebenden Gegner in Schuss-Reichweite (Welt-Distanz vom
+  // Panzer) sind Kandidaten; davon die besten n nach Ziel-Priorität (Stufe), bei Gleichstand der
+  // nähere zuerst. Liefert weniger als n, wenn nicht genug in Reichweite sind (→ kein Multishot bei
+  // nur einem Ziel). Jeder Gegner nur einmal. Wird jeden Frame neu bestimmt (Gegner fahren rein/raus).
+  function pickTargets(n: number, stage: number, px: number, pz: number, range: number): string[] {
     const cands: { id: string; rank: number; d: number }[] = [];
-    for (const b of blips) {
-      const d = Math.hypot(b.sx - mx, b.sy - my);
-      if (d > radius) continue;
-      const t = roster.find((r) => r.id === b.id);
-      if (!t || !t.combatant.alive) continue;
-      cands.push({ id: b.id, rank: targetRank(t.typeId, stage), d });
+    for (const e of roster) {
+      if (!e.combatant.alive) continue;
+      const d = Math.hypot(e.combatant.x - px, e.combatant.z - pz);
+      if (d > range) continue;
+      cands.push({ id: e.id, rank: targetRank(e.typeId, stage), d });
     }
     cands.sort((a, b) => a.rank - b.rank || a.d - b.d);
     return cands.slice(0, Math.max(1, n)).map((c) => c.id);
@@ -801,7 +797,6 @@ function boot(combatStyle: CombatStyle): void {
   tunables.add({ label: 'Dash-Cooldown s', category: 'Fähigkeiten', value: dashCdMax, min: 1, max: 15, step: 0.5, onChange: (v) => { dashCdMax = v; } });
   tunables.add({ label: 'Sniper-Reichweite', category: 'Stile', value: sniperRange, min: 40, max: 200, step: 5, onChange: (v) => { sniperRange = v; } });
   tunables.add({ label: 'Sniper-Schadensfaktor', category: 'Stile', value: sniperDmgMul, min: 1, max: 5, step: 0.5, onChange: (v) => { sniperDmgMul = v; } });
-  tunables.add({ label: 'Sniper-Snap-Radius px', category: 'Stile', value: sniperSnapRadius, min: 40, max: 600, step: 10, onChange: (v) => { sniperSnapRadius = v; } });
   // Zielnetz-Route
   tunables.add({ label: 'Netz-Restdauer s', category: 'Routen', value: netLinger, min: 1, max: 12, step: 0.5, onChange: (v) => { netLinger = v; } });
   tunables.add({ label: 'Netz-Schaden/Tick', category: 'Routen', value: netDmg, min: 1, max: 40, step: 1, onChange: (v) => { netDmg = v; } });
@@ -1390,16 +1385,12 @@ function boot(combatStyle: CombatStyle): void {
       if (combatStyle === 'sniper' && scopeActive) {
         const coreStage = evo.unlockedStagesByChannel.sniper_core;
         sniperTargets = fireCd <= 0
-          ? pickTargets(maxMarks(), coreStage, mouseX, mouseY, screenBlips, sniperSnapRadius)
+          ? pickTargets(maxMarks(), coreStage, px, pz, sniperRange)
           : [];
         const col = fireCd <= 0 ? '#9be36b' : '#ffa94d'; // grün = feuerbereit, orange = nachladen
-        // Cursor-Fadenkreuz (im Scope ist das reticle aus): zeigt, wo du zielst + Bereitschaft.
-        sniperCrosshair.style.display = 'block';
-        sniperCrosshair.style.left = mouseX + 'px';
-        sniperCrosshair.style.top = mouseY + 'px';
-        sniperCrosshair.querySelectorAll<HTMLElement>('[data-ring],[data-tick]').forEach((el) => {
-          if (el.hasAttribute('data-ring')) el.style.borderColor = col; else el.style.background = col;
-        });
+        // Kein Cursor-Fadenkreuz mehr — Targeting ist cursor-unabhängig (alle in Reichweite).
+        // Feedback läuft nur über die Ziel-Ringe (Farbe = Feuerbereitschaft).
+        sniperCrosshair.style.display = 'none';
         // Ringe um jedes Ziel, das der nächste Schuss trifft.
         for (let i = 0; i < markPool.length; i++) {
           const tb = i < sniperTargets.length ? screenBlips.find((b) => b.id === sniperTargets[i]) : null;
