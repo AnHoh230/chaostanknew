@@ -40,6 +40,7 @@ import { createRunMetrics } from './debug/runMetrics';
 import { createTunables } from './ui/tunables';
 import { createTuningPanel } from './ui/tuningPanel';
 import { TANK_CLASSES } from './game/classes';
+import { computeFlowState, pruneDeathTimes, type FlowState } from './game/flowState';
 import { createProgression } from './progression/progression';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
@@ -220,6 +221,13 @@ function boot(combatStyle: CombatStyle): void {
   const PLAYER_FIRE_BASE = 0.28; // s zwischen Schüssen bei fireRate 1
   const BASE_TURRET_SLEW = 22; // rad/s Turm-Dreh-Tempo (Turmservo verdoppelt; Schüsse bleiben pixelgenau)
   let spawnGraceCd = 5; // 5s nach Erscheinen: unverwundbar (Spawn & Respawn)
+  // — Schicht 0: Bauprofil + Flow-State-Maschine (Loop muss zuerst tragen) —
+  type TuningProfile = 'LOOP_TEST' | 'EVOLUTION_TEST' | 'FULL_RUN';
+  const currentTuningProfile: TuningProfile = 'LOOP_TEST'; // bis der Loop 5+ min stabil trägt
+  const deathTimes: number[] = []; // Zeitstempel jüngster Tode (runClock) für Deathloop-Erkennung
+  let lastRespawnAt = 0; // runClock des letzten Respawns (Respawn-Schonfrist)
+  let flowState: FlowState = 'flow';
+  let prevFlowState: FlowState = 'flow';
   const fxList: { mesh: Mesh; mat: StandardMaterial; life: number; max: number; fade: boolean; alpha0: number }[] = []; // kurzlebige Effekt-Meshes (Laser, Rauch)
 
   // — Reaktive Schwarm-Welt (R1): Stil messen → Heat pro Richtung je Frontlage-Puls.
@@ -683,7 +691,8 @@ function boot(combatStyle: CombatStyle): void {
     playerCombatant.alive = false;
     log.warn('player died', { cause });
     metrics.onDeath();
-    alog.log('player.death', { cause, byType: metrics.lastDamager(), idle: Math.round(idleFor) }); // byType=Schädiger; idle≥2s = „Hände weg", nicht werten
+    deathTimes.push(runClock); // Deathloop-Erkennung (Flow-State)
+    alog.log('player.death', { cause, byType: metrics.lastDamager(), idle: Math.round(idleFor), flow: flowState }); // byType=Schädiger; idle≥2s = „Hände weg", nicht werten
     bus.emit('tank.died', { tankId: 'player' });
     respawnPlayer();
   }
@@ -697,10 +706,29 @@ function boot(combatStyle: CombatStyle): void {
     playerCombatant.hp = playerCombatant.maxHp;
     playerCombatant.alive = true;
     playerCombatant.invulnerable = true; // sofort (schützt auch im selben combat-Frame)
-    spawnGraceCd = 5; // Respawn = Erscheinen: 5s Invuln + Shop überall öffenbar
+    lastRespawnAt = runClock;
+    // Notstart-Hilfe: in der Todesspirale länger unverwundbar + nahe Gegner wegdrücken,
+    // damit man nicht direkt wieder in den Tod respawnt (kein neuer Counter, nur Entlastung).
+    const broken = flowState === 'broken';
+    spawnGraceCd = broken ? 7 : 5;
+    if (broken) {
+      const relief = 28; // Radius, in dem Gegner beim Notstart weggeschoben werden
+      for (const e of roster) {
+        if (!e.combatant.alive) continue;
+        const dx = e.combatant.x - playerCombatant.x, dz = e.combatant.z - playerCombatant.z;
+        const d = Math.hypot(dx, dz);
+        if (d < relief) {
+          const ux = d > 0.01 ? dx / d : 1, uz = d > 0.01 ? dz / d : 0;
+          e.view.root.position.x = playerCombatant.x + ux * relief;
+          e.view.root.position.z = playerCombatant.z + uz * relief;
+          e.combatant.x = e.view.root.position.x;
+          e.combatant.z = e.view.root.position.z;
+        }
+      }
+    }
     prevPosInit = false; // Teleport NICHT als Tempo werten (kein falsches Rush-Signal/Ø-Tempo-Spike)
-    alog.log('player.respawn', { x: +playerCombatant.x.toFixed(1), z: +playerCombatant.z.toFixed(1) });
-    showToast('Zerstört — neu aufgebaut');
+    alog.log('player.respawn', { x: +playerCombatant.x.toFixed(1), z: +playerCombatant.z.toFixed(1), broken });
+    showToast(broken ? 'Notstart — Druck entschärft' : 'Zerstört — neu aufgebaut');
   }
 
   // Mess-Overlay (Phase 1 Debugging): macht Cursor-Bodenpunkt, Ziel und Schussrichtung sichtbar.
@@ -746,6 +774,8 @@ function boot(combatStyle: CombatStyle): void {
       x: +f.mesh.position.x.toFixed(1), z: +f.mesh.position.z.toFixed(1), life: +f.life.toFixed(1),
     })),
     playerInvuln: () => playerCombatant.invulnerable === true,
+    flow: () => flowState,
+    profile: () => currentTuningProfile,
     inspect: () => ({ open: inspecting, simSpeed: clock.simSpeed, hovered: hoveredId }),
     logTail: (n?: number) => alog.tail(n),
     runId: () => alog.runId(),
@@ -825,6 +855,12 @@ function boot(combatStyle: CombatStyle): void {
     const px = tank.view.root.position.x;
     const pz = tank.view.root.position.z;
 
+    // Schicht 0: Flow-State pro Frame. BROKEN (Todesspirale) = Notstart: Spawns pausiert,
+    // kein Heat-Anstieg. Tode altern aus dem Fenster → Zustand kehrt von selbst zu flow zurück.
+    if (deathTimes.length) { const kept = pruneDeathTimes(deathTimes, runClock); if (kept.length !== deathTimes.length) deathTimes.splice(0, deathTimes.length, ...kept); }
+    flowState = computeFlowState({ alive: playerCombatant.alive, now: runClock, lastRespawnAt, deathTimes });
+    if (flowState !== prevFlowState) { alog.log('flow', { from: prevFlowState, to: flowState, t: +runClock.toFixed(1) }); prevFlowState = flowState; }
+
     // Stil messen + Frontlage-Puls (P3). Echtes Tempo aus dem Positionsdelta.
     if (!prevPosInit) { prevPx = px; prevPz = pz; prevPosInit = true; }
     const actualSpeed = simDt > 0 ? Math.hypot(px - prevPx, pz - prevPz) / simDt : 0;
@@ -834,14 +870,17 @@ function boot(combatStyle: CombatStyle): void {
     if (simDt > 0) styleTracker.onMove({ speed: actualSpeed, x: px, z: pz, dt: simDt });
     pulseCd -= simDt;
     if (pulseCd <= 0) {
-      director.evaluate(styleTracker.snapshotAndReset());
+      // BROKEN: kein Heat-Anstieg — leeres Profil (nur Decay), Tracker dennoch leeren (kein Stau).
+      const snap = styleTracker.snapshotAndReset();
+      director.evaluate(flowState === 'broken' ? emptyProfile() : snap);
       pulseCd = pulseLen;
     }
 
     // Stil-getriebener Nachschub (gedeckelt): Typ-Mix aus der Heat-Lage, Zahl fest (Max Gegner).
     runClock += simDt;
     const aliveCount = roster.reduce((n, e) => n + (e.combatant.alive ? 1 : 0), 0);
-    const spawned = spawner.update(simDt, px, pz, aliveCount, currentSwarmPlan());
+    // BROKEN: keine neuen Spawns (Druck raus, Loop erholt sich). Sonst normaler gedeckelter Nachschub.
+    const spawned = flowState === 'broken' ? null : spawner.update(simDt, px, pz, aliveCount, currentSwarmPlan());
     if (spawned) { roster.push(spawned); metrics.onSpawn(spawned.typeId); spawnTimes.set(spawned.id, runClock); }
 
     // Idle-Erkennung: aktiver Input = Fahren ODER kürzlich manuell gefeuert ODER Ziel bewegt.
@@ -868,7 +907,7 @@ function boot(combatStyle: CombatStyle): void {
         px, pz, heat, mix: aliveByType,
       });
       // idle = Sekunden ohne Input; ab ~2 s ist „Hände weg" → Analyse ignoriert diese Zeilen.
-      alog.log('snap', { ...(snap as unknown as Record<string, unknown>), idle: Math.round(idleFor) });
+      alog.log('snap', { ...(snap as unknown as Record<string, unknown>), idle: Math.round(idleFor), flow: flowState });
     }
 
     // Gegner-Verhalten (R2): jeder Typ steuert nach seinem Muster auf einen Zielpunkt zu,
