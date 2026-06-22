@@ -16,9 +16,6 @@ import {
 } from './channels';
 import { thresholdForStage, type TuningProfile } from './profiles';
 
-/** Gewichte unter diesem Wert bekommen keinen Fortschritt (verhindert, dass alle Routen wachsen). */
-export const NOISE_FLOOR = 0.2;
-
 export interface EvolutionState {
   baseMode: BaseMode;
   progressByChannel: Record<EvolutionChannelId, number>;
@@ -42,34 +39,26 @@ export function createEvolutionState(base: BaseMode): EvolutionState {
   };
 }
 
-export interface ImpulseContext {
-  weights: CompassWeights; // geglätteter Kompass
-  profile: TuningProfile;
-  flow: number; // flowMultiplier (0 = Bruch/Respawn/Leerlauf → kein Fortschritt)
-  repetition: number; // repetitionControl (dämpft Spam)
-  routeMatch?: (ch: EvolutionChannelId) => number; // Passung Impuls↔Kanal, Default 1
-}
-
 /**
- * Einen Kampf-Impuls auf die aktiven Kanäle verteilen. gain = basePoints × Kompassgewicht ×
- * flow × repetition × routeMatch. Erreicht ein Kanal die nächste Stufenschwelle, wird sie
- * VORGEMERKT (nicht sofort ausgelöst — das macht tryTriggerEvolution im sicheren Fenster).
+ * Reibungslos: ein Kampf-Impuls fließt VOLL und DIREKT in den Kanal, auf den der Kompass zeigt
+ * (der aktive Kanal). Keine Aufteilung, kein Noise-Floor, keine Wiederholungs-/Wackel-Dämpfung —
+ * wohin der Spieler entwickeln will, dahin entwickelt er sich, jede Richtung gleich schnell.
+ * Erreicht der Kanal die nächste Stufenschwelle, wird sie VORGEMERKT (Auslösen erst im sicheren
+ * Fenster über tryTriggerEvolution).
  */
-export function applyImpulse(state: EvolutionState, basePoints: number, ctx: ImpulseContext): void {
-  if (ctx.flow <= 0 || basePoints <= 0) return;
-  for (const ch of channelsForBaseMode(state.baseMode)) {
-    const w = channelWeight(ch, ctx.weights);
-    if (w < NOISE_FLOOR) continue;
-    const rm = ctx.routeMatch ? ctx.routeMatch(ch) : 1;
-    const gain = basePoints * w * ctx.flow * ctx.repetition * rm;
-    if (gain <= 0) continue;
-    state.progressByChannel[ch] += gain;
-    if (!state.pendingEvolution) {
-      const next = state.unlockedStagesByChannel[ch] + 1;
-      const thr = thresholdForStage(ctx.profile, next);
-      if (thr != null && state.progressByChannel[ch] >= thr) {
-        state.pendingEvolution = { channelId: ch, stage: next };
-      }
+export function gainProgress(
+  state: EvolutionState,
+  channel: EvolutionChannelId,
+  points: number,
+  profile: TuningProfile,
+): void {
+  if (points <= 0) return;
+  state.progressByChannel[channel] += points;
+  if (!state.pendingEvolution) {
+    const next = state.unlockedStagesByChannel[channel] + 1;
+    const thr = thresholdForStage(profile, next);
+    if (thr != null && state.progressByChannel[channel] >= thr) {
+      state.pendingEvolution = { channelId: channel, stage: next };
     }
   }
 }

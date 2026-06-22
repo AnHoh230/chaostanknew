@@ -44,7 +44,7 @@ import { computeFlowState, pruneDeathTimes, type FlowState } from './game/flowSt
 import { ROSTER, DEFAULT_ESCALATION, scaleStats } from './enemy/roster';
 import { thresholdForStage, maxStage, type TuningProfile } from './evolution/profiles';
 import { CHANNEL_DISPLAY, type BaseMode } from './evolution/channels';
-import { createEvolutionState, applyImpulse, tryTriggerEvolution, emergingChannel } from './evolution/evolution';
+import { createEvolutionState, gainProgress, tryTriggerEvolution, emergingChannel } from './evolution/evolution';
 import { createCompassState, weightsFromPointer, smoothToward } from './evolution/compass';
 import { createProgression } from './progression/progression';
 import { startLoop } from './core/loop';
@@ -66,7 +66,7 @@ const DAMAGE_TICK = 0.5; // Länge eines „Ticks" (s) für DoT/AoE-Schaden
 /** Kampfstil (Startwahl): bestimmt, wie der Hauptschuss wirkt. */
 export type CombatStyle = 'sniper' | 'aoe' | 'dot';
 const COMBAT_STYLES: { id: CombatStyle; name: string; desc: string }[] = [
-  { id: 'sniper', name: 'Sniper', desc: 'Rechte Maustaste halten: weiter zoomen + maximale Reichweite, aber kein Fahren. Loslassen = zurück.' },
+  { id: 'sniper', name: 'Kommandant', desc: 'Übersichtsmodus (Rechtsklick): herauszoomen, Ziele markieren, Angriff auslösen. Kein klassischer Sniper.' },
   { id: 'aoe', name: 'AoE', desc: 'Bogenlampe legt Flächen ab (kürzere Wurfweite). Gegner darin nehmen pro Tick Schaden. Unbegrenzt, halten 5 Ticks.' },
   { id: 'dot', name: 'DoT', desc: 'Normaler Schuss, kein Soforttreffer — setzt Gift: tickt alle 2 Ticks. Nachschuss erneuert die Dauer.' },
 ];
@@ -171,8 +171,13 @@ function boot(combatStyle: CombatStyle): void {
   let sniperRange = 95, sniperCamBack = 150, sniperCamHeight = 95; // Scope: Reichweite + Kamera weit weg (mehr Gebiet)
   let sniperDmgMul = 2; // Sniper schlägt härter — Faktor auf den normalen Schussschaden
   let sniperSnapRadius = 220; // px: max. Cursor-Abstand, in dem ein Gegner angevisiert wird
-  let sniperTargetId: string | null = null; // aktuell gelocktes Ziel (Fadenkreuz); nur 1 zugleich
-  let sniperCrosshair: HTMLDivElement | null = null; // Fadenkreuz-Overlay (nur im Sniper-Stil)
+  const sniperMarks: string[] = []; // markierte Ziele (Mehrfach-Markierung wächst mit Kern-Stufe)
+  let sniperCandidateId: string | null = null; // aktuell gesnapptes Kandidaten-Ziel (nächste Marke)
+  let markCommitCd = 0; // s bis die markierte Gruppe als Salve feuert (0 = inaktiv)
+  const SNIPER_COMMIT = 0.3; // Zeitfenster, in dem weitere Ziele zur Salve getaggt werden können
+  let returnBoostCd = 0; // Kern-Stufe 3: kurzes Tempo-Fenster nach dem Auspacken
+  let sniperCrosshair: HTMLDivElement | null = null; // Kandidaten-Fadenkreuz
+  let markPool: HTMLDivElement[] = []; // Anzeiger für bereits gesetzte Marken
   let aoeRange = 26, aoeRadius = 4, aoeDmg = 14, aoeTickCount = 5; // AoE-Feld (Radius ~2 Späher)
   let dotDmg = 36, dotEvery = DAMAGE_TICK * 2, dotDur = DAMAGE_TICK * 8; // DoT: alle 2 Ticks, 8 Ticks lang
   let scopeActive = false; // Sniper: RMB gedrückt → Scope an (kein Fahren, weiter zoomen)
@@ -236,15 +241,18 @@ function boot(combatStyle: CombatStyle): void {
   const evo = createEvolutionState(baseMode);
   const compass = createCompassState();
   let compassOpen = false; // C gehalten → Kompass steuerbar
-  const INTENT_SMOOTHING = 6; // s Glättungsfenster
+  const INTENT_SMOOTHING = 1.5; // s — nur Eingabe-Entzittern, KEINE zähe Bremse (reibungslos)
   // Profil-Werte (LOOP_TEST bis der Loop trägt): Mindestzeiten fürs Evolutions-Fenster (Debug-Werte).
   const evoMinFirst = 20, evoMinBetween = 25;
   // C halten → Kompass steuerbar (Maus im Bildschirm-Dreieck: oben Kern, unten-links Raum, -rechts Zustand).
   window.addEventListener('keydown', (e) => { if (e.key.toLowerCase() === 'c') compassOpen = true; });
   window.addEventListener('keyup', (e) => { if (e.key.toLowerCase() === 'c') compassOpen = false; });
-  // Einen Kampf-Impuls in die Evolution geben (nur im Flow; Kompass lenkt den Zielkanal).
-  const gainImpulse = (points: number): void =>
-    applyImpulse(evo, points, { weights: compass.smoothed, profile: currentTuningProfile, flow: flowState === 'flow' ? 1 : 0, repetition: 1 });
+  // Einen Kampf-Impuls in die Evolution geben: voll und direkt in den Kanal, auf den der Kompass
+  // zeigt (nur im Flow). Reibungslos — keine Aufteilung, keine Bremse.
+  const gainImpulse = (points: number): void => {
+    if (flowState !== 'flow') return;
+    gainProgress(evo, emergingChannel(evo, compass.smoothed), points, currentTuningProfile);
+  };
   // Frontformung-HUD (unten rechts): entstehende Form + Stufe/Fortschritt + Kompassanteile.
   const frontHud = document.createElement('div');
   frontHud.style.cssText =
@@ -416,25 +424,61 @@ function boot(combatStyle: CombatStyle): void {
   // Feuern: Richtung im KLICK-Augenblick frisch aus dem aktuellen Cursor ableiten —
   // NICHT die (um einen Frame veraltete) Turm-Ausrichtung lesen. Sonst zielt der
   // Schuss aufs Ziel vom letzten Frame (bewiesen: aimErr 7-40° beim Bewegen).
+  // Kern-Stufe → wie viele Ziele gleichzeitig markierbar sind (Stufe 0/1 = 1, Stufe 2 = 2, …).
+  const maxMarks = (): number => Math.max(1, evo.unlockedStagesByChannel.sniper_core);
+  // Markierte Gruppe als Salve auflösen: jedes Ziel garantiert treffen + Impuls je Treffer.
+  function fireVolley(): void {
+    const root = tank.view.root, turret = tank.view.turretNode;
+    const origin = root.getAbsolutePosition();
+    const dmg = Math.round(playerStats().damage * sniperDmgMul);
+    let hits = 0;
+    for (const id of sniperMarks) {
+      const e = roster.find((r) => r.id === id && r.combatant.alive);
+      if (!e) continue;
+      turret.rotation.y = yawTo(origin.x, origin.z, e.combatant.x, e.combatant.z) - root.rotation.y;
+      spawnLaser(origin.x, origin.z, e.combatant.x, e.combatant.z);
+      damageEnemyTick(e, dmg);
+      gainImpulse(e.typeId === 'bunker' ? 6 : 4);
+      hits += 1;
+    }
+    sniperMarks.length = 0; sniperCandidateId = null; markCommitCd = 0;
+    if (hits > 0) {
+      metrics.onShot(); lastFireClock = runClock; bus.emit('tank.fired', { tankId: tank.id });
+      alog.log('volley', { hits });
+      fireCd = PLAYER_FIRE_BASE / playerBuffs.aggregate().fireRateMul; // Cooldown nach der Salve
+    }
+  }
+
+  // Nächstes anvisierbares Ziel am Cursor, ohne bereits markierte. prio (Kern-Stufe 1) gewichtet
+  // gefährliche Ziele (Bunker) näher, sodass der Snap sie bevorzugt greift.
+  function pickCandidate(
+    mx: number, my: number, blips: { id: string; sx: number; sy: number }[],
+    radius: number, exclude: string[], prio: boolean,
+  ): string | null {
+    let best: string | null = null, bestScore = Infinity;
+    for (const b of blips) {
+      if (exclude.includes(b.id)) continue;
+      const d = Math.hypot(b.sx - mx, b.sy - my);
+      if (d > radius) continue;
+      const danger = prio && roster.find((r) => r.id === b.id)?.typeId === 'bunker' ? 0.6 : 1;
+      const score = d * danger;
+      if (score < bestScore) { bestScore = score; best = b.id; }
+    }
+    return best;
+  }
+
   function fire(): void {
-    if (combatStyle === 'sniper' && !scopeActive) return; // Sniper feuert NUR im Scope — kein Hüftschuss
-    // Sniper: KEIN Richtungsschuss — der Schuss trifft das gelockte Ziel garantiert (kein Ausweichen).
+    if (combatStyle === 'sniper' && !scopeActive) return; // Kommandant feuert NUR im Übersichtsmodus
+    // Kommandant: Linksklick MARKIERT das gesnappte Ziel. Bei voller Gruppe (maxMarks) feuert die
+    // Salve sofort; sonst startet ein kurzes Fenster, in dem weitere Ziele dazugetaggt werden können.
+    // Bei maxMarks=1 ist „markieren → voll → feuern" identisch zum bisherigen Einzel-Lock (fließend).
     if (combatStyle === 'sniper') {
-      const tgt = sniperTargetId ? roster.find((r) => r.id === sniperTargetId && r.combatant.alive) : null;
-      if (!tgt) return; // kein Ziel anvisiert → kein Schuss (und KEIN Cooldown verbraten)
-      if (fireCd > 0) return; // Takt = Schussgeschwindigkeit; erst danach neues Ziel/Schuss möglich
-      fireCd = PLAYER_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
-      const root = tank.view.root, turret = tank.view.turretNode;
-      const origin = root.getAbsolutePosition();
-      const dmg = Math.round(playerStats().damage * sniperDmgMul);
-      turret.rotation.y = yawTo(origin.x, origin.z, tgt.combatant.x, tgt.combatant.z) - root.rotation.y; // Turm aufs Ziel
-      spawnLaser(origin.x, origin.z, tgt.combatant.x, tgt.combatant.z); // sichtbarer Schuss direkt zum Ziel
-      damageEnemyTick(tgt, dmg); // garantierter Treffer (umgeht Ausweichen)
-      metrics.onShot();
-      lastFireClock = runClock;
-      gainImpulse(tgt.typeId === 'bunker' ? 6 : 4); // Sniper-Treffer = Evolutions-Fortschritt (gefährliches Ziel mehr)
-      alog.log('snipe', { target: tgt.id, dmg });
-      bus.emit('tank.fired', { tankId: tank.id });
+      if (fireCd > 0) return; // nach einer Salve kurz nachladen
+      const cand = sniperCandidateId;
+      if (!cand) return; // kein Kandidat → nichts markieren (kein Cooldown verbraten)
+      if (!sniperMarks.includes(cand) && sniperMarks.length < maxMarks()) sniperMarks.push(cand);
+      if (sniperMarks.length >= maxMarks()) fireVolley();
+      else markCommitCd = SNIPER_COMMIT; // Fenster zum Nachtaggen offen halten
       return;
     }
     if (fireCd > 0) return; // Feuer-Cooldown (Kühlmittel senkt ihn)
@@ -601,10 +645,24 @@ function boot(combatStyle: CombatStyle): void {
       '<div data-tick style="position:absolute;top:50%;right:-7px;height:2px;width:9px;background:#ff5252;transform:translateY(-50%)"></div>';
     document.body.appendChild(ch);
     sniperCrosshair = ch;
+    // Marken-Pool: feste Ringe für bereits getaggte Ziele (Mehrfach-Markierung).
+    markPool = Array.from({ length: 6 }, () => {
+      const m = document.createElement('div');
+      m.style.cssText =
+        'position:fixed;width:30px;height:30px;margin:-15px 0 0 -15px;z-index:44;display:none;pointer-events:none;' +
+        'border:2px solid #9be36b;border-radius:50%;box-shadow:0 0 6px #9be36baa;';
+      document.body.appendChild(m);
+      return m;
+    });
     const toggleScope = (): void => {
       scopeActive = !scopeActive;
       scopeBadge.style.display = scopeActive ? 'block' : 'none';
-      if (!scopeActive) { sniperTargetId = null; ch.style.display = 'none'; } // Scope aus → Ziel/Fadenkreuz weg
+      if (!scopeActive) {
+        // Scope aus → Marken/Kandidat weg; Kern-Stufe 3 „Rückkehrfenster": kurzer Tempo-Schub.
+        sniperMarks.length = 0; sniperCandidateId = null; markCommitCd = 0;
+        ch.style.display = 'none'; for (const m of markPool) m.style.display = 'none';
+        if (evo.unlockedStagesByChannel.sniper_core >= 3) returnBoostCd = 1.5;
+      }
       log.info('scope', { on: scopeActive });
     };
     // contextmenu feuert genau einmal pro Rechtsklick (ideal für einen Schalter) und wird eh unterdrückt.
@@ -895,7 +953,10 @@ function boot(combatStyle: CombatStyle): void {
     playerBuffs.tick(simDt);
     const pmods = playerBuffs.aggregate();
     const pst = playerStats();
-    playerSpeed = pst.speed * pmods.speedMul * playerSpeedMul;
+    // Kern-Stufe 3 „Rückkehrfenster": kurzer Tempo-Schub direkt nach dem Auspacken.
+    if (returnBoostCd > 0) returnBoostCd = Math.max(0, returnBoostCd - simDt);
+    const returnBoost = returnBoostCd > 0 ? 1.5 : 1;
+    playerSpeed = pst.speed * pmods.speedMul * playerSpeedMul * returnBoost;
     playerCombatant.armor = pst.armor + pmods.armorAdd;
     playerCombatant.dodge = pst.dodge + pmods.dodgeAdd; // Ausweichen aus Buffs (Basis 0)
     playerCombatant.incomingMul = pmods.incomingMul; // Verwundbarkeit (falls Gegner später markieren)
@@ -1166,28 +1227,38 @@ function boot(combatStyle: CombatStyle): void {
       );
       if (s.z > 0 && s.z < 1) screenBlips.push({ id: e.id, sx: s.x, sy: s.y });
     }
-    // Sniper-Zielsnap: im Scope snappt das Fadenkreuz auf den Gegner nahe dem Cursor. Ein NEUES
-    // Ziel darf nur gewählt werden, wenn die Waffe bereit ist (fireCd<=0 = Takt der Schussgeschw.);
-    // währenddessen bleibt das Fadenkreuz auf dem aktuellen Ziel (orange = nachladen, grün = bereit).
+    // Kommandant: Salven-Fenster ticken; tote Marken raus; Kandidat = nächster UNMARKIERTER Gegner
+    // am Cursor (Kern-Stufe 1 „Prioritätsblick" bevorzugt gefährliche Ziele). Fadenkreuz = Kandidat,
+    // Ringe = bereits getaggte Marken. Bei maxMarks=1 ist das der bisherige Einzel-Lock.
+    if (markCommitCd > 0) { markCommitCd -= simDt; if (markCommitCd <= 0 && sniperMarks.length) fireVolley(); }
     if (sniperCrosshair) {
       if (combatStyle === 'sniper' && scopeActive) {
-        if (sniperTargetId && !roster.find((r) => r.id === sniperTargetId && r.combatant.alive)) sniperTargetId = null;
-        if (fireCd <= 0) sniperTargetId = nearestToPointer(mouseX, mouseY, screenBlips, sniperSnapRadius);
-        const tb = sniperTargetId ? screenBlips.find((b) => b.id === sniperTargetId) : null;
-        if (tb) {
-          const ready = fireCd <= 0;
-          const col = ready ? '#9be36b' : '#ffa94d';
+        for (let i = sniperMarks.length - 1; i >= 0; i--) {
+          if (!roster.find((r) => r.id === sniperMarks[i] && r.combatant.alive)) sniperMarks.splice(i, 1);
+        }
+        const prio = evo.unlockedStagesByChannel.sniper_core >= 1;
+        sniperCandidateId = fireCd <= 0 && sniperMarks.length < maxMarks()
+          ? pickCandidate(mouseX, mouseY, screenBlips, sniperSnapRadius, sniperMarks, prio)
+          : null;
+        const cb = sniperCandidateId ? screenBlips.find((b) => b.id === sniperCandidateId) : null;
+        if (cb) {
+          const onBunker = prio && roster.find((r) => r.id === sniperCandidateId)?.typeId === 'bunker';
+          const col = onBunker ? '#ff5252' : fireCd <= 0 ? '#9be36b' : '#ffa94d';
           sniperCrosshair.style.display = 'block';
-          sniperCrosshair.style.left = tb.sx + 'px';
-          sniperCrosshair.style.top = tb.sy + 'px';
+          sniperCrosshair.style.left = cb.sx + 'px';
+          sniperCrosshair.style.top = cb.sy + 'px';
           sniperCrosshair.querySelectorAll<HTMLElement>('[data-ring],[data-tick]').forEach((el) => {
             if (el.hasAttribute('data-ring')) el.style.borderColor = col; else el.style.background = col;
           });
-        } else {
-          sniperCrosshair.style.display = 'none';
+        } else sniperCrosshair.style.display = 'none';
+        for (let i = 0; i < markPool.length; i++) {
+          const mb = i < sniperMarks.length ? screenBlips.find((b) => b.id === sniperMarks[i]) : null;
+          if (mb) { markPool[i]!.style.display = 'block'; markPool[i]!.style.left = mb.sx + 'px'; markPool[i]!.style.top = mb.sy + 'px'; }
+          else markPool[i]!.style.display = 'none';
         }
-      } else if (sniperCrosshair.style.display !== 'none') {
-        sniperCrosshair.style.display = 'none';
+      } else {
+        if (sniperCrosshair.style.display !== 'none') sniperCrosshair.style.display = 'none';
+        for (const m of markPool) if (m.style.display !== 'none') m.style.display = 'none';
       }
     }
 

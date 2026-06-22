@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createEvolutionState, applyImpulse, tryTriggerEvolution, NOISE_FLOOR } from './evolution';
+import { createEvolutionState, gainProgress, tryTriggerEvolution, emergingChannel } from './evolution';
 
 const FLOW = (now: number, dom?: string) => ({
   now,
@@ -9,36 +9,34 @@ const FLOW = (now: number, dom?: string) => ({
   dominantChannel: dom as never,
 });
 
-describe('applyImpulse', () => {
-  it('verteilt Fortschritt nach Kompassgewicht; unter Noise-Floor nichts', () => {
+describe('gainProgress', () => {
+  it('voller, direkter Fortschritt in den gewählten Kanal (keine Aufteilung)', () => {
     const s = createEvolutionState('sniper');
-    // Kompass stark auf AoE → sniper_aoe_dot wächst, Kern (0.1 < Floor) nicht.
-    applyImpulse(s, 10, { weights: { sniper: 0.1, aoe: 0.7, dot: 0.2 }, profile: 'LOOP_TEST', flow: 1, repetition: 1 });
-    expect(s.progressByChannel.sniper_aoe_dot).toBeCloseTo(7, 5);
-    expect(s.progressByChannel.sniper_dot_aoe).toBeCloseTo(2, 5);
-    expect(s.progressByChannel.sniper_core).toBe(0); // 0.1 < 0.2 Floor
-    expect(NOISE_FLOOR).toBe(0.2);
+    gainProgress(s, 'sniper_core', 10, 'LOOP_TEST');
+    expect(s.progressByChannel.sniper_core).toBe(10);
+    expect(s.progressByChannel.sniper_aoe_dot).toBe(0);
   });
 
-  it('kein Fortschritt bei flow=0 (Bruch/Respawn)', () => {
+  it('merkt Evolution vor, sobald die Schwelle erreicht ist (LOOP_TEST Stufe 1 = 25)', () => {
     const s = createEvolutionState('sniper');
-    applyImpulse(s, 10, { weights: { sniper: 1, aoe: 0, dot: 0 }, profile: 'LOOP_TEST', flow: 0, repetition: 1 });
-    expect(s.progressByChannel.sniper_core).toBe(0);
-  });
-
-  it('merkt Evolution vor, sobald die Schwelle erreicht ist', () => {
-    const s = createEvolutionState('sniper');
-    // Kern, voll auf Sniper. LOOP_TEST Stufe-1-Schwelle = 25.
-    applyImpulse(s, 25, { weights: { sniper: 1, aoe: 0, dot: 0 }, profile: 'LOOP_TEST', flow: 1, repetition: 1 });
+    gainProgress(s, 'sniper_core', 25, 'LOOP_TEST');
     expect(s.pendingEvolution).toEqual({ channelId: 'sniper_core', stage: 1 });
     expect(s.unlockedStagesByChannel.sniper_core).toBe(0); // noch nicht ausgelöst
+  });
+});
+
+describe('emergingChannel', () => {
+  it('liefert den Kanal, auf den der Kompass am stärksten zeigt', () => {
+    const s = createEvolutionState('sniper');
+    expect(emergingChannel(s, { sniper: 0.1, aoe: 0.7, dot: 0.2 })).toBe('sniper_aoe_dot');
+    expect(emergingChannel(s, { sniper: 0.8, aoe: 0.1, dot: 0.1 })).toBe('sniper_core');
   });
 });
 
 describe('tryTriggerEvolution', () => {
   it('löst im sicheren Fenster aus und räumt das Pending weg', () => {
     const s = createEvolutionState('sniper');
-    applyImpulse(s, 25, { weights: { sniper: 1, aoe: 0, dot: 0 }, profile: 'LOOP_TEST', flow: 1, repetition: 1 });
+    gainProgress(s, 'sniper_core', 25, 'LOOP_TEST');
     const ev = tryTriggerEvolution(s, FLOW(30));
     expect(ev).toEqual({ channelId: 'sniper_core', stage: 1 });
     expect(s.unlockedStagesByChannel.sniper_core).toBe(1);
@@ -47,7 +45,7 @@ describe('tryTriggerEvolution', () => {
 
   it('löst NICHT aus bei Bruch/Respawn oder zu früh', () => {
     const s = createEvolutionState('sniper');
-    applyImpulse(s, 25, { weights: { sniper: 1, aoe: 0, dot: 0 }, profile: 'LOOP_TEST', flow: 1, repetition: 1 });
+    gainProgress(s, 'sniper_core', 25, 'LOOP_TEST');
     expect(tryTriggerEvolution(s, { ...FLOW(30), flow: 'broken' })).toBeNull();
     expect(tryTriggerEvolution(s, FLOW(10))).toBeNull(); // vor minSecondsBeforeFirst
     expect(s.pendingEvolution).toBeDefined(); // bleibt vorgemerkt
@@ -55,11 +53,8 @@ describe('tryTriggerEvolution', () => {
 
   it('Routen brauchen Dominanz, Kern nicht', () => {
     const s = createEvolutionState('sniper');
-    // Route sniper_aoe_dot auf Schwelle bringen.
-    applyImpulse(s, 25, { weights: { sniper: 0, aoe: 1, dot: 0 }, profile: 'LOOP_TEST', flow: 1, repetition: 1 });
-    // anderer Kanal dominant → Route darf nicht auslösen
+    gainProgress(s, 'sniper_aoe_dot', 25, 'LOOP_TEST');
     expect(tryTriggerEvolution(s, FLOW(30, 'sniper_dot_aoe'))).toBeNull();
-    // eigener Kanal dominant → löst aus
     expect(tryTriggerEvolution(s, FLOW(30, 'sniper_aoe_dot'))).toEqual({ channelId: 'sniper_aoe_dot', stage: 1 });
   });
 });
