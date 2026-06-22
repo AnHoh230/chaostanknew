@@ -43,9 +43,9 @@ import { TANK_CLASSES } from './game/classes';
 import { computeFlowState, pruneDeathTimes, type FlowState } from './game/flowState';
 import { ROSTER, DEFAULT_ESCALATION, scaleStats } from './enemy/roster';
 import { thresholdForStage, maxStage, type TuningProfile } from './evolution/profiles';
-import { CHANNEL_DISPLAY, type BaseMode } from './evolution/channels';
+import { CHANNEL_DISPLAY, type BaseMode, type EvolutionChannelId } from './evolution/channels';
 import { createEvolutionState, gainProgress, tryTriggerEvolution, emergingChannel } from './evolution/evolution';
-import { createCompassState, weightsFromPointer, smoothToward } from './evolution/compass';
+import { createCompassState, baryWeights } from './evolution/compass';
 import { createProgression } from './progression/progression';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
@@ -246,20 +246,45 @@ function boot(combatStyle: CombatStyle): void {
   const baseMode: BaseMode = combatStyle; // Grundmodus = gewählter Kampfstil
   const evo = createEvolutionState(baseMode);
   const compass = createCompassState();
-  let compassOpen = false; // C gehalten → Kompass steuerbar
-  const INTENT_SMOOTHING = 1.5; // s — nur Eingabe-Entzittern, KEINE zähe Bremse (reibungslos)
-  // Profil-Werte (LOOP_TEST bis der Loop trägt): Mindestzeiten fürs Evolutions-Fenster (Debug-Werte).
-  const evoMinFirst = 20, evoMinBetween = 25;
-  // C halten → Kompass steuerbar (Maus im Bildschirm-Dreieck: oben Kern, unten-links Raum, -rechts Zustand).
-  window.addEventListener('keydown', (e) => { if (e.key.toLowerCase() === 'c') compassOpen = true; });
-  window.addEventListener('keyup', (e) => { if (e.key.toLowerCase() === 'c') compassOpen = false; });
-  // Einen Kampf-Impuls in die Evolution geben: voll und direkt in den Kanal, auf den der Kompass
-  // zeigt (nur im Flow). Reibungslos — keine Aufteilung, keine Bremse.
+  const evoMinFirst = 20, evoMinBetween = 25; // Mindestzeiten fürs Evolutions-Fenster (LOOP_TEST-Debug)
+  // Aktiver Kanal = wohin der Kompass-Punkt zeigt — SOFORT, ohne Glättung (reibungslos).
+  const activeChannelNow = (): EvolutionChannelId => emergingChannel(evo, compass.raw);
   const gainImpulse = (points: number): void => {
     if (flowState !== 'flow') return;
-    gainProgress(evo, emergingChannel(evo, compass.smoothed), points, currentTuningProfile);
+    gainProgress(evo, activeChannelNow(), points, currentTuningProfile);
   };
-  // Frontformung-HUD (unten rechts): entstehende Form + Stufe/Fortschritt + Kompassanteile.
+
+  // — Sichtbarer Kompass: Dreieck mit ZIEHBAREM Punkt (oben Kern, unten-links Raum, -rechts Zustand) —
+  const KERN = { x: 80, y: 20 }, RAUMP = { x: 24, y: 116 }, ZUSTP = { x: 136, y: 116 };
+  const compassBox = document.createElement('div');
+  compassBox.style.cssText = 'position:fixed;right:12px;bottom:120px;z-index:41;width:160px;height:140px;cursor:grab;touch-action:none;user-select:none;';
+  compassBox.innerHTML =
+    '<svg width="160" height="140" style="overflow:visible">' +
+    `<polygon points="${KERN.x},${KERN.y} ${RAUMP.x},${RAUMP.y} ${ZUSTP.x},${ZUSTP.y}" fill="#10151cdd" stroke="#3a4a5a" stroke-width="1.5"/>` +
+    `<text x="${KERN.x}" y="${KERN.y - 6}" fill="#9be36b" font-size="11" font-family="system-ui" text-anchor="middle" font-weight="700">Kern</text>` +
+    `<text x="${RAUMP.x - 4}" y="${RAUMP.y + 15}" fill="#74c0fc" font-size="11" font-family="system-ui" text-anchor="middle">Raum</text>` +
+    `<text x="${ZUSTP.x + 4}" y="${ZUSTP.y + 15}" fill="#ffa94d" font-size="11" font-family="system-ui" text-anchor="middle">Zustand</text>` +
+    `<circle data-dot cx="${KERN.x}" cy="${KERN.y}" r="8" fill="#fff" stroke="#10151c" stroke-width="2"/>` +
+    '</svg>';
+  document.body.appendChild(compassBox);
+  const compassDot = compassBox.querySelector('[data-dot]')!;
+  const renderCompassDot = (): void => {
+    const w = compass.raw;
+    compassDot.setAttribute('cx', String(w.sniper * KERN.x + w.aoe * RAUMP.x + w.dot * ZUSTP.x));
+    compassDot.setAttribute('cy', String(w.sniper * KERN.y + w.aoe * RAUMP.y + w.dot * ZUSTP.y));
+  };
+  const compassFromEvent = (ev: PointerEvent): void => {
+    const r = compassBox.getBoundingClientRect();
+    const b = baryWeights({ x: ev.clientX - r.left, y: ev.clientY - r.top }, KERN, RAUMP, ZUSTP);
+    compass.raw = { sniper: b.wa, aoe: b.wb, dot: b.wc };
+    renderCompassDot();
+  };
+  let compassDragging = false;
+  compassBox.addEventListener('pointerdown', (ev) => { compassDragging = true; compassFromEvent(ev); ev.preventDefault(); ev.stopPropagation(); });
+  window.addEventListener('pointermove', (ev) => { if (compassDragging) compassFromEvent(ev); });
+  window.addEventListener('pointerup', () => { compassDragging = false; });
+
+  // Frontformung-HUD (unten rechts unter dem Kompass): entstehende Form + Stufe/Fortschritt.
   const frontHud = document.createElement('div');
   frontHud.style.cssText =
     'position:fixed;right:12px;bottom:12px;z-index:40;width:212px;background:#10151cdd;border:1px solid #2a3a4a;' +
@@ -267,7 +292,7 @@ function boot(combatStyle: CombatStyle): void {
   document.body.appendChild(frontHud);
   let frontHudCd = 0;
   const updateFrontHud = (): void => {
-    const ch = emergingChannel(evo, compass.smoothed);
+    const ch = activeChannelNow();
     const stage = evo.unlockedStagesByChannel[ch];
     const thrNext = thresholdForStage(currentTuningProfile, stage + 1);
     const prevThr = stage >= 1 ? thresholdForStage(currentTuningProfile, stage) ?? 0 : 0;
@@ -275,13 +300,14 @@ function boot(combatStyle: CombatStyle): void {
     const pct = thrNext != null ? Math.max(0, Math.min(1, (prog - prevThr) / (thrNext - prevThr))) : 1;
     const n = Math.round(pct * 10);
     const bar = '█'.repeat(n) + '░'.repeat(10 - n);
-    const w = compass.smoothed;
+    const w = compass.raw;
     frontHud.innerHTML =
-      `<div style="opacity:.55;letter-spacing:1px;font-size:10px">FRONTFORMUNG${compassOpen ? ' · STEUERN' : ' · [C]'}</div>` +
+      '<div style="opacity:.55;letter-spacing:1px;font-size:10px">FRONTFORMUNG</div>' +
       `<div style="margin-top:3px;font-size:13px;color:#9be36b">${CHANNEL_DISPLAY[ch].displayName}</div>` +
       `<div style="margin-top:2px;opacity:.85">Stufe ${stage}/${maxStage(currentTuningProfile)}` +
-      (thrNext != null ? ` &nbsp;${bar} ${Math.round(pct * 100)}%` : ' &nbsp;max') + `</div>` +
+      (thrNext != null ? ` &nbsp;${bar} ${Math.round(pct * 100)}%` : ' &nbsp;max') + '</div>' +
       `<div style="margin-top:5px;opacity:.65;font-size:10px">Kern ${Math.round(w.sniper * 100)} · Raum ${Math.round(w.aoe * 100)} · Zustand ${Math.round(w.dot * 100)}</div>`;
+    renderCompassDot();
   };
 
   // Run-Action-Log: pro Run nach logs/run-<NNN>.log (Schüsse, Bewegung, Shop …).
@@ -1033,13 +1059,11 @@ function boot(combatStyle: CombatStyle): void {
     flowState = computeFlowState({ alive: playerCombatant.alive, now: runClock, lastRespawnAt, deathTimes });
     if (flowState !== prevFlowState) { alog.log('flow', { from: prevFlowState, to: flowState, t: +runClock.toFixed(1) }); prevFlowState = flowState; }
 
-    // Schicht 2: Kompass glätten (C steuert) + vorgemerkte Evolution im sicheren Fenster freischalten.
-    if (compassOpen) compass.raw = weightsFromPointer(mouseX / window.innerWidth, mouseY / window.innerHeight);
-    compass.smoothed = smoothToward(compass.smoothed, compass.raw, simDt, INTENT_SMOOTHING);
+    // Schicht 2: vorgemerkte Evolution im sicheren Fenster freischalten (Kompass = gezogener Punkt).
     const evoUnlock = tryTriggerEvolution(evo, {
       now: runClock, flow: flowState,
       minSecondsBeforeFirst: evoMinFirst, minSecondsBetween: evoMinBetween,
-      dominantChannel: emergingChannel(evo, compass.smoothed),
+      dominantChannel: activeChannelNow(),
     });
     if (evoUnlock) {
       showToast(`NEUE FORMUNG · ${CHANNEL_DISPLAY[evoUnlock.channelId].displayName} ${evoUnlock.stage}`);
