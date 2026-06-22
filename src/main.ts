@@ -249,9 +249,24 @@ function boot(combatStyle: CombatStyle): void {
   const evoMinFirst = 20, evoMinBetween = 25; // Mindestzeiten fürs Evolutions-Fenster (LOOP_TEST-Debug)
   // Aktiver Kanal = wohin der Kompass-Punkt zeigt — SOFORT, ohne Glättung (reibungslos).
   const activeChannelNow = (): EvolutionChannelId => emergingChannel(evo, compass.raw);
-  const gainImpulse = (points: number): void => {
-    if (flowState !== 'flow') return;
-    gainProgress(evo, activeChannelNow(), points, currentTuningProfile);
+  // — Impuls-Orbs: droppen beim Kill, fliegen automatisch zum Spieler, geben dort Fortschritt.
+  // Farbe = Richtung beim Drop: blau = Kommandant/Kern, lila = Raum/AoE, grün = Zustand/DoT.
+  const POLE_HEX = { kommandant: '#4dabf7', aoe: '#c77dff', dot: '#69db7c' };
+  const channelHex = (ch: EvolutionChannelId): string => {
+    const mid = ch.split('_')[1];
+    return mid === 'aoe' ? POLE_HEX.aoe : mid === 'dot' ? POLE_HEX.dot : POLE_HEX.kommandant;
+  };
+  const orbs: { mesh: Mesh; channel: EvolutionChannelId; points: number }[] = [];
+  const ORB_SPEED = 22; // Welt-Einheiten/s, mit dem der Orb zum Spieler fliegt
+  const spawnImpulseOrb = (x: number, z: number, channel: EvolutionChannelId, points: number): void => {
+    const orb = MeshBuilder.CreateSphere('orb', { diameter: 0.9, segments: 8 }, scene);
+    orb.position.set(x, 1, z);
+    orb.isPickable = false;
+    const mat = new StandardMaterial('orb_mat', scene);
+    mat.emissiveColor = Color3.FromHexString(channelHex(channel));
+    mat.disableLighting = true;
+    orb.material = mat;
+    orbs.push({ mesh: orb, channel, points });
   };
 
   // — Sichtbarer Kompass: Dreieck mit ZIEHBAREM Punkt (oben Kern, unten-links Raum, -rechts Zustand) —
@@ -261,9 +276,9 @@ function boot(combatStyle: CombatStyle): void {
   compassBox.innerHTML =
     '<svg width="160" height="140" style="overflow:visible">' +
     `<polygon points="${KERN.x},${KERN.y} ${RAUMP.x},${RAUMP.y} ${ZUSTP.x},${ZUSTP.y}" fill="#10151cdd" stroke="#3a4a5a" stroke-width="1.5"/>` +
-    `<text x="${KERN.x}" y="${KERN.y - 6}" fill="#9be36b" font-size="11" font-family="system-ui" text-anchor="middle" font-weight="700">Kern</text>` +
-    `<text x="${RAUMP.x - 4}" y="${RAUMP.y + 15}" fill="#74c0fc" font-size="11" font-family="system-ui" text-anchor="middle">Raum</text>` +
-    `<text x="${ZUSTP.x + 4}" y="${ZUSTP.y + 15}" fill="#ffa94d" font-size="11" font-family="system-ui" text-anchor="middle">Zustand</text>` +
+    `<text x="${KERN.x}" y="${KERN.y - 6}" fill="#4dabf7" font-size="11" font-family="system-ui" text-anchor="middle" font-weight="700">Kern</text>` +
+    `<text x="${RAUMP.x - 4}" y="${RAUMP.y + 15}" fill="#c77dff" font-size="11" font-family="system-ui" text-anchor="middle">Raum</text>` +
+    `<text x="${ZUSTP.x + 4}" y="${ZUSTP.y + 15}" fill="#69db7c" font-size="11" font-family="system-ui" text-anchor="middle">Zustand</text>` +
     `<circle data-dot cx="${KERN.x}" cy="${KERN.y}" r="8" fill="#fff" stroke="#10151c" stroke-width="2"/>` +
     '</svg>';
   document.body.appendChild(compassBox);
@@ -416,6 +431,8 @@ function boot(combatStyle: CombatStyle): void {
     if (killerTeam === 'player') {
       metrics.onKill(e.typeId, runClock - (spawnTimes.get(e.id) ?? runClock));
       styleTracker.onKill({ dist: Math.hypot(e.combatant.x - playerCombatant.x, e.combatant.z - playerCombatant.z) });
+      // Impuls-Orb in der aktuellen Kompass-Richtung droppen (nur im Flow → keine Deathloop-Punkte).
+      if (flowState === 'flow') spawnImpulseOrb(e.combatant.x, e.combatant.z, activeChannelNow(), e.typeId === 'bunker' ? 9 : 5);
       const up = progression.addXp(Math.round(18 + (e.combatant.lootValue ?? 0.4) * 60));
       if (up.gained > 0) {
         const mkNote = up.newMkUnlocks.length ? ` — MK${up.newMkUnlocks[up.newMkUnlocks.length - 1]} frei!` : '';
@@ -488,9 +505,8 @@ function boot(combatStyle: CombatStyle): void {
           alog.log('wundbruch', { target: id });
         } else woundPressure.set(id, np);
       }
-      damageEnemyTick(e, hitDmg);
+      damageEnemyTick(e, hitDmg); // Kill droppt einen Impuls-Orb (siehe killEnemy)
       if (netOn && e.combatant.alive) netMarks.push({ id, left: netLinger }); // Zielnetz: Marke bleibt liegen
-      gainImpulse(e.typeId === 'bunker' ? 6 : 4);
       hits += 1;
     }
     sniperMarks.length = 0; sniperCandidateId = null; markCommitCd = 0;
@@ -1071,6 +1087,22 @@ function boot(combatStyle: CombatStyle): void {
     }
     frontHudCd -= simDt;
     if (frontHudCd <= 0) { frontHudCd = 0.1; updateFrontHud(); }
+
+    // Impuls-Orbs fliegen zum Spieler (kein Hinfahren nötig) und geben beim Einsammeln Fortschritt
+    // in ihrer Drop-Richtung (Farbe). Schnell genug, um den fahrenden Spieler einzuholen.
+    for (let i = orbs.length - 1; i >= 0; i--) {
+      const o = orbs[i]!;
+      const dx = px - o.mesh.position.x, dz = pz - o.mesh.position.z;
+      const d = Math.hypot(dx, dz) || 1;
+      if (d < 1.8) {
+        gainProgress(evo, o.channel, o.points, currentTuningProfile);
+        o.mesh.dispose(); orbs.splice(i, 1); continue;
+      }
+      const step = Math.min(d, ORB_SPEED * simDt);
+      o.mesh.position.x += (dx / d) * step;
+      o.mesh.position.z += (dz / d) * step;
+      o.mesh.position.y = 1 + Math.sin(runClock * 6 + i) * 0.12;
+    }
 
     // Stil messen + Frontlage-Puls (P3). Echtes Tempo aus dem Positionsdelta.
     if (!prevPosInit) { prevPx = px; prevPz = pz; prevPosInit = true; }
