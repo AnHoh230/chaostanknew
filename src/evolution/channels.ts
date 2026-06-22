@@ -26,6 +26,13 @@ export interface CompassWeights {
   dot: number;
 }
 
+/** Alle 9 Kanäle (für Record-Initialisierung über alle Grundmodi). */
+export const ALL_CHANNELS: readonly EvolutionChannelId[] = [
+  'sniper_core', 'sniper_aoe_dot', 'sniper_dot_aoe',
+  'aoe_core', 'aoe_sniper_dot', 'aoe_dot_sniper',
+  'dot_core', 'dot_sniper_aoe', 'dot_aoe_sniper',
+];
+
 /** Die drei Kanäle des aktuellen Grundmodus: eigener Kern + zwei Triadenrouten. */
 export function channelsForBaseMode(base: BaseMode): EvolutionChannelId[] {
   if (base === 'sniper') return ['sniper_core', 'sniper_aoe_dot', 'sniper_dot_aoe'];
