@@ -42,7 +42,7 @@ import { createTuningPanel } from './ui/tuningPanel';
 import { TANK_CLASSES } from './game/classes';
 import { computeFlowState, pruneDeathTimes, type FlowState } from './game/flowState';
 import { ROSTER, DEFAULT_ESCALATION, scaleStats } from './enemy/roster';
-import { saeGift, tickGift, DEFAULT_GARTEN } from './build/garten';
+import { saeGift, tickGift, reifeStufe, DEFAULT_GARTEN } from './build/garten';
 import { thresholdForStage, maxStage, type TuningProfile } from './evolution/profiles';
 import { CHANNEL_DISPLAY, type BaseMode, type EvolutionChannelId } from './evolution/channels';
 import { createEvolutionState, gainProgress, tryTriggerEvolution, emergingChannel } from './evolution/evolution';
@@ -177,6 +177,15 @@ function boot(combatStyle: CombatStyle): void {
   const GARTEN_MODE = true;
   const gartenCfg = { ...DEFAULT_GARTEN };
   const GARTEN_SNAP_PX = 150; // großzügiger Cursor-Fang fürs manuelle Säen (du wählst die Ziele selbst)
+  // Sichtbare Reife (Slot 2): der vergiftete Panzer glüht stufenweise grün→rot, je näher am Erntebruch.
+  const GIFT_GLOW = [new Color3(0, 0, 0), new Color3(0.05, 0.25, 0.02), new Color3(0.4, 0.3, 0), new Color3(0.65, 0.07, 0)];
+  const setGiftGlow = (e: Enemy, stufe: number): void => {
+    const col = GIFT_GLOW[stufe] ?? GIFT_GLOW[0]!;
+    for (const m of e.view.root.getChildMeshes()) {
+      const mat = m.material as StandardMaterial | null;
+      if (mat) mat.emissiveColor = col;
+    }
+  };
   let returnBoostCd = 0; // Kern-Stufe 3: kurzes Tempo-Fenster nach dem Auspacken
   let sniperCrosshair: HTMLDivElement | null = null; // Cursor-Fadenkreuz (grün=bereit / orange=nachladen)
   let markPool: HTMLDivElement[] = []; // Ziel-Ringe um die getroffenen Gegner (1..maxMarks)
@@ -1153,7 +1162,11 @@ function boot(combatStyle: CombatStyle): void {
     runClock += simDt;
     const aliveCount = roster.reduce((n, e) => n + (e.combatant.alive ? 1 : 0), 0);
     // BROKEN: keine neuen Spawns (Druck raus, Loop erholt sich). Sonst normaler gedeckelter Nachschub.
-    const spawned = flowState === 'broken' ? null : spawner.update(simDt, px, pz, aliveCount, currentSwarmPlan());
+    const gartenWave = Math.floor(runClock / 20); // Garten-Eskalation: alle 20s eine Stufe höher
+    const spawnPlan = GARTEN_MODE
+      ? { targetCount: Math.min(16, 5 + gartenWave), weights: { allrounder: 1 } } // Zahl wächst mit der Welle
+      : currentSwarmPlan();
+    const spawned = flowState === 'broken' ? null : spawner.update(simDt, px, pz, aliveCount, spawnPlan);
     if (spawned) {
       // Stats aus dem Roster × aktueller Distanz-Heat-Stufe setzen (überschreibt die Level-Defaults).
       const r = rosterGet[spawned.typeId];
@@ -1168,9 +1181,12 @@ function boot(combatStyle: CombatStyle): void {
         spawned.damage = s.damage; spawned.speed = s.speed; spawned.combatant.lootValue = s.lootValue;
       }
       if (GARTEN_MODE) {
-        // Garten-Stage (handgesetzt): zähe, langsame Gegner — leben lange genug, dass Gift reifen kann.
-        spawned.combatant.maxHp = 200; spawned.combatant.hp = 200;
-        spawned.speed = 4; spawned.damage = 12;
+        // Garten-Stage: zäh + langsam (Gift hat Zeit zu reifen), und mit jeder Welle stärker —
+        // zäher, schneller, härter, damit Druck entsteht statt ewig dieselben harmlosen 7.
+        spawned.combatant.maxHp = 160 + gartenWave * 30;
+        spawned.combatant.hp = spawned.combatant.maxHp;
+        spawned.speed = 4 + gartenWave * 0.7;
+        spawned.damage = 12 + gartenWave * 4;
       }
       roster.push(spawned); metrics.onSpawn(spawned.typeId); spawnTimes.set(spawned.id, runClock);
     }
@@ -1272,17 +1288,24 @@ function boot(combatStyle: CombatStyle): void {
       if (e.combatant.alive && e.dot && e.dot.left <= 0) e.dot = undefined;
     }
 
-    // GARTEN-Build: reifendes Gift tickt pro Gegner. Tötet das Gift den Gegner, „platzt" er sichtbar.
+    // GARTEN-Build: reifendes Gift tickt pro Gegner. Drei Schichten: säen (fireVolley) → vertiefen
+    // (Potenz wächst, Glühen) → ERNTEBRUCH bei Reife (großer Knall).
     if (GARTEN_MODE) {
       for (let i = roster.length - 1; i >= 0; i--) {
         const e = roster[i];
         if (!e || !e.combatant.alive || !e.gift) continue;
         const r = tickGift(e.gift, simDt, gartenCfg);
-        if (r.dmg > 0) {
+        if (r.ernte) {
+          // Slot 3 — Erntebruch: die reife Wunde bricht auf. Großer Knall, tötet i.d.R.
+          damageEnemyTick(e, Math.round(e.gift.potency * gartenCfg.ernteBurst));
+          spawnBurstDisc(e.combatant.x, e.combatant.z, 6);
+          alog.log('ernte', { id: e.id, pot: Math.round(e.gift.potency) });
+          e.gift = undefined; setGiftGlow(e, 0);
+        } else if (r.dmg > 0) {
           damageEnemyTick(e, r.dmg);
-          if (!e.combatant.alive) spawnBurstDisc(e.combatant.x, e.combatant.z, 3); // reif aufgebrochen
         }
-        if (r.expired && e.combatant.alive && e.gift) e.gift = undefined;
+        if (r.expired && e.combatant.alive && e.gift) { e.gift = undefined; setGiftGlow(e, 0); }
+        else if (e.gift && e.combatant.alive) setGiftGlow(e, reifeStufe(e.gift, gartenCfg)); // Slot 2: Glühen nach Reife
       }
     }
 
