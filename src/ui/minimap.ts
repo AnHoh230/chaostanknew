@@ -21,7 +21,7 @@ export function createMinimap(sizePx = 168, rangeWorld = 60): Minimap {
   cv.height = sizePx;
   cv.id = 'minimap';
   cv.style.cssText =
-    'position:fixed;right:12px;bottom:12px;z-index:18;border:1px solid #2a343b;' +
+    'position:fixed;left:12px;bottom:12px;z-index:18;border:1px solid #2a343b;' +
     'border-radius:50%;background:rgba(10,14,12,0.62);';
   document.body.appendChild(cv);
   const ctx = cv.getContext('2d');
