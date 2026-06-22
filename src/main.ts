@@ -508,9 +508,9 @@ function boot(combatStyle: CombatStyle): void {
       turret.rotation.y = yawTo(origin.x, origin.z, e.combatant.x, e.combatant.z) - root.rotation.y;
       spawnLaser(origin.x, origin.z, e.combatant.x, e.combatant.z);
       if (GARTEN_MODE) {
-        // SEUCHE: ein Schuss INFIZIERT (sät Gift mit dem aktuellen Erntefieber als heißerem Start).
-        // Kein Direktschaden — töten tut nur das reifende Gift. „Markieren" = anschießen.
-        e.gift = saeGift(e.gift, gartenCfg, erntefieber);
+        // SEUCHE: ein Schuss INFIZIERT (sät Gift). Kein Direktschaden — töten tut nur das reifende
+        // Gift. Erntefieber wirkt NICHT aufs Säen, nur aufs reife Gift. „Markieren" = anschießen.
+        e.gift = saeGift(e.gift, gartenCfg);
         hits += 1; continue;
       }
       let hitDmg = dmg;
@@ -1190,10 +1190,10 @@ function boot(combatStyle: CombatStyle): void {
         spawned.damage = s.damage; spawned.speed = s.speed; spawned.combatant.lootValue = s.lootValue;
       }
       if (GARTEN_MODE) {
-        // Seuchen-Stage: HP moderat — der Panzer muss die Reifung überleben (Köcheln klein) und dann
-        // REIF am tödlichen Gift sterben (sonst keine Ernte). Mit jeder Welle zäher/schneller/härter,
-        // damit Druck entsteht; das stärker werdende Gift (Erntefieber) hält dagegen.
-        spawned.combatant.maxHp = 50 + gartenWave * 12;
+        // Seuchen-Stage: HP so, dass der Panzer die lange Inkubation überlebt (Köcheln klein) und dann
+        // REIF am tödlichen Gift sterben muss (sonst keine Ernte) — nicht „wie Fliegen". Mit jeder Welle
+        // zäher/schneller/härter, damit Druck entsteht; das stärker werdende Gift hält dagegen.
+        spawned.combatant.maxHp = 70 + gartenWave * 14;
         spawned.combatant.hp = spawned.combatant.maxHp;
         spawned.speed = 4 + gartenWave * 0.7;
         spawned.damage = 12 + gartenWave * 4;
@@ -1339,7 +1339,7 @@ function boot(combatStyle: CombatStyle): void {
             const d = Math.hypot(o.combatant.x - e.combatant.x, o.combatant.z - e.combatant.z);
             if (d < bestD) { bestD = d; best = o; }
           }
-          if (best) best.gift = saeGift(undefined, gartenCfg, erntefieber);
+          if (best) best.gift = saeGift(undefined, gartenCfg);
         }
         // Glühen grün→rot; reif pulsiert (raucht/krank, wartet auf den Tod).
         if (e.gift && e.combatant.alive) {

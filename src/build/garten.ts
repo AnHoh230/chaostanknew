@@ -8,8 +8,8 @@
  * - Reif: erreicht die Potenz die Schwelle, STEHT der Panzer (Tempo 0), raucht, ist sichtbar krank.
  *   Das Gift wird tödlich (reifDmg) und frisst ihn auf — der Spieler schießt ihn NICHT ab.
  * - ZZZ — ERNTE: stirbt ein REIFER Panzer am Gift, bekommt der Spieler „Erntefieber" (Aufrufer).
- *   Jeder Erntefieber-Punkt macht das Gift tödlicher (dmgProFieber) und neue Infektionen heißer,
- *   sodass sie schneller reifen (potProFieber). So trägt sich die Seuche mit der Zeit selbst.
+ *   Jeder Erntefieber-Punkt macht NUR das reife Gift tödlicher (dmgProFieber) — reife sterben
+ *   schneller, also häufiger Ernten. Inkubation/Säen bleiben unberührt. So trägt sich die Seuche.
  */
 export interface GiftState {
   potency: number; // Giftstärke; wächst beim Säen und beim Reifen, bestimmt Glühen/Drosselung/Reife
@@ -25,32 +25,24 @@ export interface GartenConfig {
   slow: number; // 0..1 Tempo-Anteil, der frisch Infizierten genommen wird (steigt mit Reife bis 1 = steht)
   erntePot: number; // Potenz-Schwelle: ab hier reif (rot, steht, stirbt am Gift)
   ansteckRadius: number; // Welt-Radius: ein Infizierter steckt den nächsten Gesunden an (Aufrufer nutzt es)
-  dmgProFieber: number; // +reifDmg pro Erntefieber (Buff macht das Gift tödlicher)
-  potProFieber: number; // +Start-Potenz pro Erntefieber (neue Infektion reift schneller)
+  dmgProFieber: number; // +reifDmg pro Erntefieber (der EINZIGE Buff-Effekt: reifes Gift tödlicher)
 }
 
 export const DEFAULT_GARTEN: GartenConfig = {
   saat: 6,
-  reife: 1.25,
+  reife: 1.15,
   tickEvery: 0.5,
-  tickDmg: 2,
-  reifDmg: 11,
+  tickDmg: 1,
+  reifDmg: 9,
   slow: 0.4,
-  erntePot: 24,
+  erntePot: 36,
   ansteckRadius: 30,
   dmgProFieber: 2,
-  potProFieber: 2,
 };
 
-/**
- * Ein Schuss infiziert/erneuert: Grund-Saat + (Erntefieber × potProFieber) als heißerer Start.
- * Mehr Erntefieber → frische Infektionen starten näher an der Reife → reifen schneller.
- */
-export function saeGift(g: GiftState | undefined, cfg: GartenConfig, fieber = 0): GiftState {
-  return {
-    potency: (g?.potency ?? 0) + cfg.saat + fieber * cfg.potProFieber,
-    tickCd: g?.tickCd ?? cfg.tickEvery,
-  };
+/** Ein Schuss infiziert/erneuert ein Ziel: Grund-Saat drauf. Kein Buff-Bezug (Erntefieber wirkt nur aufs reife Gift). */
+export function saeGift(g: GiftState | undefined, cfg: GartenConfig): GiftState {
+  return { potency: (g?.potency ?? 0) + cfg.saat, tickCd: g?.tickCd ?? cfg.tickEvery };
 }
 
 /** Reif = Potenz hat die Schwelle erreicht (rot, steht, tödliches Gift). */

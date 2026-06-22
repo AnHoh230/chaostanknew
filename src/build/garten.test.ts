@@ -3,7 +3,7 @@ import { saeGift, tickGift, istReif, reifeStufe, giftSlow, DEFAULT_GARTEN, type 
 
 const CFG: GartenConfig = {
   saat: 6, reife: 1.25, tickEvery: 0.5, tickDmg: 2, reifDmg: 11, slow: 0.4, erntePot: 24,
-  ansteckRadius: 30, dmgProFieber: 2, potProFieber: 2,
+  ansteckRadius: 30, dmgProFieber: 2,
 };
 
 describe('saeGift', () => {
@@ -13,8 +13,8 @@ describe('saeGift', () => {
   it('stapelt Potenz beim Nachsäen', () => {
     expect(saeGift(saeGift(undefined, CFG), CFG).potency).toBe(12);
   });
-  it('Erntefieber lässt frische Infektionen heißer starten (schnellere Reife)', () => {
-    expect(saeGift(undefined, CFG, 3).potency).toBe(6 + 3 * CFG.potProFieber); // 12
+  it('hängt NICHT vom Erntefieber ab (Buff wirkt nur aufs reife Gift)', () => {
+    expect(saeGift(undefined, CFG).potency).toBe(CFG.saat); // kein heißerer Start durch Buff
   });
 });
 
