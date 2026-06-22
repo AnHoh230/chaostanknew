@@ -42,7 +42,7 @@ import { createTuningPanel } from './ui/tuningPanel';
 import { TANK_CLASSES } from './game/classes';
 import { computeFlowState, pruneDeathTimes, type FlowState } from './game/flowState';
 import { ROSTER, DEFAULT_ESCALATION, scaleStats } from './enemy/roster';
-import { saeGift, tickGift, istReif, reifeStufe, DEFAULT_GARTEN } from './build/garten';
+import { saeGift, tickGift, istReif, reifeStufe, giftSlow, DEFAULT_GARTEN } from './build/garten';
 import { thresholdForStage, maxStage, type TuningProfile } from './evolution/profiles';
 import { CHANNEL_DISPLAY, type BaseMode, type EvolutionChannelId } from './evolution/channels';
 import { createEvolutionState, gainProgress, tryTriggerEvolution, emergingChannel } from './evolution/evolution';
@@ -172,7 +172,8 @@ function boot(combatStyle: CombatStyle): void {
   let sniperRange = 95, sniperCamBack = 150, sniperCamHeight = 95; // Scope: Reichweite + Kamera weit weg (mehr Gebiet)
   let sniperDmgMul = 2; // Sniper schlägt härter — Faktor auf den normalen Schussschaden
   let sniperTargets: string[] = []; // Ziele, die der nächste Schuss trifft (Auto-Targeting, jeden Frame neu)
-  // GARTEN-BUILD (Z-Z-Z) erster echter Build-Test: Schuss sät reifendes Gift statt Direktschaden.
+  // GARTEN-BUILD (Z-Z-Z) als SEUCHE: Schuss INFIZIERT (sät Gift) statt Direktschaden. Das Gift reift,
+  // drosselt, steckt nahe Panzer an; reif → Panzer steht & stirbt am Gift → Erntefieber-Buff.
   // Fest an für diesen Test; der Spieler IST der Garten (noch kein Kompass/Formung).
   const GARTEN_MODE = true;
   const gartenCfg = { ...DEFAULT_GARTEN };
@@ -181,7 +182,7 @@ function boot(combatStyle: CombatStyle): void {
   const GIFT_GLOW = [new Color3(0.04, 0.13, 0.02), new Color3(0.08, 0.3, 0.03), new Color3(0.45, 0.32, 0), new Color3(0.7, 0.06, 0)];
   const GIFT_GREY = new Color3(0.22, 0.22, 0.26); // geerntet: Rot SOFORT weg, fahles Grau (sterbender Bruchkörper)
   const GARTEN_HARVEST_TIME = 0.4; // s grau-Animation nach der Ernte, dann Tod
-  let dotKraft = 0; // ZZZ-Buff: jede Ernte erhöht ihn dauerhaft → stärkere Grund-Dots
+  let erntefieber = 0; // ZZZ-Buff „Erntefieber": +1 je geerntetem (reif gestorbenem) Panzer — macht Gift tödlicher + neue Infektionen heißer
   const setEnemyGlow = (e: Enemy, col: Color3): void => {
     for (const m of e.view.root.getChildMeshes()) {
       const mat = m.material as StandardMaterial | null;
@@ -507,9 +508,9 @@ function boot(combatStyle: CombatStyle): void {
       turret.rotation.y = yawTo(origin.x, origin.z, e.combatant.x, e.combatant.z) - root.rotation.y;
       spawnLaser(origin.x, origin.z, e.combatant.x, e.combatant.z);
       if (GARTEN_MODE) {
-        // ZZZ ist dot-getrieben: ein Schuss SÄT immer (mit der angesammelten Dot-Kraft). KEIN
-        // Schuss-Zünder — die Ernte läuft ausschließlich über Aura-Berührung (siehe Loop).
-        e.gift = saeGift(e.gift, gartenCfg, dotKraft);
+        // SEUCHE: ein Schuss INFIZIERT (sät Gift mit dem aktuellen Erntefieber als heißerem Start).
+        // Kein Direktschaden — töten tut nur das reifende Gift. „Markieren" = anschießen.
+        e.gift = saeGift(e.gift, gartenCfg, erntefieber);
         hits += 1; continue;
       }
       let hitDmg = dmg;
@@ -708,24 +709,6 @@ function boot(combatStyle: CombatStyle): void {
     mat.alpha = 0.55;
     disc.material = mat;
     fxList.push({ mesh: disc, mat, life: 0.45, max: 0.45, fade: true, alpha0: 0.55 });
-  }
-
-  /** ZZZ-Ernte: ein zackiger schwarzer Tentakel, der vom Ernte-Ort nach einem Panzer greift. */
-  function spawnTentakel(ax: number, az: number, bx: number, bz: number): void {
-    const segs = 5;
-    const dx = bx - ax, dz = bz - az, l = Math.hypot(dx, dz) || 1;
-    const nx = -dz / l, nz = dx / l; // senkrecht zur Greifrichtung (für die Zacken)
-    const pts: Vector3[] = [];
-    for (let i = 0; i <= segs; i++) {
-      const t = i / segs;
-      // pseudo-zufälliger Seiten-Zacken (deterministisch per Ort), an den Enden 0 → greift sauber an
-      const jag = i > 0 && i < segs ? Math.sin((ax + bz) * 9.7 + i * 2.1) * 2.4 : 0;
-      pts.push(new Vector3(ax + dx * t + nx * jag, 0.7 + Math.sin(i * 1.3) * 0.35, az + dz * t + nz * jag));
-    }
-    const line = MeshBuilder.CreateLines('fx_tentakel', { points: pts }, scene);
-    line.color = new Color3(0.06, 0.0, 0.09); // fast schwarz, ein Hauch Seuchen-Violett
-    line.isPickable = false;
-    fxList.push({ mesh: line as unknown as Mesh, mat: null as unknown as StandardMaterial, life: 0.5, max: 0.5, fade: false, alpha0: 1 });
   }
 
   /** Effekt-Meshes altern lassen (Fade) und am Ende entsorgen. */
@@ -1207,9 +1190,10 @@ function boot(combatStyle: CombatStyle): void {
         spawned.damage = s.damage; spawned.speed = s.speed; spawned.combatant.lootValue = s.lootValue;
       }
       if (GARTEN_MODE) {
-        // Garten-Stage: zäh + langsam (Gift hat Zeit zu reifen), und mit jeder Welle stärker —
-        // zäher, schneller, härter, damit Druck entsteht statt ewig dieselben harmlosen 7.
-        spawned.combatant.maxHp = 160 + gartenWave * 30;
+        // Seuchen-Stage: HP moderat — der Panzer muss die Reifung überleben (Köcheln klein) und dann
+        // REIF am tödlichen Gift sterben (sonst keine Ernte). Mit jeder Welle zäher/schneller/härter,
+        // damit Druck entsteht; das stärker werdende Gift (Erntefieber) hält dagegen.
+        spawned.combatant.maxHp = 50 + gartenWave * 12;
         spawned.combatant.hp = spawned.combatant.maxHp;
         spawned.speed = 4 + gartenWave * 0.7;
         spawned.damage = 12 + gartenWave * 4;
@@ -1262,8 +1246,8 @@ function boot(combatStyle: CombatStyle): void {
       if (distToPlayer > out.standoff) {
         const tdx = out.tx - er.position.x, tdz = out.tz - er.position.z;
         const tl = Math.hypot(tdx, tdz) || 1;
-        const giftSlow = e.gift ? (1 - gartenCfg.slow) : 1; // Garten: vergiftete Gegner gedrosselt (Bedrohung runter)
-        const step = e.speed * mods.speedMul * giftSlow * simDt; // Tempo type-/stufen-getrieben (out.speedMul = Muster, nicht Tempo)
+        const slowFactor = e.gift ? 1 - giftSlow(e.gift, gartenCfg) : 1; // Seuche: reifendes Gift drosselt; reif → 0 (steht)
+        const step = e.speed * mods.speedMul * slowFactor * simDt; // Tempo type-/stufen-getrieben (out.speedMul = Muster, nicht Tempo)
         er.position.x += (tdx / tl) * step;
         er.position.z += (tdz / tl) * step;
         er.rotation.y = Math.atan2(tdx, tdz);
@@ -1314,8 +1298,8 @@ function boot(combatStyle: CombatStyle): void {
       if (e.combatant.alive && e.dot && e.dot.left <= 0) e.dot = undefined;
     }
 
-    // GARTEN-Build: säen (fireVolley) → REIFEN (köcheln + glühen, reif=rot wartet) → ERNTEN (Schuss
-    // auf rot, fireVolley). Hier: das Köcheln/Reifen + die grau-Animation der geernteten Gegner.
+    // SEUCHE (Z-Z-Z): INFIZIEREN (fireVolley) → REIFEN (köcheln + drosseln + ANSTECKEN) → reif STEHT
+    // und stirbt am Gift → ERNTE (Erntefieber-Buff). Hier: Reifen, Ansteckung, Gift-Tod, grau-Animation.
     if (GARTEN_MODE) {
       for (let i = roster.length - 1; i >= 0; i--) {
         const e = roster[i];
@@ -1328,42 +1312,40 @@ function boot(combatStyle: CombatStyle): void {
           continue;
         }
         if (!e.combatant.alive || !e.gift) continue;
-        const r = tickGift(e.gift, simDt, gartenCfg); // köchelt + reift; reif → wartet (kein Schaden)
-        if (r.dmg > 0) damageEnemyTick(e, r.dmg);
-        if (e.gift && e.combatant.alive) setGiftGlow(e, reifeStufe(e.gift, gartenCfg)); // grün→rot
-      }
-    }
-
-    // ZZZ — Aura-Kaskade: berühren sich zwei reife Auren, zündet die Ernte. Sie greift RIESIG um sich
-    // (Tentakeln = Schicht 2): Panzer mit Dot → Ernte-Status (reif), ohne Dot → frischer (gebuffter)
-    // Dot. Die neu-reifen → neue Auren → nächste Ernte: die Kaskade rollt übers Feld.
-    if (GARTEN_MODE) {
-      const reif = roster.filter((e) => e.combatant.alive && e.harvested == null && e.gift && istReif(e.gift, gartenCfg));
-      for (let i = 0; i < reif.length; i++) {
-        const a = reif[i]!;
-        if (!a.combatant.alive) continue;
-        for (let j = i + 1; j < reif.length; j++) {
-          const b = reif[j]!;
-          if (!b.combatant.alive) continue;
-          if (Math.hypot(a.combatant.x - b.combatant.x, a.combatant.z - b.combatant.z) > gartenCfg.auraRadius * 2) continue;
-          const cx = (a.combatant.x + b.combatant.x) / 2, cz = (a.combatant.z + b.combatant.z) / 2;
-          for (const e of [a, b]) { // die Auslöser sterben (grau-Animation), Tentakel greift sie
+        const warReif = istReif(e.gift, gartenCfg); // schon reif → dieser Tick ist tödliches Gift
+        const r = tickGift(e.gift, simDt, gartenCfg, erntefieber); // köchelt+reift, oder reif→tödlich
+        if (r.dmg > 0) {
+          e.combatant.hp -= r.dmg;
+          metrics.onHitDealt(r.dmg);
+          if (e.combatant.hp <= 0) {
             e.combatant.hp = 0; e.combatant.alive = false;
-            e.harvested = GARTEN_HARVEST_TIME; e.gift = undefined; setEnemyGlow(e, GIFT_GREY);
-            spawnTentakel(cx, cz, e.combatant.x, e.combatant.z);
+            if (warReif) {
+              // ERNTESIEG: ein REIFER Panzer ist am Gift gestorben → dauerhafter Erntefieber-Buff.
+              erntefieber += 1;
+              e.harvested = GARTEN_HARVEST_TIME; e.gift = undefined; setEnemyGlow(e, GIFT_GREY);
+              showToast(`🦠 ERNTESIEG — Erntefieber +${erntefieber}`);
+              alog.log('ernte', { fieber: erntefieber, t: +runClock.toFixed(1) });
+            } else {
+              killEnemy(e, 'player'); // mitten in der Reifung gestorben → normaler Tod, kein Buff
+            }
+            continue;
           }
-          dotKraft += gartenCfg.dotKraftProErnte; // Spieler wird dauerhaft stärker
-          let gegriffen = 0;
-          for (const o of roster) { // Tentakeln greifen riesig nach allen Panzern im Radius
-            if (!o.combatant.alive || o.harvested != null || o === a || o === b) continue;
-            if (Math.hypot(o.combatant.x - cx, o.combatant.z - cz) > gartenCfg.ausbreitRadius) continue;
-            if (o.gift) o.gift.potency = gartenCfg.erntePot; // hat Dot → Ernte-Status (reif)
-            else o.gift = saeGift(undefined, gartenCfg, dotKraft); // kein Dot → frischer gebuffter Dot
-            spawnTentakel(cx, cz, o.combatant.x, o.combatant.z);
-            gegriffen++;
+        }
+        // ANSTECKUNG: bei jedem Tick steckt der Infizierte den NÄCHSTEN Gesunden in Reichweite an.
+        if (r.ticked) {
+          let best: Enemy | null = null, bestD = gartenCfg.ansteckRadius;
+          for (const o of roster) {
+            if (o === e || !o.combatant.alive || o.gift || o.harvested != null) continue;
+            const d = Math.hypot(o.combatant.x - e.combatant.x, o.combatant.z - e.combatant.z);
+            if (d < bestD) { bestD = d; best = o; }
           }
-          alog.log('ernte', { kraft: dotKraft, gegriffen, t: +runClock.toFixed(1) });
-          break; // a ist geerntet → nächstes i
+          if (best) best.gift = saeGift(undefined, gartenCfg, erntefieber);
+        }
+        // Glühen grün→rot; reif pulsiert (raucht/krank, wartet auf den Tod).
+        if (e.gift && e.combatant.alive) {
+          const st = reifeStufe(e.gift, gartenCfg);
+          if (st >= 3) setEnemyGlow(e, GIFT_GLOW[3]!.scale(0.55 + 0.45 * Math.sin(runClock * 7)));
+          else setGiftGlow(e, st);
         }
       }
     }
@@ -1507,7 +1489,7 @@ function boot(combatStyle: CombatStyle): void {
             });
           } else sniperCrosshair.style.display = 'none';
           for (const m of markPool) m.style.display = 'none'; // keine Auto-Ziel-Ringe im Garten
-          if (scopeBadge) scopeBadge.textContent = `🔭 GARTEN · säen — Dot-Kraft +${dotKraft}`;
+          if (scopeBadge) scopeBadge.textContent = `🦠 SEUCHE · infizieren — Erntefieber +${erntefieber}`;
         } else {
           const coreStage = evo.unlockedStagesByChannel.sniper_core;
           sniperTargets = fireCd <= 0 ? pickTargets(maxMarks(), coreStage, px, pz, sniperRange) : [];

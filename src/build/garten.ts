@@ -1,53 +1,59 @@
 /**
- * Garten-Build (Z-Z-Z) — reine Reife-Logik, kein Engine-Bezug (TDD).
+ * Garten-Build (Z-Z-Z) — als KRANKHEIT. Reine Gift-Logik, kein Engine-Bezug (TDD).
  *
- * Der Loop: SÄEN → REIFEN lassen → ERNTEN.
- * - SÄEN: ein Schuss erhöht die Potenz. Ein einzelner Saat reift von selbst bis „reif" — kein
- *   Nachhämmern nötig (Nachsäen ist optional, treibt nur die Potenz für zähe Gegner höher).
- * - REIFEN: jeder Tick köchelt einen kleinen DoT (tötet allein nicht) und lässt die Potenz reifen
- *   (×reife). Erreicht sie die Schwelle, ist das Gift REIF (rot) — Reifen + Köcheln stoppen, es
- *   wartet (kein Verfall).
- * - ERNTEN: ein Schuss auf ein reifes Ziel löst den Erntebruch aus (Aufrufer) — der tödliche Knall.
+ * Das Bild: eine Seuche, die sich über das Feld frisst.
+ * - Z  — INFEKTION: ein Schuss sät Gift. Der Panzer wird sofort langsamer (Verlangsamung).
+ * - ZZ — ANSTECKUNG + REIFUNG: das Gift reift pro Tick (Potenz ×reife) und drosselt dabei immer
+ *   stärker. Infizierte stecken nahe Gesunde an (Ansteckung — räumlich, das macht der Aufrufer).
+ * - Reif: erreicht die Potenz die Schwelle, STEHT der Panzer (Tempo 0), raucht, ist sichtbar krank.
+ *   Das Gift wird tödlich (reifDmg) und frisst ihn auf — der Spieler schießt ihn NICHT ab.
+ * - ZZZ — ERNTE: stirbt ein REIFER Panzer am Gift, bekommt der Spieler „Erntefieber" (Aufrufer).
+ *   Jeder Erntefieber-Punkt macht das Gift tödlicher (dmgProFieber) und neue Infektionen heißer,
+ *   sodass sie schneller reifen (potProFieber). So trägt sich die Seuche mit der Zeit selbst.
  */
 export interface GiftState {
-  potency: number; // Giftstärke; wächst beim Säen und beim Reifen, bestimmt Glühen + Erntebruch
+  potency: number; // Giftstärke; wächst beim Säen und beim Reifen, bestimmt Glühen/Drosselung/Reife
   tickCd: number; // s bis zum nächsten Tick
 }
 
 export interface GartenConfig {
-  saat: number; // Grund-Potenz-Zuwachs pro Schuss
-  reife: number; // Potenz-Faktor pro Tick (>1 = reift)
+  saat: number; // Start-Potenz pro Schuss (Infektion)
+  reife: number; // Potenz-Faktor pro Tick (>1 = reift Richtung Schwelle)
   tickEvery: number; // s zwischen Ticks
-  tickDmg: number; // kleiner Köchel-Schaden pro Tick (DoT, tötet allein nicht)
-  slow: number; // 0..1 Tempo-Drosselung vergifteter Gegner
-  erntePot: number; // Potenz-Schwelle: ab hier ist das Gift reif (rot, Aura aktiv)
-  // ZZZ — Aura-Kaskade. RIESIG im Welt-Maßstab (Feld ist 130+), sonst gilt nie ein Panzer als nah:
-  auraRadius: number; // Welt-Radius der Reife-Aura; berühren sich zwei → Ernte
-  ausbreitRadius: number; // riesiger Radius, in dem die Ernte (Tentakeln) nach Panzern greift
-  dotKraftProErnte: number; // additive Dot-Stärke pro Ernte (bleibt — Spieler wird stärker)
+  tickDmg: number; // kleiner Köchel-Schaden WÄHREND der Reifung (überlebbar — der Panzer soll reif werden)
+  reifDmg: number; // tödlicher Gift-Schaden, sobald reif (frisst den stehenden Panzer auf)
+  slow: number; // 0..1 Tempo-Anteil, der frisch Infizierten genommen wird (steigt mit Reife bis 1 = steht)
+  erntePot: number; // Potenz-Schwelle: ab hier reif (rot, steht, stirbt am Gift)
+  ansteckRadius: number; // Welt-Radius: ein Infizierter steckt den nächsten Gesunden an (Aufrufer nutzt es)
+  dmgProFieber: number; // +reifDmg pro Erntefieber (Buff macht das Gift tödlicher)
+  potProFieber: number; // +Start-Potenz pro Erntefieber (neue Infektion reift schneller)
 }
 
 export const DEFAULT_GARTEN: GartenConfig = {
-  saat: 4,
-  reife: 1.2,
+  saat: 6,
+  reife: 1.25,
   tickEvery: 0.5,
-  tickDmg: 3,
-  slow: 0.5,
+  tickDmg: 2,
+  reifDmg: 11,
+  slow: 0.4,
   erntePot: 24,
-  auraRadius: 28,
-  ausbreitRadius: 80,
-  dotKraftProErnte: 1,
+  ansteckRadius: 30,
+  dmgProFieber: 2,
+  potProFieber: 2,
 };
 
 /**
- * Ein Schuss sät/erneuert Gift: Grund-Potenz + die angesammelte Dot-Kraft (Buff) dazu. Kein Verfall.
- * `dotKraft` hebt frische UND nachgesäte Dots auf die aktuelle Stärke des Spielers an.
+ * Ein Schuss infiziert/erneuert: Grund-Saat + (Erntefieber × potProFieber) als heißerer Start.
+ * Mehr Erntefieber → frische Infektionen starten näher an der Reife → reifen schneller.
  */
-export function saeGift(g: GiftState | undefined, cfg: GartenConfig, dotKraft = 0): GiftState {
-  return { potency: (g?.potency ?? 0) + cfg.saat + dotKraft, tickCd: g?.tickCd ?? cfg.tickEvery };
+export function saeGift(g: GiftState | undefined, cfg: GartenConfig, fieber = 0): GiftState {
+  return {
+    potency: (g?.potency ?? 0) + cfg.saat + fieber * cfg.potProFieber,
+    tickCd: g?.tickCd ?? cfg.tickEvery,
+  };
 }
 
-/** Reif = Potenz hat die Ernteschwelle erreicht (rot, bereit für den Erntebruch). */
+/** Reif = Potenz hat die Schwelle erreicht (rot, steht, tödliches Gift). */
 export function istReif(g: GiftState, cfg: GartenConfig): boolean {
   return g.potency >= cfg.erntePot;
 }
@@ -62,14 +68,31 @@ export function reifeStufe(g: GiftState, cfg: GartenConfig): 0 | 1 | 2 | 3 {
 }
 
 /**
- * Gift um dt weiterrechnen (mutiert g). Liefert den fälligen Köchel-Schaden (0 = noch kein Tick
- * oder bereits reif). Reifes Gift köchelt/reift NICHT mehr — es wartet auf die Ernte (Schuss).
+ * Anteil 0..1 des Tempos, der dem vergifteten Gegner GENOMMEN wird. Frisch = cfg.slow, und es steigt
+ * mit der Reife bis 1 (reif → steht). Der Aufrufer rechnet: effektivesTempo = basis × (1 − giftSlow).
  */
-export function tickGift(g: GiftState, dt: number, cfg: GartenConfig): { dmg: number } {
+export function giftSlow(g: GiftState, cfg: GartenConfig): number {
+  const f = Math.min(1, g.potency / cfg.erntePot);
+  return cfg.slow + (1 - cfg.slow) * f;
+}
+
+/**
+ * Gift um dt weiterrechnen (mutiert g). Liefert den fälligen Tick-Schaden und ob ein Tick fiel
+ * (für die Ansteckung). Während der Reifung köchelt es klein (tickDmg) und reift (×reife); sobald
+ * reif, hört das Reifen auf und das Gift wird tödlich (reifDmg + Erntefieber-Bonus) — es tötet.
+ */
+export function tickGift(
+  g: GiftState,
+  dt: number,
+  cfg: GartenConfig,
+  fieber = 0,
+): { dmg: number; ticked: boolean } {
   g.tickCd -= dt;
-  if (g.tickCd > 0) return { dmg: 0 };
+  if (g.tickCd > 0) return { dmg: 0, ticked: false };
   g.tickCd += cfg.tickEvery;
-  if (g.potency >= cfg.erntePot) return { dmg: 0 }; // reif → wartet, kein Schaden/Reifen mehr
-  g.potency *= cfg.reife; // reift weiter Richtung Ernteschwelle
-  return { dmg: cfg.tickDmg }; // köchelt (kleiner DoT)
+  if (g.potency >= cfg.erntePot) {
+    return { dmg: cfg.reifDmg + fieber * cfg.dmgProFieber, ticked: true }; // reif → tödliches Gift
+  }
+  g.potency *= cfg.reife; // reift weiter Richtung Schwelle
+  return { dmg: cfg.tickDmg, ticked: true }; // köchelt klein (überlebbar)
 }
