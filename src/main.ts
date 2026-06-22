@@ -273,6 +273,8 @@ function boot(combatStyle: CombatStyle): void {
     flankerOrbit: tunables.add({ label: 'Flanker-Orbit', category: 'Gegner', value: 0.85, min: 0.3, max: 1.5, step: 0.05 }),
     blockerLead: tunables.add({ label: 'Blocker-Vorhalt', category: 'Gegner', value: 14, min: 0, max: 40, step: 1 }),
   };
+  // Racer-eigener Schadensfaktor (auf den aus Ausrüstung/Level abgeleiteten Schuss-Schaden).
+  const racerDmgMul = tunables.add({ label: 'Racer-Schaden ×', category: 'Gegner', value: 1, min: 0.2, max: 4, step: 0.1 });
   // Fix A: wie stark Gegner das Spielerziel vorhalten (0 = auf Ist-Position, 1 = volle Lead-Korrektur).
   const enemyLeadGet = tunables.add({ label: 'Vorhalt-Stärke', category: 'Gegner', value: 0.8, min: 0, max: 1.5, step: 0.05 });
   // — Gegner-Plan: Heat-Lage → Typ-MIX (welche Archetypen kontern deinen Stil). Die ZAHL ist
@@ -1253,7 +1255,8 @@ function boot(combatStyle: CombatStyle): void {
         const tLead = (distToPlayer / PROJECTILE_SPEED) * enemyLeadGet();
         const aimX = px + playerVelX * tLead;
         const aimZ = pz + playerVelZ * tLead;
-        enemyFire(er.position.x, er.position.z, aimX, aimZ, 'enemy', e.damage * mods.damageMul, e.typeId);
+        const typeDmgMul = e.typeId === 'racer' ? racerDmgMul() : 1; // Racer-eigener Schadensfaktor
+        enemyFire(er.position.x, er.position.z, aimX, aimZ, 'enemy', e.damage * mods.damageMul * typeDmgMul, e.typeId);
         e.fireCd = ENEMY_FIRE_COOLDOWN;
       }
       e.combatant.x = er.position.x;
