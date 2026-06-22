@@ -42,7 +42,10 @@ import { createTuningPanel } from './ui/tuningPanel';
 import { TANK_CLASSES } from './game/classes';
 import { computeFlowState, pruneDeathTimes, type FlowState } from './game/flowState';
 import { ROSTER, DEFAULT_ESCALATION, scaleStats } from './enemy/roster';
-import type { TuningProfile } from './evolution/profiles';
+import { thresholdForStage, maxStage, type TuningProfile } from './evolution/profiles';
+import { CHANNEL_DISPLAY, type BaseMode } from './evolution/channels';
+import { createEvolutionState, applyImpulse, tryTriggerEvolution, emergingChannel } from './evolution/evolution';
+import { createCompassState, weightsFromPointer, smoothToward } from './evolution/compass';
 import { createProgression } from './progression/progression';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
@@ -228,6 +231,45 @@ function boot(combatStyle: CombatStyle): void {
   let playerSpeedMul = 1; // Live-Regler auf die eigene Fahrgeschwindigkeit
   const progression = createProgression(); // Level/XP/MK (P2)
 
+  // — Schicht 2: Kompass (Absicht) + Evolution (Fortschritt je Kanal) —
+  const baseMode: BaseMode = combatStyle; // Grundmodus = gewählter Kampfstil
+  const evo = createEvolutionState(baseMode);
+  const compass = createCompassState();
+  let compassOpen = false; // C gehalten → Kompass steuerbar
+  const INTENT_SMOOTHING = 6; // s Glättungsfenster
+  // Profil-Werte (LOOP_TEST bis der Loop trägt): Mindestzeiten fürs Evolutions-Fenster (Debug-Werte).
+  const evoMinFirst = 20, evoMinBetween = 25;
+  // C halten → Kompass steuerbar (Maus im Bildschirm-Dreieck: oben Kern, unten-links Raum, -rechts Zustand).
+  window.addEventListener('keydown', (e) => { if (e.key.toLowerCase() === 'c') compassOpen = true; });
+  window.addEventListener('keyup', (e) => { if (e.key.toLowerCase() === 'c') compassOpen = false; });
+  // Einen Kampf-Impuls in die Evolution geben (nur im Flow; Kompass lenkt den Zielkanal).
+  const gainImpulse = (points: number): void =>
+    applyImpulse(evo, points, { weights: compass.smoothed, profile: currentTuningProfile, flow: flowState === 'flow' ? 1 : 0, repetition: 1 });
+  // Frontformung-HUD (unten rechts): entstehende Form + Stufe/Fortschritt + Kompassanteile.
+  const frontHud = document.createElement('div');
+  frontHud.style.cssText =
+    'position:fixed;right:12px;bottom:12px;z-index:40;width:212px;background:#10151cdd;border:1px solid #2a3a4a;' +
+    'border-radius:8px;padding:9px 11px;font:600 11px system-ui,sans-serif;color:#cfe3ee;pointer-events:none;';
+  document.body.appendChild(frontHud);
+  let frontHudCd = 0;
+  const updateFrontHud = (): void => {
+    const ch = emergingChannel(evo, compass.smoothed);
+    const stage = evo.unlockedStagesByChannel[ch];
+    const thrNext = thresholdForStage(currentTuningProfile, stage + 1);
+    const prevThr = stage >= 1 ? thresholdForStage(currentTuningProfile, stage) ?? 0 : 0;
+    const prog = evo.progressByChannel[ch];
+    const pct = thrNext != null ? Math.max(0, Math.min(1, (prog - prevThr) / (thrNext - prevThr))) : 1;
+    const n = Math.round(pct * 10);
+    const bar = '█'.repeat(n) + '░'.repeat(10 - n);
+    const w = compass.smoothed;
+    frontHud.innerHTML =
+      `<div style="opacity:.55;letter-spacing:1px;font-size:10px">FRONTFORMUNG${compassOpen ? ' · STEUERN' : ' · [C]'}</div>` +
+      `<div style="margin-top:3px;font-size:13px;color:#9be36b">${CHANNEL_DISPLAY[ch].displayName}</div>` +
+      `<div style="margin-top:2px;opacity:.85">Stufe ${stage}/${maxStage(currentTuningProfile)}` +
+      (thrNext != null ? ` &nbsp;${bar} ${Math.round(pct * 100)}%` : ' &nbsp;max') + `</div>` +
+      `<div style="margin-top:5px;opacity:.65;font-size:10px">Kern ${Math.round(w.sniper * 100)} · Raum ${Math.round(w.aoe * 100)} · Zustand ${Math.round(w.dot * 100)}</div>`;
+  };
+
   // Run-Action-Log: pro Run nach logs/run-<NNN>.log (Schüsse, Bewegung, Shop …).
   const alog = createActionLog();
   alog.log('class', { id: cls.id });
@@ -390,6 +432,7 @@ function boot(combatStyle: CombatStyle): void {
       damageEnemyTick(tgt, dmg); // garantierter Treffer (umgeht Ausweichen)
       metrics.onShot();
       lastFireClock = runClock;
+      gainImpulse(tgt.typeId === 'bunker' ? 6 : 4); // Sniper-Treffer = Evolutions-Fortschritt (gefährliches Ziel mehr)
       alog.log('snipe', { target: tgt.id, dmg });
       bus.emit('tank.fired', { tankId: tank.id });
       return;
@@ -880,6 +923,21 @@ function boot(combatStyle: CombatStyle): void {
     if (deathTimes.length) { const kept = pruneDeathTimes(deathTimes, runClock); if (kept.length !== deathTimes.length) deathTimes.splice(0, deathTimes.length, ...kept); }
     flowState = computeFlowState({ alive: playerCombatant.alive, now: runClock, lastRespawnAt, deathTimes });
     if (flowState !== prevFlowState) { alog.log('flow', { from: prevFlowState, to: flowState, t: +runClock.toFixed(1) }); prevFlowState = flowState; }
+
+    // Schicht 2: Kompass glätten (C steuert) + vorgemerkte Evolution im sicheren Fenster freischalten.
+    if (compassOpen) compass.raw = weightsFromPointer(mouseX / window.innerWidth, mouseY / window.innerHeight);
+    compass.smoothed = smoothToward(compass.smoothed, compass.raw, simDt, INTENT_SMOOTHING);
+    const evoUnlock = tryTriggerEvolution(evo, {
+      now: runClock, flow: flowState,
+      minSecondsBeforeFirst: evoMinFirst, minSecondsBetween: evoMinBetween,
+      dominantChannel: emergingChannel(evo, compass.smoothed),
+    });
+    if (evoUnlock) {
+      showToast(`NEUE FORMUNG · ${CHANNEL_DISPLAY[evoUnlock.channelId].displayName} ${evoUnlock.stage}`);
+      alog.log('evolution', { ch: evoUnlock.channelId, stage: evoUnlock.stage, t: +runClock.toFixed(1) });
+    }
+    frontHudCd -= simDt;
+    if (frontHudCd <= 0) { frontHudCd = 0.1; updateFrontHud(); }
 
     // Stil messen + Frontlage-Puls (P3). Echtes Tempo aus dem Positionsdelta.
     if (!prevPosInit) { prevPx = px; prevPz = pz; prevPosInit = true; }

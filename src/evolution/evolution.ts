@@ -74,6 +74,18 @@ export function applyImpulse(state: EvolutionState, basePoints: number, ctx: Imp
   }
 }
 
+/** Die „entstehende Form": der Kanal des Grundmodus, auf den der Kompass aktuell am stärksten zeigt. */
+export function emergingChannel(state: EvolutionState, weights: CompassWeights): EvolutionChannelId {
+  const chans = channelsForBaseMode(state.baseMode);
+  let best = chans[0]!;
+  let bestW = -1;
+  for (const ch of chans) {
+    const w = channelWeight(ch, weights);
+    if (w > bestW) { bestW = w; best = ch; }
+  }
+  return best;
+}
+
 export interface SafeWindow {
   now: number;
   flow: string; // 'flow' | 'respawn' | 'broken' — Evolution nur bei 'flow'
