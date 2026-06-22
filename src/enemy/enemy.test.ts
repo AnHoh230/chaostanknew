@@ -19,18 +19,17 @@ function specAtLevel(level: number): EnemySpec {
 }
 
 describe('createEnemyEntity — schlanker Combatant', () => {
-  it('spawnt mit vollem Basis-Set, fester Fraktion und kampfbereit', () => {
+  it('spawnt mit fester Fraktion und kampfbereit (Stats aus dem Level)', () => {
     const e = createEnemyEntity(makeScene(), specAtLevel(3), 1, () => 0.5);
-    expect(e.equipment.length).toBe(5); // ein Teil je Slot → Drops über alle Slots
-    expect(new Set(e.equipment.map((i) => i.slot)).size).toBe(5);
     expect(e.combatant.team).toBe('enemy'); // alle Gegner = eine Fraktion
     expect(e.combatant.alive).toBe(true);
     expect(e.level).toBe(3);
     expect(e.damage).toBeGreaterThan(0);
+    expect(e.combatant.maxHp).toBeGreaterThan(0);
     expect(e.fireCd).toBe(0);
   });
 
-  it('höhere MK = zäher (Stats aus dem vollen Set, nicht aus dem Level direkt)', () => {
+  it('höheres Level = zäher (Stats direkt aus dem Level)', () => {
     const lo = createEnemyEntity(makeScene(), specAtLevel(1), 1, () => 0.5);
     const hi = createEnemyEntity(makeScene(), specAtLevel(9), 1, () => 0.5);
     expect(hi.combatant.maxHp).toBeGreaterThan(lo.combatant.maxHp);

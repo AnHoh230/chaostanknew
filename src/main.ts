@@ -1,6 +1,5 @@
 import { Engine, Scene, HemisphericLight, Vector3, Color4, Matrix, MeshBuilder, StandardMaterial, Color3 } from '@babylonjs/core';
 import type { Mesh } from '@babylonjs/core';
-import { nearestInRange, idsWithinRadius } from './combat/areaTargeting';
 import { yawTo, rayGroundY0 } from './input/aimMath';
 import { createClock } from './core/clock';
 import { createBus } from './core/events';
@@ -20,9 +19,8 @@ import { createDoctrineDirector } from './doctrine/doctrineDirector';
 import { DOCTRINES, HEAT_STRONG, HEAT_MID, HEAT_LIGHT, DECAY, BANDS } from './doctrine/doctrineConfig';
 import { planSwarm, type SwarmDirection } from './doctrine/spawnPlan';
 import { emptyProfile, STATIONARY_SPEED, type PlayerStyleProfile } from './doctrine/styleProfile';
-import { applyEnemyStats, type Enemy } from './enemy/enemy';
-import { pickDrop, enemyMk } from './enemy/equipment';
-import { stepAutoTurret, type AutoTurretState } from './combat/autoTurret';
+import { type Enemy } from './enemy/enemy';
+import { enemyMk } from './enemy/enemyStats';
 import { createSpawner } from './enemy/spawner';
 import { behaviorTarget } from './enemy/enemyBehavior';
 import { ENEMY_TYPES } from './enemy/enemyTypes';
@@ -31,29 +29,17 @@ import { createMinimap } from './ui/minimap';
 import { createEnemyBars } from './ui/enemyBars';
 import { createSwarmHud } from './ui/swarmHud';
 import { createHeatHud } from './ui/heatHud';
-import { createOwnInventory, type OwnInvItem } from './ui/ownInventory';
-import { createLootLabels } from './ui/lootLabels';
 import { createOverviewMap, type MapBlip } from './ui/overviewMap';
 import { createInspectCard } from './ui/inspectCard';
 import { buildEnemyInfo } from './inspect/enemyInfo';
 import { nearestToPointer, type ScreenBlip } from './inspect/enemyPick';
 import { createBuffStack } from './combat/buffs';
-import { createBelt } from './player/belt';
 import { createBuffHud } from './ui/buffHud';
-import { BOOSTERS, type BoosterDef } from './shop/boosters';
 import { createActionLog } from './debug/actionLog';
 import { createRunMetrics } from './debug/runMetrics';
 import { createTunables } from './ui/tunables';
 import { createTuningPanel } from './ui/tuningPanel';
 import { TANK_CLASSES } from './game/classes';
-import { createPickupField } from './loot/pickups';
-import { createShopField } from './world/shopTiles';
-import { CATALOG, SLOT_SOCKET, catalogItem, cloneItem, mostExpensiveItemPrice, type ShopItem, type Slot } from './shop/catalog';
-import { createShop } from './shop/shop';
-import { sellValue } from './shop/buyLogic';
-
-const SLOTS: Slot[] = ['waffe', 'wanne', 'turm', 'raeder', 'ruestung'];
-import { createLoadout } from './player/loadout';
 import { createProgression } from './progression/progression';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
@@ -213,12 +199,11 @@ function boot(combatStyle: CombatStyle): void {
   };
   const liveCombatants = (): Combatant[] => [playerCombatant, ...roster.map((e) => e.combatant)];
 
-  // Loadout (P4): ein Item je Slot, Stats = Klassen-Basis + bestückte Slots.
-  const loadout = createLoadout({ damage: cls.damage, maxHp: cls.maxHp, speed: cls.speed, armor: 0 });
-  let geld = mostExpensiveItemPrice(1); // Startbudget = teuerstes MK1-Item (symmetrisch zum Gegner)
-  let playerSpeed = cls.speed; // aus loadout.stats() abgeleitet (Räder) × Buffs × Regler
+  // Spieler-Werte: fest aus der Klassen-Basis (kein Equipment mehr). armor/dodge bleiben 0,
+  // die Live-Regler (Buffs/Tempo-Mul) wirken zusätzlich darauf.
+  const playerStats = () => ({ damage: cls.damage, maxHp: cls.maxHp, speed: cls.speed, armor: 0, dodge: 0 });
+  let playerSpeed = cls.speed; // Klassen-Basis × Buffs × Regler
   let playerSpeedMul = 1; // Live-Regler auf die eigene Fahrgeschwindigkeit
-  let playerTurretCd = 0; // Cooldown der Spieler-Sekundärwaffe (Auto-Turret)
   const progression = createProgression(); // Level/XP/MK (P2)
 
   // Run-Action-Log: pro Run nach logs/run-<NNN>.log (Schüsse, Bewegung, Shop …).
@@ -228,22 +213,14 @@ function boot(combatStyle: CombatStyle): void {
   const metrics = createRunMetrics();
   const snapIntervalGet = tunables.add({ label: 'Diagnose-Intervall s', category: 'Debug', value: 5, min: 1, max: 30, step: 1 });
 
-  // SH2: Aktiv-Buffs + Sofort-Booster (Gürtel/Hotkeys 1-3) + Turm-Slew.
+  // SH2: Aktiv-Buffs (Debuffs auf Gegner) + Turm-Slew.
   const playerBuffs = createBuffStack();
-  const belt = createBelt<BoosterDef>(3);
   const buffHud = createBuffHud();
-  let overpressureShots = 0; // Überdruck-Munition: nächste N Schüsse stärker
-  let overpressureMul = 1;
   let fireCd = 0; // Spieler-Feuer-Cooldown (Kühlmittel senkt ihn über fireRateMul)
   const PLAYER_FIRE_BASE = 0.28; // s zwischen Schüssen bei fireRate 1
   const BASE_TURRET_SLEW = 22; // rad/s Turm-Dreh-Tempo (Turmservo verdoppelt; Schüsse bleiben pixelgenau)
-  let spawnGraceCd = 5; // 5s nach Erscheinen: unverwundbar + Shop überall öffenbar (Spawn & Respawn)
+  let spawnGraceCd = 5; // 5s nach Erscheinen: unverwundbar (Spawn & Respawn)
   const fxList: { mesh: Mesh; mat: StandardMaterial; life: number; max: number; fade: boolean; alpha0: number }[] = []; // kurzlebige Effekt-Meshes (Laser, Rauch)
-  let ownInvRefreshCd = 0; // drosselt das Live-Refresh des Inventar-Panels
-
-  const pickups = createPickupField(scene);
-  const PICKUP_REACH = TANK_RADIUS + 0.8;
-  const lastDrops: string[] = []; // Verifikation: tatsächlich gedroppte Item-IDs
 
   // — Reaktive Schwarm-Welt (R1): Stil messen → Heat pro Richtung je Frontlage-Puls.
   // Heat bestimmt, welche Gegner-Typen + wie viele spawnen. Asymmetrischer Decay:
@@ -295,10 +272,6 @@ function boot(combatStyle: CombatStyle): void {
   let pulseLen = 10; // Frontlage-Puls (s): so kurz, dass der Stil-Konter INNERHALB eines Lebens rampt
   let pulseCd = pulseLen;
 
-  // Shop-Felder (S2): leuchtende Felder in der Welt. Shop nur dort, Welt läuft
-  // weiter, auf dem Feld ist man unverwundbar.
-  const shopField = createShopField(scene);
-
   const combat = createCombatSystem(pool, liveCombatants, {
     damage: HIT_DAMAGE,
     projectileRadius: PROJECTILE_RADIUS,
@@ -327,19 +300,12 @@ function boot(combatStyle: CombatStyle): void {
     },
   });
 
-  // Gegner-Tod (von Projektil-Treffer ODER Tick-Schaden aus DoT/AoE): Drop + Reward + entfernen.
+  // Gegner-Tod (von Projektil-Treffer ODER Tick-Schaden aus DoT/AoE): XP + entfernen.
   function killEnemy(e: Enemy, killerTeam: string): void {
     bus.emit('tank.died', { tankId: e.id });
-    const part = pickDrop(e.equipment, () => aiRng.next());
-    if (part) {
-      pickups.spawn(part, e.combatant.x, e.combatant.z);
-      lastDrops.push(part.id);
-      if (lastDrops.length > 200) lastDrops.shift();
-    }
     if (killerTeam === 'player') {
       metrics.onKill(e.typeId, runClock - (spawnTimes.get(e.id) ?? runClock));
       styleTracker.onKill({ dist: Math.hypot(e.combatant.x - playerCombatant.x, e.combatant.z - playerCombatant.z) });
-      geld += Math.round((e.combatant.lootValue ?? 0.4) * 120);
       const up = progression.addXp(Math.round(18 + (e.combatant.lootValue ?? 0.4) * 60));
       if (up.gained > 0) {
         const mkNote = up.newMkUnlocks.length ? ` — MK${up.newMkUnlocks[up.newMkUnlocks.length - 1]} frei!` : '';
@@ -390,8 +356,7 @@ function boot(combatStyle: CombatStyle): void {
       fireCd = PLAYER_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
       const root = tank.view.root, turret = tank.view.turretNode;
       const origin = root.getAbsolutePosition();
-      let dmg = Math.round(loadout.stats().damage * sniperDmgMul);
-      if (overpressureShots > 0) { dmg = Math.round(dmg * overpressureMul); overpressureShots -= 1; }
+      const dmg = Math.round(playerStats().damage * sniperDmgMul);
       turret.rotation.y = yawTo(origin.x, origin.z, tgt.combatant.x, tgt.combatant.z) - root.rotation.y; // Turm aufs Ziel
       spawnLaser(origin.x, origin.z, tgt.combatant.x, tgt.combatant.z); // sichtbarer Schuss direkt zum Ziel
       damageEnemyTick(tgt, dmg); // garantierter Treffer (umgeht Ausweichen)
@@ -442,11 +407,7 @@ function boot(combatStyle: CombatStyle): void {
       }
       return;
     }
-    let shotDamage = loadout.stats().damage;
-    if (overpressureShots > 0) {
-      shotDamage = Math.round(shotDamage * overpressureMul);
-      overpressureShots -= 1;
-    }
+    let shotDamage = playerStats().damage;
     if (combatStyle === 'dot') shotDamage = 0; // DoT: kein Soforttreffer, nur Gift beim Treffer
     const p = pool.acquire({
       x: origin.x,
@@ -527,20 +488,6 @@ function boot(combatStyle: CombatStyle): void {
     fxList.push({ mesh: line as unknown as Mesh, mat: null as unknown as StandardMaterial, life: 0.4, max: 0.4, fade: false, alpha0: 1 });
   }
 
-  /** Verblassende Rauch-Scheibe am Boden (Radius = Wirkbereich). */
-  function spawnSmokeDisc(x: number, z: number, radius: number, duration: number): void {
-    const disc = MeshBuilder.CreateCylinder('fx_smoke', { diameter: radius * 2, height: 0.4, tessellation: 40 }, scene);
-    disc.position.set(x, 0.25, z); // flache Scheibe am Boden (bewährtes Shop-Feld-Muster)
-    disc.isPickable = false;
-    const mat = new StandardMaterial('fx_smoke_mat', scene);
-    mat.emissiveColor = new Color3(0.82, 0.85, 0.9); // hell, klar gegen den dunklen Boden
-    mat.disableLighting = true;
-    const alpha0 = 0.6;
-    mat.alpha = alpha0;
-    disc.material = mat;
-    fxList.push({ mesh: disc, mat, life: duration, max: duration, fade: true, alpha0 });
-  }
-
   /** Effekt-Meshes altern lassen (Fade) und am Ende entsorgen. */
   function updateFx(dt: number): void {
     for (let i = fxList.length - 1; i >= 0; i--) {
@@ -552,15 +499,6 @@ function boot(combatStyle: CombatStyle): void {
         fxList.splice(i, 1);
       }
     }
-  }
-
-  /** Auto-Turret-Schuss (Sekundärwaffe). Richtung ist bereits gemäß Treffsicherheit gestreut (rad). */
-  function fireAutoTurret(ox: number, oz: number, dir: number, team: string, damage: number, range: number): void {
-    const p = pool.acquire({
-      x: ox, y: 0.5, z: oz, dx: Math.sin(dir), dz: Math.cos(dir),
-      speed: playerProjSpeed, life: range / playerProjSpeed, team, damage, auto: true,
-    });
-    if (p) bus.emit('projectile.spawned', { id: p.id });
   }
 
   const input = createInput(
@@ -629,7 +567,6 @@ function boot(combatStyle: CombatStyle): void {
   const STYLE_LABEL: Record<string, string> = {
     stoerkrieg: 'Auto-Turret', nebel: 'Distanz', sperrkrieg: 'Rush',
   };
-  const lootLabels = createLootLabels(scene, camera, engine); // Item-Namen über den Loot-Würfeln
   // — Regler-Registry (R0): jede live-stellbare Magic Number wird hier registriert und
   // erscheint automatisch im filterbaren Tuning-HUD. Spielcode liest die Live-Getter.
   const camApi = (window as unknown as { __cam?: { set(h: number, b: number, f?: number): void; setOffset(ox: number, oz: number): void; get(): { height: number; back: number; fov: number } } }).__cam;
@@ -691,36 +628,16 @@ function boot(combatStyle: CombatStyle): void {
     });
   }
 
-  // Gürtel-HUD: 3 Ladungs-Slots (Tasten 1-3) unten mittig.
-  const beltHud = document.createElement('div');
-  beltHud.style.cssText =
+  // Dash-HUD: einzelner Slot unten mittig — zeigt Bereitschaft bzw. CD-Countdown.
+  const dashHud = document.createElement('div');
+  dashHud.style.cssText =
     'position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:19;display:flex;gap:8px;pointer-events:none;';
-  document.body.appendChild(beltHud);
-  const beltSlotEls: HTMLElement[] = [];
-  for (let i = 0; i < 3; i++) {
-    const s = document.createElement('div');
-    s.style.cssText =
-      'min-width:78px;text-align:center;background:rgba(8,12,16,0.78);border:1px solid #2a343b;' +
-      'border-radius:7px;padding:5px 8px;font:600 10px system-ui,sans-serif;';
-    beltHud.appendChild(s);
-    beltSlotEls.push(s);
-  }
-  function updateBeltHud(): void {
-    const slots = belt.slots();
-    for (let i = 0; i < 3; i++) {
-      const it = slots[i];
-      beltSlotEls[i]!.innerHTML =
-        `<div style="color:#ffe08a;font-weight:800">[${i + 1}]</div>` +
-        (it ? `<div style="color:#cdd6dd">${it.name}</div>` : `<div style="color:#566">leer</div>`);
-    }
-  }
-  updateBeltHud();
-  // Dash-Slot rechts neben dem Gürtel: zeigt Bereitschaft bzw. CD-Countdown.
+  document.body.appendChild(dashHud);
   const dashSlotEl = document.createElement('div');
   dashSlotEl.style.cssText =
     'min-width:78px;text-align:center;background:rgba(8,12,16,0.78);border:1px solid #2a343b;' +
     'border-radius:7px;padding:5px 8px;font:600 10px system-ui,sans-serif;';
-  beltHud.appendChild(dashSlotEl);
+  dashHud.appendChild(dashSlotEl);
   function updateDashHud(): void {
     const ready = dashCd <= 0;
     dashSlotEl.style.borderColor = ready ? '#3c7d6e' : '#2a343b';
@@ -730,121 +647,19 @@ function boot(combatStyle: CombatStyle): void {
   }
   updateDashHud();
 
-  function applyBooster(def: BoosterDef): void {
-    const eff = def.effect;
-    if (eff.kind === 'buff') {
-      if (eff.onlyLowHp && playerCombatant.hp / playerCombatant.maxHp >= 0.2) {
-        belt.add(def); // Bedingung nicht erfüllt → nicht verschwenden, zurück in den Gürtel
-        showToast('Nur unter 20 % HP: ' + def.name);
-        return;
-      }
-      playerBuffs.add({ ...eff.buff, label: def.name });
-    } else if (eff.kind === 'tempHp') {
-      playerCombatant.hp = Math.min(playerCombatant.maxHp, playerCombatant.hp + eff.amount);
-    } else if (eff.kind === 'nextShots') {
-      overpressureShots = eff.shots;
-      overpressureMul = eff.damageMul;
-    } else if (eff.kind === 'paint') {
-      // Zielmarkierung: den anvisierten (Cursor-nächsten) Gegner verwundbar machen.
-      const aim = input.getAimTarget();
-      const ax = aim ? aim.x : playerCombatant.x;
-      const az = aim ? aim.z : playerCombatant.z;
-      const cands = roster.filter((e) => e.combatant.alive)
-        .map((e) => ({ id: e.id, x: e.combatant.x, z: e.combatant.z }));
-      const hit = nearestInRange(ax, az, cands, eff.range);
-      if (!hit) {
-        belt.add(def); // kein Ziel in Reichweite → Ladung nicht verschwenden
-        showToast('Kein Ziel in Reichweite für ' + def.name);
-        return;
-      }
-      const tgt = roster.find((r) => r.id === hit.id)!;
-      tgt.buffs.add({ id: 'markiert', duration: eff.duration, incomingMul: eff.incomingMul, label: 'Markiert' });
-      spawnLaser(playerCombatant.x, playerCombatant.z, tgt.combatant.x, tgt.combatant.z);
-      alog.log('debuff', { id: def.id, ziel: tgt.id });
-      showToast(`Markiert: ${tgt.displayName} (+${Math.round((eff.incomingMul - 1) * 100)} % Schaden)`);
-      return;
-    } else if (eff.kind === 'smoke') {
-      // Rauch: nahe Gegner-Geschütze treffen schlechter (accuracyAdd negativ).
-      const cands = roster.filter((e) => e.combatant.alive)
-        .map((e) => ({ id: e.id, x: e.combatant.x, z: e.combatant.z }));
-      const ids = idsWithinRadius(playerCombatant.x, playerCombatant.z, cands, eff.radius);
-      for (const id of ids) {
-        const e = roster.find((r) => r.id === id);
-        if (e) e.buffs.add({ id: 'vernebelt', duration: eff.duration, accuracyAdd: -eff.accuracyPenalty, label: 'Vernebelt' });
-      }
-      spawnSmokeDisc(playerCombatant.x, playerCombatant.z, eff.radius, eff.duration);
-      alog.log('debuff', { id: def.id, getroffen: ids.length });
-      showToast(`Rauch ausgebracht — ${ids.length} Gegner vernebelt`);
-      return;
-    }
-    alog.log('booster', { id: def.id });
-    showToast('Gezündet: ' + def.name);
-  }
-  function triggerBelt(i: number): void {
-    if (inspecting || shop.isOpen()) return;
-    const def = belt.trigger(i);
-    if (!def) return;
-    applyBooster(def);
-    styleTracker.onBoosterUsed(); // Stil: Booster-Nutzung (Rush-Signal)
-    updateBeltHud();
-  }
-
-  // Eigenes Live-Inventar (Taste „I" ohne anvisierten Gegner) — OHNE Pause.
-  const INV_SLOTS: { slot: Slot; label: string }[] = [
-    { slot: 'waffe', label: 'Waffe' },
-    { slot: 'sekundaer', label: 'Sekundär' },
-    { slot: 'turm', label: 'Turm' },
-    { slot: 'wanne', label: 'Wanne' },
-    { slot: 'raeder', label: 'Räder' },
-    { slot: 'ruestung', label: 'Rüstung' },
-  ];
-  function invStat(it: ShopItem): string {
-    if (it.autoFire) return `Auto: ${it.autoFire.damage} Schaden`;
-    if (it.damage) return `${it.damage} Schaden`;
-    if (it.hp) return `${it.hp} HP`;
-    if (it.armor) return `${it.armor} Rüstung`;
-    if (it.speed) return `${it.speed} Tempo`;
-    if (it.dodge) return `${Math.round(it.dodge * 100)} % Ausweichen`;
-    return '—';
-  }
-  function invItem(it: ShopItem): OwnInvItem {
-    return { id: it.id, name: it.name, stat: invStat(it), rarity: it.rarity };
-  }
-  const ownInv = createOwnInventory({
-    slots: () =>
-      INV_SLOTS.map((s) => {
-        const it = loadout.get(s.slot);
-        return { slot: s.slot, label: s.label, item: it ? invItem(it) : null };
-      }),
-    bag: () => loadout.bag().map(invItem),
-    stats: () => {
-      const st = loadout.stats();
-      return { damage: st.damage, maxHp: st.maxHp, armor: st.armor, speed: st.speed, dodge: st.dodge };
-    },
-    onEquip: (id) => {
-      const it = loadout.bag().find((x) => x.id === id);
-      if (it) { loadout.equip(it); alog.log('inv.equip', { id }); }
-    },
-    onUnequip: (slot) => { loadout.unequip(slot as Slot); alog.log('inv.unequip', { slot }); },
-  });
-
   window.addEventListener('keydown', (ev) => {
     const k = ev.key.toLowerCase();
     if (k === 'm' && !inspecting) {
       overviewMap.toggle();
     } else if (k === 'i') {
       if (inspecting) inspectCard.close();
-      else if (ownInv.isOpen()) ownInv.toggle(); // offenes Inventar schließen
-      else if (hoveredId && !shop.isOpen()) openInspect(hoveredId); // Gegner anvisiert → Inspect (pausiert)
-      else if (!shop.isOpen()) ownInv.toggle(); // kein Gegner → eigenes Inventar (läuft weiter)
+      else if (hoveredId) openInspect(hoveredId); // Gegner anvisiert → Inspect (pausiert)
     } else if (ev.key === 'Escape' && inspecting) {
       inspectCard.close();
-    } else if (k === '1' || k === '2' || k === '3') {
-      triggerBelt(Number(k) - 1);
     }
   });
 
-  // Loot-Toast: kurze Einblendung beim Aufsammeln eines Teils.
+  // Toast: kurze Einblendung (Level-Up etc.).
   const toast = document.createElement('div');
   toast.id = 'loot-toast';
   toast.style.cssText =
@@ -888,96 +703,6 @@ function boot(combatStyle: CombatStyle): void {
     showToast('Zerstört — neu aufgebaut');
   }
 
-  // Optik + Stats nach JEDER Loadout-Änderung synchron halten (Slots ↔ Tasche).
-  function syncTank(prevMaxHp: number): void {
-    for (const slot of SLOTS) {
-      const map = SLOT_SOCKET[slot];
-      if (!map) continue;
-      const it = loadout.get(slot);
-      tank.view.setVariant(map.socket, it ? map.variant : cls.composition[map.socket]);
-    }
-    const st = loadout.stats();
-    playerSpeed = st.speed;
-    playerCombatant.maxHp = st.maxHp;
-    playerCombatant.armor = st.armor;
-    playerCombatant.hp = Math.min(st.maxHp, Math.max(1, playerCombatant.hp + (st.maxHp - prevMaxHp)));
-    playerCombatant.lootValue = 1 + (loadout.equippedList().length + loadout.bag().length) * 0.15;
-  }
-
-  // Anlegen (aus Tasche/Kauf): neues Item in den Slot, altes → Tasche.
-  function equip(item: ShopItem): void {
-    // MK-Gate: über der freigeschalteten MK kann der Spieler ein Teil NICHT anlegen
-    // (looten ja, in die Tasche — aber nutzbar erst, wenn die MK frei ist).
-    if (item.mk > progression.unlockedMk()) {
-      showToast(`MK ${item.mk} nötig — du hast MK ${progression.unlockedMk()}`);
-      alog.log('equip.denied', { id: item.id, mk: item.mk, unlocked: progression.unlockedMk() });
-      return;
-    }
-    const prevMax = loadout.stats().maxHp;
-    loadout.equip(item);
-    syncTank(prevMax);
-    alog.log('equip', { id: item.id, slot: item.slot });
-    showToast('Angelegt: ' + item.name);
-  }
-  function unequipSlot(slot: Slot): void {
-    const prevMax = loadout.stats().maxHp;
-    loadout.unequip(slot);
-    syncTank(prevMax);
-    alog.log('unequip', { slot });
-    showToast('Abgelegt → Inventar');
-  }
-  function sellAny(item: ShopItem): void {
-    const prevMax = loadout.stats().maxHp;
-    loadout.remove(item);
-    geld += sellValue(item);
-    syncTank(prevMax);
-    alog.log('shop.sell', { id: item.id, slot: item.slot, geld });
-    showToast(`Verkauft: ${item.name} (+💰 ${sellValue(item)})`);
-  }
-  // Loot landet im INVENTAR (Tasche), nicht automatisch im Slot.
-  function collectLoot(item: ShopItem): void {
-    loadout.addToBag(cloneItem(item)); // eigene Instanz — keine geteilten Referenzen
-    alog.log('loot', { id: item.id });
-    showToast('Eingesammelt: ' + item.name + ' → Inventar');
-  }
-
-  // Werkstatt (Taste B pausiert die Sim): Ausrüstung · Inventar · Kaufen.
-  const shop = createShop({
-    items: CATALOG,
-    getMoney: () => geld,
-    getUnlockedMk: () => progression.unlockedMk(),
-    getSlot: (slot) => loadout.get(slot),
-    getBag: () => loadout.bag(),
-    onBuy: (item) => {
-      if (item.rarity !== 'normal' || item.mk > progression.unlockedMk() || geld < item.cost) return;
-      geld -= item.cost;
-      equip(cloneItem(item)); // eigene Instanz in den Slot, altes → Tasche
-      alog.log('shop.buy', { id: item.id, cost: item.cost, geld });
-      showToast('Gekauft & angelegt: ' + item.name);
-    },
-    onEquip: (item) => equip(item),
-    onUnequip: (slot) => unequipSlot(slot),
-    onSell: (item) => sellAny(item),
-    // SH2: Sofort-Booster — kaufbar (Spieler), landen als Ladung im Gürtel.
-    getBoosters: () => BOOSTERS.filter((b) => b.buyer !== 'enemy'),
-    getBelt: () => belt.slots(),
-    onBuyBooster: (b) => {
-      if (geld < b.cost) return;
-      if (belt.slots().every((s) => s !== null)) {
-        showToast('Gürtel voll (max 3)');
-        return;
-      }
-      geld -= b.cost;
-      belt.add(b);
-      updateBeltHud();
-      alog.log('shop.buyBooster', { id: b.id, cost: b.cost, geld });
-      showToast('Gekauft → Gürtel: ' + b.name);
-    },
-    // Werkstatt: auf einem Shop-Feld ODER während der 5s-Gnadenzeit nach dem Erscheinen (überall).
-    canOpen: () => shopField.isOnTile(playerCombatant.x, playerCombatant.z) || spawnGraceCd > 0,
-    onToggle: (o) => alog.log(o ? 'shop.open' : 'shop.close', { geld }),
-  });
-
   // Mess-Overlay (Phase 1 Debugging): macht Cursor-Bodenpunkt, Ziel und Schussrichtung sichtbar.
   const aimDebug = createAimDebug(scene, camera, tank, () => input.getAimTarget());
 
@@ -999,91 +724,39 @@ function boot(combatStyle: CombatStyle): void {
       return director.states();
     },
     swarm: () => currentSwarmPlan(),
-    stats: () => loadout.stats(),
-    loadout: () => loadout.equippedList().map((it) => it.id),
-    bag: () => loadout.bag().map((it) => it.id),
-    equippedBySlot: () => Object.fromEntries(SLOTS.map((s) => [s, loadout.get(s)?.id ?? null])),
-    enemyEquip: (id: string) => roster.find((r) => r.id === id)?.equipment.map((i) => i.id) ?? null,
-    // Verifikations-Sonden (Observability): Gegner-Kampfwerte lesen + Gear setzen.
+    stats: () => playerStats(),
+    // Verifikations-Sonden (Observability): Gegner-Kampfwerte lesen (rein level-basiert).
     enemyCombat: (id: string) => {
       const e = roster.find((r) => r.id === id);
       if (!e) return null;
       return {
         level: e.level,
+        mk: enemyMk(e.level),
         hp: Math.round(e.combatant.hp),
         maxHp: Math.round(e.combatant.maxHp),
         armor: Math.round(e.combatant.armor ?? 0),
         dodge: e.combatant.dodge ?? 0,
         incomingMul: e.combatant.incomingMul ?? 1, // >1 = markiert/verwundbar
-        damage: e.damage, // aus der Ausrüstung abgeleitet
-        equipMk: e.equipment.map((i) => i.mk),
+        damage: e.damage, // aus dem Level abgeleitet
       };
-    },
-    setEnemyGear: (id: string, mk: number) => {
-      const e = roster.find((r) => r.id === id);
-      if (!e) return 'nicht gefunden';
-      const mkStr = String(mk).padStart(2, '0');
-      e.equipment = (['waffe', 'wanne', 'turm', 'raeder', 'ruestung'] as Slot[]).map((s) =>
-        catalogItem(`${s}_mk${mkStr}_normal`),
-      );
-      applyEnemyStats(e); // Stats aus der Ausrüstung neu berechnen
-      const e2 = roster.find((r) => r.id === id)!;
-      return {
-        level: e2.level, maxHp: Math.round(e2.combatant.maxHp),
-        armor: Math.round(e2.combatant.armor ?? 0), equipMk: e2.equipment.map((i) => i.mk),
-      };
-    },
-    // SH3.5: Spieler ein Item in die Tasche legen UND anlegen (manueller Test, z. B. Auto-Turret).
-    giveAndEquip: (id: string) => {
-      const it = cloneItem(catalogItem(id));
-      loadout.addToBag(it);
-      loadout.equip(it);
-      return { equipped: loadout.equippedList().map((i) => i.id), dodge: loadout.stats().dodge };
     },
     fxNow: () => fxList.map((f) => ({
       name: f.mesh.name, alpha: f.mat ? +f.mat.alpha.toFixed(2) : null,
       visible: f.mesh.isVisible, enabled: f.mesh.isEnabled(),
       x: +f.mesh.position.x.toFixed(1), z: +f.mesh.position.z.toFixed(1), life: +f.life.toFixed(1),
     })),
-    lastDrops: () => [...lastDrops],
-    pickupCount: () => pickups.count(),
-    pickupList: () => pickups.list(),
-    spawnLootAt: (x: number, z: number, itemId = 'waffe_mk05_normal') => {
-      pickups.spawn(catalogItem(itemId), x, z);
-      return { count: pickups.count(), at: [x, z], item: itemId };
-    },
-    shopTiles: () => shopField.positions.map((t) => ({ x: t.x, z: t.z })),
-    onShopTile: () => shopField.isOnTile(playerCombatant.x, playerCombatant.z),
     playerInvuln: () => playerCombatant.invulnerable === true,
-    shopOpen: () => shop.isOpen(),
-    nearestTile: () => shopField.nearest(playerCombatant.x, playerCombatant.z),
     inspect: () => ({ open: inspecting, simSpeed: clock.simSpeed, hovered: hoveredId }),
     logTail: (n?: number) => alog.tail(n),
     runId: () => alog.runId(),
     buffs: () => playerBuffs.active(),
     buffMods: () => playerBuffs.aggregate(),
-    belt: () => belt.slots().map((b) => b?.id ?? null),
-    giveBooster: (id: string) => {
-      const b = BOOSTERS.find((x) => x.id === id);
-      if (b) belt.add(b);
-      updateBeltHud();
-      return belt.slots().map((s) => s?.id ?? null);
-    },
-    triggerBelt: (i: number) => { triggerBelt(i); return belt.slots().map((s) => s?.id ?? null); },
-    overpressure: () => ({ shots: overpressureShots, mul: overpressureMul }),
     playerSpeedNow: () => playerSpeed,
     mapOpen: () => overviewMap.isOpen(),
     openInspect: (id: string) => { openInspect(id); return { open: inspecting, simSpeed: clock.simSpeed }; },
     enemyInfoOf: (id: string) => {
       const e = roster.find((r) => r.id === id);
       return e ? buildEnemyInfo({ ...e, speed: ENEMY_SPEED, activeBuffs: e.buffs.active().map((b) => b.label ?? b.id) }) : null;
-    },
-    teleportToTile: () => {
-      const t = shopField.positions[0]!;
-      tank.view.root.position.set(t.x, 0, t.z);
-      playerCombatant.x = t.x;
-      playerCombatant.z = t.z;
-      return { x: t.x, z: t.z };
     },
     teleportTo: (x: number, z: number) => {
       tank.view.root.position.set(x, 0, z);
@@ -1110,10 +783,6 @@ function boot(combatStyle: CombatStyle): void {
       }
       return 'volley ' + shots + 'x' + dmg;
     },
-    equip,
-    collectLoot,
-    geld: () => geld,
-    shop,
     progression: () => ({
       level: progression.level, xp: progression.xp,
       xpToNext: progression.xpToNext(), mk: progression.unlockedMk(),
@@ -1132,10 +801,10 @@ function boot(combatStyle: CombatStyle): void {
     fireCd -= simDt;
     playerBuffs.tick(simDt);
     const pmods = playerBuffs.aggregate();
-    const pst = loadout.stats();
+    const pst = playerStats();
     playerSpeed = pst.speed * pmods.speedMul * playerSpeedMul;
     playerCombatant.armor = pst.armor + pmods.armorAdd;
-    playerCombatant.dodge = pst.dodge + pmods.dodgeAdd; // Ausweichen aus Modulen + Buffs
+    playerCombatant.dodge = pst.dodge + pmods.dodgeAdd; // Ausweichen aus Buffs (Basis 0)
     playerCombatant.incomingMul = pmods.incomingMul; // Verwundbarkeit (falls Gegner später markieren)
     buffHud.update(playerBuffs.active());
     input.update(simDt);
@@ -1152,10 +821,6 @@ function boot(combatStyle: CombatStyle): void {
     reticle.update(combatStyle === 'sniper' && scopeActive ? null : input.getAimTarget());
     pool.update(simDt);
     updateFx(simDt); // Laser/Rauch-Effekte altern lassen
-    if (ownInv.isOpen()) { // Inventar läuft live mit (Beute/Statänderungen), gedrosselt
-      ownInvRefreshCd -= simDt;
-      if (ownInvRefreshCd <= 0) { ownInvRefreshCd = 0.5; ownInv.refresh(); }
-    }
 
     const px = tank.view.root.position.x;
     const pz = tank.view.root.position.z;
@@ -1171,23 +836,6 @@ function boot(combatStyle: CombatStyle): void {
     if (pulseCd <= 0) {
       director.evaluate(styleTracker.snapshotAndReset());
       pulseCd = pulseLen;
-    }
-
-    // SH3.5: Sekundärwaffe (Auto-Turret) feuert autonom auf den nächsten Gegner.
-    const sek = loadout.get('sekundaer');
-    if (sek?.autoFire) {
-      const st: AutoTurretState = {
-        cooldown: playerTurretCd, range: sek.autoFire.range,
-        fireInterval: sek.autoFire.fireInterval, damage: sek.autoFire.damage, accuracy: sek.autoFire.accuracy,
-      };
-      const cands = roster.filter((e) => e.combatant.alive).map((e) => ({ x: e.combatant.x, z: e.combatant.z }));
-      const res = stepAutoTurret(px, pz, st, cands, simDt, () => aiRng.next());
-      playerTurretCd = st.cooldown;
-      if (res.fire && res.dir != null) {
-        fireAutoTurret(px, pz, res.dir, 'player', sek.autoFire.damage, sek.autoFire.range);
-        metrics.onShot();
-        alog.log('autoturret', { team: 'player', dmg: sek.autoFire.damage });
-      }
     }
 
     // Stil-getriebener Nachschub (gedeckelt): Typ-Mix aus der Heat-Lage, Zahl fest (Max Gegner).
@@ -1216,7 +864,7 @@ function boot(combatStyle: CombatStyle): void {
       const snap = metrics.takeSnapshot({
         alive: aliveCount, target: plan.targetCount,
         hp: playerCombatant.hp, hpMax: playerCombatant.maxHp,
-        geld, level: progression.level, mk: progression.unlockedMk(),
+        level: progression.level, mk: progression.unlockedMk(),
         px, pz, heat, mix: aliveByType,
       });
       // idle = Sekunden ohne Input; ab ~2 s ist „Hände weg" → Analyse ignoriert diese Zeilen.
@@ -1263,13 +911,11 @@ function boot(combatStyle: CombatStyle): void {
       e.combatant.z = er.position.z;
     }
 
-    // Spieler-Combatant spiegeln. Schutzzone: auf einem Shop-Feld unverwundbar.
+    // Spieler-Combatant spiegeln. Schutzzone: kurz nach dem Erscheinen unverwundbar.
     playerCombatant.x = px;
     playerCombatant.z = pz;
-    const onShopTile = shopField.isOnTile(px, pz);
     spawnGraceCd = Math.max(0, spawnGraceCd - simDt);
-    playerCombatant.invulnerable = onShopTile || spawnGraceCd > 0;
-    if (shop.isOpen() && !onShopTile && spawnGraceCd <= 0) shop.close(); // Feld verlassen → Shop schließt (außer in der Gnadenzeit)
+    playerCombatant.invulnerable = spawnGraceCd > 0;
     combat.update();
 
     // Sniper-Scope: an = Reichweite hoch + Kamera WEITER WEG (mehr Gebiet sichtbar, Panzer
@@ -1310,12 +956,6 @@ function boot(combatStyle: CombatStyle): void {
       if (f.left <= 0) { f.disc.dispose(); aoeFields.splice(i, 1); }
     }
 
-    // Beute einsammeln: fährt der Spieler über ein Teil → ins Inventar (Tasche).
-    shopField.update();
-    pickups.update(px, pz, PICKUP_REACH, collectLoot);
-    lootLabels.update(pickups.list()); // Item-Namen über den Würfeln
-    shop.updateMoney(); // nur die Geld-Anzeige (NICHT das Panel neu bauen → Klicks bleiben heil)
-
     ground.update();
     projectileView.sync();
     aimDebug.update();
@@ -1340,7 +980,6 @@ function boot(combatStyle: CombatStyle): void {
       mk: progression.unlockedMk(),
     });
     minimap.update(playerCombatant.x, playerCombatant.z, [
-      ...shopField.positions.map((t) => ({ x: t.x, z: t.z, color: '#22b0e6', r: 4.5 })),
       ...roster
         .filter((e) => e.combatant.alive)
         .map((e) => ({ x: e.combatant.x, z: e.combatant.z, color: '#e8a23c' })),
@@ -1432,7 +1071,6 @@ function boot(combatStyle: CombatStyle): void {
     }
     if (overviewMap.isOpen()) {
       const mapBlips: MapBlip[] = [
-        ...shopField.positions.map((t) => ({ x: t.x, z: t.z, color: '#22b0e6', r: 5 })),
         ...roster
           .filter((e) => e.combatant.alive)
           .map((e) => ({

@@ -2,22 +2,19 @@ import type { Scene } from '@babylonjs/core';
 import { createTankView, type TankView } from '../tank/tankFactory';
 import type { TankComposition } from '../tank/sockets';
 import type { Combatant } from '../combat/combat';
-import type { ShopItem } from '../shop/catalog';
-import { rollEnemyEquipment } from './equipment';
 import { enemyCombatStats } from './enemyStats';
 import { createBuffStack, type BuffStack } from '../combat/buffs';
 import type { EnemyBehavior } from './enemyBehavior';
 
-/** Ein lebender Gegner: schlanker Combatant — Optik + Trefferdaten + Ausrüstung + Verhalten. */
+/** Ein lebender Gegner: schlanker Combatant — Optik + Trefferdaten + Verhalten. */
 export interface Enemy {
   id: string;
   view: TankView;
   combatant: Combatant;
-  equipment: ShopItem[]; // tatsächlich angelegte Teile — NUR diese kann er droppen
-  damage: number; // Schaden pro Schuss — AUS DER AUSRÜSTUNG abgeleitet (nicht aus dem Level)
+  damage: number; // Schaden pro Schuss — AUS DEM LEVEL abgeleitet
   fireCd: number; // Sekunden bis zum nächsten Schuss
   displayName: string; // generischer "Panzer N"-Name
-  level: number; // eigenes Level (steuert Stats über die Ausrüstung)
+  level: number; // eigenes Level (steuert alle Stats)
   buffs: BuffStack; // passiver Empfänger der Spieler-Debuffs (Zielmarkierung/Rauch)
   typeId: string; // Gegner-Typ (bestimmt das Verhalten)
   behavior: EnemyBehavior; // Bewegungs-/Angriffsmuster
@@ -35,9 +32,9 @@ export interface EnemySpec {
   behavior: EnemyBehavior;
 }
 
-/** Combatant-Stats eines Gegners NEU aus seiner Ausrüstung berechnen. HP wird voll aufgefüllt. */
+/** Combatant-Stats eines Gegners NEU aus seinem Level berechnen. HP wird voll aufgefüllt. */
 export function applyEnemyStats(e: Enemy): void {
-  const st = enemyCombatStats(e.equipment, e.level);
+  const st = enemyCombatStats(e.level);
   e.combatant.maxHp = st.maxHp;
   e.combatant.hp = st.maxHp;
   e.combatant.armor = st.armor;
@@ -57,9 +54,7 @@ export function createEnemyEntity(
 ): Enemy {
   const view = createTankView(scene, spec.comp);
   view.root.position.set(spec.spawn.x, 0, spec.spawn.z);
-  // Volles Basis-Set beim Erscheinen (ein Teil je Slot, ~15 % selten) → abwechslungsreiche Drops.
-  const equipment = rollEnemyEquipment(spec.level, rng);
-  const st = enemyCombatStats(equipment, spec.level);
+  const st = enemyCombatStats(spec.level);
   const maxHp = Math.max(1, Math.round(st.maxHp * hpMul));
   const combatant: Combatant = {
     id: spec.id,
@@ -78,7 +73,6 @@ export function createEnemyEntity(
     id: spec.id,
     view,
     combatant,
-    equipment,
     damage: Math.max(1, Math.round(st.damage * dmgMul)),
     fireCd: 0,
     displayName: spec.displayName,

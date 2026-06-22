@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createRunMetrics, type MetricsState } from './runMetrics';
 
 const state = (over: Partial<MetricsState> = {}): MetricsState => ({
-  alive: 5, target: 8, hp: 80, hpMax: 100, geld: 100, level: 1, mk: 1, px: 0, pz: 0,
+  alive: 5, target: 8, hp: 80, hpMax: 100, level: 1, mk: 1, px: 0, pz: 0,
   heat: { nebel: 50 }, mix: { closer: 3 }, ...over,
 });
 

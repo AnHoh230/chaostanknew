@@ -14,7 +14,6 @@ export interface MetricsState {
   target: number;
   hp: number;
   hpMax: number;
-  geld: number;
   level: number;
   mk: number;
   px: number; // Spieler-Position (wo wird gekämpft)
@@ -52,7 +51,6 @@ export interface RunSnapshot {
   dpsOut: number;
   dpsIn: number;
   acc: number;
-  geld: number;
   level: number;
   mk: number;
   heat: Record<string, number>;
@@ -137,7 +135,6 @@ export function createRunMetrics(): RunMetrics {
         dpsOut: iTime > 0 ? r1(iDmgOut / iTime) : 0,
         dpsIn: iTime > 0 ? r1(iDmgIn / iTime) : 0,
         acc: totalShots > 0 ? Math.round((totalHits / totalShots) * 100) : 0,
-        geld: state.geld,
         level: state.level,
         mk: state.mk,
         heat: state.heat,

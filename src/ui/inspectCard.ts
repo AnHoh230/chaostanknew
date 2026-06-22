@@ -1,15 +1,10 @@
 import type { EnemyInfo } from '../inspect/enemyInfo';
-import type { Slot } from '../shop/catalog';
 
 export interface InspectCard {
   open(info: EnemyInfo, onClose: () => void): void;
   close(): void;
   isOpen(): boolean;
 }
-
-const SLOT_LABEL: Partial<Record<Slot, string>> = {
-  waffe: 'Waffe', wanne: 'Wanne', turm: 'Turm', raeder: 'Räder', ruestung: 'Rüstung',
-};
 
 function row(label: string, value: string): string {
   return (
@@ -79,15 +74,6 @@ export function createInspectCard(): InspectCard {
         row('Beutewert', info.lootValue.toFixed(2)),
     );
 
-    const equip = section(
-      'Ausrüstung',
-      info.equipment.length
-        ? info.equipment
-            .map((e) => row(SLOT_LABEL[e.slot] ?? e.slot, `${e.name} <span style="color:#8aa">(${e.stat})</span>`))
-            .join('')
-        : `<div style="color:#677">— keine —</div>`,
-    );
-
     const boosters = section(
       'Aktive Effekte',
       info.boosters.length
@@ -96,7 +82,7 @@ export function createInspectCard(): InspectCard {
     );
 
     card.innerHTML =
-      head + stats + equip + boosters +
+      head + stats + boosters +
       `<div style="text-align:center;color:#778;font-size:11px;margin-top:14px">[I] / [Esc] schließen</div>`;
   }
 
