@@ -179,6 +179,9 @@ function boot(combatStyle: CombatStyle): void {
   // — Kampfstil-Werte (Regler, Kategorie „Stile") —
   let sniperRange = 95, sniperCamBack = 150, sniperCamHeight = 95; // Scope: Reichweite + Kamera weit weg (mehr Gebiet)
   let sniperDmgMul = 2; // Sniper schlägt härter — Faktor auf den normalen Schussschaden
+  let sniperSnapRadius = 220; // px: max. Cursor-Abstand, in dem ein Gegner angevisiert wird
+  let sniperTargetId: string | null = null; // aktuell gelocktes Ziel (Fadenkreuz); nur 1 zugleich
+  let sniperCrosshair: HTMLDivElement | null = null; // Fadenkreuz-Overlay (nur im Sniper-Stil)
   let aoeRange = 26, aoeRadius = 4, aoeDmg = 14, aoeTickCount = 5; // AoE-Feld (Radius ~2 Späher)
   let dotDmg = 36, dotEvery = DAMAGE_TICK * 2, dotDur = DAMAGE_TICK * 8; // DoT: alle 2 Ticks, 8 Ticks lang
   let scopeActive = false; // Sniper: RMB gedrückt → Scope an (kein Fahren, weiter zoomen)
@@ -376,7 +379,26 @@ function boot(combatStyle: CombatStyle): void {
   // NICHT die (um einen Frame veraltete) Turm-Ausrichtung lesen. Sonst zielt der
   // Schuss aufs Ziel vom letzten Frame (bewiesen: aimErr 7-40° beim Bewegen).
   function fire(): void {
-    if (combatStyle === 'sniper' && !scopeActive) return; // Sniper feuert NUR im Scope (RMB) — kein Hüftschuss
+    if (combatStyle === 'sniper' && !scopeActive) return; // Sniper feuert NUR im Scope — kein Hüftschuss
+    // Sniper: KEIN Richtungsschuss — der Schuss trifft das gelockte Ziel garantiert (kein Ausweichen).
+    if (combatStyle === 'sniper') {
+      const tgt = sniperTargetId ? roster.find((r) => r.id === sniperTargetId && r.combatant.alive) : null;
+      if (!tgt) return; // kein Ziel anvisiert → kein Schuss (und KEIN Cooldown verbraten)
+      if (fireCd > 0) return; // Takt = Schussgeschwindigkeit; erst danach neues Ziel/Schuss möglich
+      fireCd = PLAYER_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
+      const root = tank.view.root, turret = tank.view.turretNode;
+      const origin = root.getAbsolutePosition();
+      let dmg = Math.round(loadout.stats().damage * sniperDmgMul);
+      if (overpressureShots > 0) { dmg = Math.round(dmg * overpressureMul); overpressureShots -= 1; }
+      turret.rotation.y = yawTo(origin.x, origin.z, tgt.combatant.x, tgt.combatant.z) - root.rotation.y; // Turm aufs Ziel
+      spawnLaser(origin.x, origin.z, tgt.combatant.x, tgt.combatant.z); // sichtbarer Schuss direkt zum Ziel
+      damageEnemyTick(tgt, dmg); // garantierter Treffer (umgeht Ausweichen)
+      metrics.onShot();
+      lastFireClock = runClock;
+      alog.log('snipe', { target: tgt.id, dmg });
+      bus.emit('tank.fired', { tankId: tank.id });
+      return;
+    }
     if (fireCd > 0) return; // Feuer-Cooldown (Kühlmittel senkt ihn)
     fireCd = PLAYER_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
     const root = tank.view.root;
@@ -423,7 +445,6 @@ function boot(combatStyle: CombatStyle): void {
       shotDamage = Math.round(shotDamage * overpressureMul);
       overpressureShots -= 1;
     }
-    if (combatStyle === 'sniper') shotDamage = Math.round(shotDamage * sniperDmgMul); // Sniper schlägt härter
     if (combatStyle === 'dot') shotDamage = 0; // DoT: kein Soforttreffer, nur Gift beim Treffer
     const p = pool.acquire({
       x: origin.x,
@@ -547,9 +568,10 @@ function boot(combatStyle: CombatStyle): void {
     () => combatStyle !== 'sniper', // Sniper: kein Auto-Vorwärts, manuell per W/S fahren
   );
 
-  // Sniper-Scope: rechte Maustaste halten → Scope an, loslassen → aus (nur im Sniper-Stil).
+  // Sniper-Scope: Rechtsklick als SCHALTER (1× an, nochmal aus). Im Scope steht der Panzer,
+  // die Maus snappt aufs Ziel (Fadenkreuz), der Schuss trifft garantiert.
   if (combatStyle === 'sniper') {
-    // Sichtbarer Scope-Indikator — sonst rät man, ob RMB ankam (Debug: erst sichtbar machen).
+    // Sichtbarer Scope-Indikator — sonst rät man, ob der Schalter ankam (Debug: erst sichtbar machen).
     const scopeBadge = document.createElement('div');
     scopeBadge.textContent = '🔭 SCOPE';
     scopeBadge.style.cssText =
@@ -557,22 +579,25 @@ function boot(combatStyle: CombatStyle): void {
       'color:#9be36b;border:1px solid #9be36b;border-radius:6px;padding:4px 14px;display:none;' +
       'font:700 13px system-ui,sans-serif;letter-spacing:1.5px;pointer-events:none;';
     document.body.appendChild(scopeBadge);
-    const setScope = (on: boolean): void => {
-      if (on === scopeActive) return;
-      scopeActive = on;
-      scopeBadge.style.display = on ? 'block' : 'none';
-      log.info('scope', { on });
+    // Fadenkreuz-Overlay: Ring + 4 Striche; Farbe signalisiert bereit (grün) / nachladen (orange).
+    const ch = document.createElement('div');
+    ch.style.cssText = 'position:fixed;width:46px;height:46px;margin:-23px 0 0 -23px;z-index:45;display:none;pointer-events:none;';
+    ch.innerHTML =
+      '<div data-ring style="position:absolute;inset:0;border:2px solid #ff5252;border-radius:50%;box-shadow:0 0 6px #ff5252aa"></div>' +
+      '<div data-tick style="position:absolute;left:50%;top:-7px;width:2px;height:9px;background:#ff5252;transform:translateX(-50%)"></div>' +
+      '<div data-tick style="position:absolute;left:50%;bottom:-7px;width:2px;height:9px;background:#ff5252;transform:translateX(-50%)"></div>' +
+      '<div data-tick style="position:absolute;top:50%;left:-7px;height:2px;width:9px;background:#ff5252;transform:translateY(-50%)"></div>' +
+      '<div data-tick style="position:absolute;top:50%;right:-7px;height:2px;width:9px;background:#ff5252;transform:translateY(-50%)"></div>';
+    document.body.appendChild(ch);
+    sniperCrosshair = ch;
+    const toggleScope = (): void => {
+      scopeActive = !scopeActive;
+      scopeBadge.style.display = scopeActive ? 'block' : 'none';
+      if (!scopeActive) { sniperTargetId = null; ch.style.display = 'none'; } // Scope aus → Ziel/Fadenkreuz weg
+      log.info('scope', { on: scopeActive });
     };
-    // Auslöser bombenfest: window + Capture-Phase fängt das Event ganz oben ab, bevor
-    // irgendwer (Babylon, Canvas) es schlucken könnte. Maus- UND Pointer-Events als zwei
-    // unabhängige Wege; setScope ist idempotent, also stört Doppel-Feuern nicht.
-    const down = (b: number): void => { if (b === 2) setScope(true); };
-    const up = (b: number): void => { if (b === 2) setScope(false); };
-    window.addEventListener('mousedown', (ev) => down(ev.button), true);
-    window.addEventListener('mouseup', (ev) => up(ev.button), true);
-    window.addEventListener('pointerdown', (ev) => down(ev.button), true);
-    window.addEventListener('pointerup', (ev) => up(ev.button), true);
-    window.addEventListener('contextmenu', (ev) => ev.preventDefault(), true); // kein Browser-Menü auf RMB
+    // contextmenu feuert genau einmal pro Rechtsklick (ideal für einen Schalter) und wird eh unterdrückt.
+    window.addEventListener('contextmenu', (ev) => { ev.preventDefault(); toggleScope(); }, true);
   }
 
   // Dash-Auslöser: Shift = kurzer Burst in Fahrtrichtung (der Panzer fährt eh vorwärts).
@@ -620,6 +645,7 @@ function boot(combatStyle: CombatStyle): void {
   tunables.add({ label: 'Dash-Cooldown s', category: 'Fähigkeiten', value: dashCdMax, min: 1, max: 15, step: 0.5, onChange: (v) => { dashCdMax = v; } });
   tunables.add({ label: 'Sniper-Reichweite', category: 'Stile', value: sniperRange, min: 40, max: 200, step: 5, onChange: (v) => { sniperRange = v; } });
   tunables.add({ label: 'Sniper-Schadensfaktor', category: 'Stile', value: sniperDmgMul, min: 1, max: 5, step: 0.5, onChange: (v) => { sniperDmgMul = v; } });
+  tunables.add({ label: 'Sniper-Snap-Radius px', category: 'Stile', value: sniperSnapRadius, min: 40, max: 600, step: 10, onChange: (v) => { sniperSnapRadius = v; } });
   tunables.add({ label: 'Sniper-Kamera-Höhe', category: 'Stile', value: sniperCamHeight, min: 20, max: 200, step: 5, onChange: (v) => { sniperCamHeight = v; } });
   tunables.add({ label: 'Sniper-Kamera-Distanz', category: 'Stile', value: sniperCamBack, min: 20, max: 260, step: 5, onChange: (v) => { sniperCamBack = v; } });
   tunables.add({ label: 'AoE-Wurfweite', category: 'Stile', value: aoeRange, min: 8, max: 60, step: 1, onChange: (v) => { aoeRange = v; } });
@@ -1120,7 +1146,8 @@ function boot(combatStyle: CombatStyle): void {
       dashTimer -= simDt;
     }
     updateDashHud();
-    reticle.update(input.getAimTarget()); // gleicher Frame wie der Turm
+    // Im Sniper-Scope kein Boden-Reticle (Cursor-Punkt) — dort zählt nur das Ziel-Fadenkreuz.
+    reticle.update(combatStyle === 'sniper' && scopeActive ? null : input.getAimTarget());
     pool.update(simDt);
     updateFx(simDt); // Laser/Rauch-Effekte altern lassen
     if (ownInv.isOpen()) { // Inventar läuft live mit (Beute/Statänderungen), gedrosselt
@@ -1366,6 +1393,31 @@ function boot(combatStyle: CombatStyle): void {
       );
       if (s.z > 0 && s.z < 1) screenBlips.push({ id: e.id, sx: s.x, sy: s.y });
     }
+    // Sniper-Zielsnap: im Scope snappt das Fadenkreuz auf den Gegner nahe dem Cursor. Ein NEUES
+    // Ziel darf nur gewählt werden, wenn die Waffe bereit ist (fireCd<=0 = Takt der Schussgeschw.);
+    // währenddessen bleibt das Fadenkreuz auf dem aktuellen Ziel (orange = nachladen, grün = bereit).
+    if (sniperCrosshair) {
+      if (combatStyle === 'sniper' && scopeActive) {
+        if (sniperTargetId && !roster.find((r) => r.id === sniperTargetId && r.combatant.alive)) sniperTargetId = null;
+        if (fireCd <= 0) sniperTargetId = nearestToPointer(mouseX, mouseY, screenBlips, sniperSnapRadius);
+        const tb = sniperTargetId ? screenBlips.find((b) => b.id === sniperTargetId) : null;
+        if (tb) {
+          const ready = fireCd <= 0;
+          const col = ready ? '#9be36b' : '#ffa94d';
+          sniperCrosshair.style.display = 'block';
+          sniperCrosshair.style.left = tb.sx + 'px';
+          sniperCrosshair.style.top = tb.sy + 'px';
+          sniperCrosshair.querySelectorAll<HTMLElement>('[data-ring],[data-tick]').forEach((el) => {
+            if (el.hasAttribute('data-ring')) el.style.borderColor = col; else el.style.background = col;
+          });
+        } else {
+          sniperCrosshair.style.display = 'none';
+        }
+      } else if (sniperCrosshair.style.display !== 'none') {
+        sniperCrosshair.style.display = 'none';
+      }
+    }
+
     hoveredId = inspecting ? null : nearestToPointer(mouseX, mouseY, screenBlips, 70);
     const hb = hoveredId ? screenBlips.find((b) => b.id === hoveredId) : null;
     if (hb && !overviewMap.isOpen()) {
