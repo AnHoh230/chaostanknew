@@ -42,6 +42,7 @@ import { createTuningPanel } from './ui/tuningPanel';
 import { TANK_CLASSES } from './game/classes';
 import { computeFlowState, pruneDeathTimes, type FlowState } from './game/flowState';
 import { ROSTER, DEFAULT_ESCALATION, scaleStats } from './enemy/roster';
+import { saeGift, tickGift, DEFAULT_GARTEN } from './build/garten';
 import { thresholdForStage, maxStage, type TuningProfile } from './evolution/profiles';
 import { CHANNEL_DISPLAY, type BaseMode, type EvolutionChannelId } from './evolution/channels';
 import { createEvolutionState, gainProgress, tryTriggerEvolution, emergingChannel } from './evolution/evolution';
@@ -171,6 +172,10 @@ function boot(combatStyle: CombatStyle): void {
   let sniperRange = 95, sniperCamBack = 150, sniperCamHeight = 95; // Scope: Reichweite + Kamera weit weg (mehr Gebiet)
   let sniperDmgMul = 2; // Sniper schlägt härter — Faktor auf den normalen Schussschaden
   let sniperTargets: string[] = []; // Ziele, die der nächste Schuss trifft (Auto-Targeting, jeden Frame neu)
+  // GARTEN-BUILD (Z-Z-Z) erster echter Build-Test: Schuss sät reifendes Gift statt Direktschaden.
+  // Fest an für diesen Test; der Spieler IST der Garten (noch kein Kompass/Formung).
+  const GARTEN_MODE = true;
+  const gartenCfg = { ...DEFAULT_GARTEN };
   let returnBoostCd = 0; // Kern-Stufe 3: kurzes Tempo-Fenster nach dem Auspacken
   let sniperCrosshair: HTMLDivElement | null = null; // Cursor-Fadenkreuz (grün=bereit / orange=nachladen)
   let markPool: HTMLDivElement[] = []; // Ziel-Ringe um die getroffenen Gegner (1..maxMarks)
@@ -488,6 +493,7 @@ function boot(combatStyle: CombatStyle): void {
       if (!e) continue;
       turret.rotation.y = yawTo(origin.x, origin.z, e.combatant.x, e.combatant.z) - root.rotation.y;
       spawnLaser(origin.x, origin.z, e.combatant.x, e.combatant.z);
+      if (GARTEN_MODE) { e.gift = saeGift(e.gift, gartenCfg); hits += 1; continue; } // Garten: säen statt töten
       let hitDmg = dmg;
       // Wundbruch: wiederholte Wahl baut Wunddruck; Bonus = Druck; bei Schwelle bricht der Gegner
       // lokal auf (AoE um ihn herum) und der Druck wird zurückgesetzt.
@@ -1160,6 +1166,11 @@ function boot(combatStyle: CombatStyle): void {
         spawned.combatant.maxHp = s.hp; spawned.combatant.hp = s.hp;
         spawned.damage = s.damage; spawned.speed = s.speed; spawned.combatant.lootValue = s.lootValue;
       }
+      if (GARTEN_MODE) {
+        // Garten-Stage (handgesetzt): zähe, langsame Gegner — leben lange genug, dass Gift reifen kann.
+        spawned.combatant.maxHp = 200; spawned.combatant.hp = 200;
+        spawned.speed = 4; spawned.damage = 12;
+      }
       roster.push(spawned); metrics.onSpawn(spawned.typeId); spawnTimes.set(spawned.id, runClock);
     }
 
@@ -1208,7 +1219,8 @@ function boot(combatStyle: CombatStyle): void {
       if (distToPlayer > out.standoff) {
         const tdx = out.tx - er.position.x, tdz = out.tz - er.position.z;
         const tl = Math.hypot(tdx, tdz) || 1;
-        const step = e.speed * mods.speedMul * simDt; // Tempo type-/stufen-getrieben (out.speedMul = Muster, nicht Tempo)
+        const giftSlow = e.gift ? (1 - gartenCfg.slow) : 1; // Garten: vergiftete Gegner gedrosselt (Bedrohung runter)
+        const step = e.speed * mods.speedMul * giftSlow * simDt; // Tempo type-/stufen-getrieben (out.speedMul = Muster, nicht Tempo)
         er.position.x += (tdx / tl) * step;
         er.position.z += (tdz / tl) * step;
         er.rotation.y = Math.atan2(tdx, tdz);
@@ -1257,6 +1269,20 @@ function boot(combatStyle: CombatStyle): void {
       e.dot.tickCd -= simDt;
       if (e.dot.tickCd <= 0) { e.dot.tickCd += dotEvery; damageEnemyTick(e, dotDmg); }
       if (e.combatant.alive && e.dot && e.dot.left <= 0) e.dot = undefined;
+    }
+
+    // GARTEN-Build: reifendes Gift tickt pro Gegner. Tötet das Gift den Gegner, „platzt" er sichtbar.
+    if (GARTEN_MODE) {
+      for (let i = roster.length - 1; i >= 0; i--) {
+        const e = roster[i];
+        if (!e || !e.combatant.alive || !e.gift) continue;
+        const r = tickGift(e.gift, simDt, gartenCfg);
+        if (r.dmg > 0) {
+          damageEnemyTick(e, r.dmg);
+          if (!e.combatant.alive) spawnBurstDisc(e.combatant.x, e.combatant.z, 3); // reif aufgebrochen
+        }
+        if (r.expired && e.combatant.alive && e.gift) e.gift = undefined;
+      }
     }
 
     // Zielnetz-Kontamination: liegende Marken ticken Schaden auf den markierten Gegner (ab St2 auch
