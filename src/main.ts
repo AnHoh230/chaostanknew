@@ -43,6 +43,7 @@ import { TANK_CLASSES } from './game/classes';
 import { computeFlowState, pruneDeathTimes, type FlowState } from './game/flowState';
 import { ROSTER, DEFAULT_ESCALATION, scaleStats } from './enemy/roster';
 import { saeGift, tickGift, istReif, reifeStufe, giftSlow, DEFAULT_GARTEN } from './build/garten';
+import { buildStufe, gegnerWelle, gartenTypStats, pulkGroesse, BUILD_STUFE_NAME } from './build/gartenProgression';
 import { thresholdForStage, maxStage, type TuningProfile } from './evolution/profiles';
 import { CHANNEL_DISPLAY, type BaseMode, type EvolutionChannelId } from './evolution/channels';
 import { createEvolutionState, gainProgress, tryTriggerEvolution, emergingChannel } from './evolution/evolution';
@@ -182,7 +183,8 @@ function boot(combatStyle: CombatStyle): void {
   const GIFT_GLOW = [new Color3(0.04, 0.13, 0.02), new Color3(0.08, 0.3, 0.03), new Color3(0.45, 0.32, 0), new Color3(0.7, 0.06, 0)];
   const GIFT_GREY = new Color3(0.22, 0.22, 0.26); // geerntet: Rot SOFORT weg, fahles Grau (sterbender Bruchkörper)
   const GARTEN_HARVEST_TIME = 0.4; // s grau-Animation nach der Ernte, dann Tod
-  let erntefieber = 0; // ZZZ-Buff „Erntefieber": +1 je geerntetem (reif gestorbenem) Panzer — macht Gift tödlicher + neue Infektionen heißer
+  let erntefieber = 0; // ZZZ-Buff „Erntefieber": +1 je geerntetem (reif gestorbenem) Panzer — macht reifes Gift tödlicher
+  const GIFT_DOT_ST1 = 6; // St 1 (Z): reiner Köchel-DoT pro Tick — tötet langsam, kein Reifen/Ansteckung
   const setEnemyGlow = (e: Enemy, col: Color3): void => {
     for (const m of e.view.root.getChildMeshes()) {
       const mat = m.material as StandardMaterial | null;
@@ -242,6 +244,7 @@ function boot(combatStyle: CombatStyle): void {
     radiusMin: 55, // größere, weiter gestreute Spawn-Area (kein Dauerfeuer auf der Stelle)
     radiusMax: 130,
     maxLevel: 3,
+    clumpSize: pulkGroesse, // Schwarm spawnt als Pulk auf einen Punkt (Garten); Rest einzeln
   });
 
   // Combatant des Spielers (Gegner-Combatants liefert der Roster dynamisch).
@@ -508,9 +511,10 @@ function boot(combatStyle: CombatStyle): void {
       turret.rotation.y = yawTo(origin.x, origin.z, e.combatant.x, e.combatant.z) - root.rotation.y;
       spawnLaser(origin.x, origin.z, e.combatant.x, e.combatant.z);
       if (GARTEN_MODE) {
-        // SEUCHE: ein Schuss INFIZIERT (sät Gift). Kein Direktschaden — töten tut nur das reifende
-        // Gift. Erntefieber wirkt NICHT aufs Säen, nur aufs reife Gift. „Markieren" = anschießen.
-        e.gift = saeGift(e.gift, gartenCfg);
+        // Stufenweise: St 0 = Grundschuss (direkter Treffer, Z noch nicht ausgebildet); ab St 1
+        // INFIZIERT der Schuss (Gift säen) — töten tut dann nur das Gift. „Markieren" = anschießen.
+        if (buildStufe(runClock) < 1) damageEnemyTick(e, dmg);
+        else e.gift = saeGift(e.gift, gartenCfg);
         hits += 1; continue;
       }
       let hitDmg = dmg;
@@ -1171,32 +1175,31 @@ function boot(combatStyle: CombatStyle): void {
     runClock += simDt;
     const aliveCount = roster.reduce((n, e) => n + (e.combatant.alive ? 1 : 0), 0);
     // BROKEN: keine neuen Spawns (Druck raus, Loop erholt sich). Sonst normaler gedeckelter Nachschub.
-    const gartenWave = Math.floor(runClock / 20); // Garten-Eskalation: alle 20s eine Stufe höher
-    const spawnPlan = GARTEN_MODE
-      ? { targetCount: Math.min(16, 5 + gartenWave), weights: { allrounder: 1 } } // Zahl wächst mit der Welle
+    const welle = GARTEN_MODE ? gegnerWelle(runClock) : null; // Garten: zeit-getriebene Welle (Menge/Mix/Level/Takt)
+    const spawnPlan = welle
+      ? { targetCount: welle.targetCount, weights: welle.weights, interval: welle.interval }
       : currentSwarmPlan();
-    const spawned = flowState === 'broken' ? null : spawner.update(simDt, px, pz, aliveCount, spawnPlan);
-    if (spawned) {
-      // Stats aus dem Roster × aktueller Distanz-Heat-Stufe setzen (überschreibt die Level-Defaults).
-      const r = rosterGet[spawned.typeId];
-      if (r) {
-        const stufe = director.states().find((s) => s.id === 'nebel')?.stufe ?? 0;
-        const s = scaleStats(
-          { speed: r.speed(), hp: r.hp(), damage: r.dmg(), lootValue: r.loot },
-          stufe,
-          { hp: escHpGet(), speed: escSpeedGet(), damage: escDmgGet() },
-        );
-        spawned.combatant.maxHp = s.hp; spawned.combatant.hp = s.hp;
-        spawned.damage = s.damage; spawned.speed = s.speed; spawned.combatant.lootValue = s.lootValue;
-      }
-      if (GARTEN_MODE) {
-        // Seuchen-Stage: HP so, dass der Panzer die lange Inkubation überlebt (Köcheln klein) und dann
-        // REIF am tödlichen Gift sterben muss (sonst keine Ernte) — nicht „wie Fliegen". Mit jeder Welle
-        // zäher/schneller/härter, damit Druck entsteht; das stärker werdende Gift hält dagegen.
-        spawned.combatant.maxHp = 70 + gartenWave * 14;
-        spawned.combatant.hp = spawned.combatant.maxHp;
-        spawned.speed = 4 + gartenWave * 0.7;
-        spawned.damage = 12 + gartenWave * 4;
+    const spawnedList = flowState === 'broken' ? [] : spawner.update(simDt, px, pz, aliveCount, spawnPlan);
+    for (const spawned of spawnedList) {
+      if (welle) {
+        // Garten: Stats pro Typ × Wellen-Level (Charakter steckt im Typ, Level skaliert) — ersetzt die
+        // flache Heat-Logik. Schwarm fragil, Brocken zäh, Läufer schnell, Allrounder Mitte.
+        const ts = gartenTypStats(spawned.typeId, welle.level);
+        spawned.combatant.maxHp = ts.hp; spawned.combatant.hp = ts.hp;
+        spawned.damage = ts.damage; spawned.speed = ts.speed;
+      } else {
+        // Stats aus dem Roster × aktueller Distanz-Heat-Stufe setzen (überschreibt die Level-Defaults).
+        const r = rosterGet[spawned.typeId];
+        if (r) {
+          const stufe = director.states().find((s) => s.id === 'nebel')?.stufe ?? 0;
+          const s = scaleStats(
+            { speed: r.speed(), hp: r.hp(), damage: r.dmg(), lootValue: r.loot },
+            stufe,
+            { hp: escHpGet(), speed: escSpeedGet(), damage: escDmgGet() },
+          );
+          spawned.combatant.maxHp = s.hp; spawned.combatant.hp = s.hp;
+          spawned.damage = s.damage; spawned.speed = s.speed; spawned.combatant.lootValue = s.lootValue;
+        }
       }
       roster.push(spawned); metrics.onSpawn(spawned.typeId); spawnTimes.set(spawned.id, runClock);
     }
@@ -1298,9 +1301,11 @@ function boot(combatStyle: CombatStyle): void {
       if (e.combatant.alive && e.dot && e.dot.left <= 0) e.dot = undefined;
     }
 
-    // SEUCHE (Z-Z-Z): INFIZIEREN (fireVolley) → REIFEN (köcheln + drosseln + ANSTECKEN) → reif STEHT
-    // und stirbt am Gift → ERNTE (Erntefieber-Buff). Hier: Reifen, Ansteckung, Gift-Tod, grau-Animation.
+    // SEUCHE (Z-Z-Z) — STUFENWEISE nach buildStufe: St 1 nur Köchel-DoT (kein Reifen/Ansteckung);
+    // ab St 2 reifen + anstecken (reif steht & stirbt am Gift); ab St 3 gibt der reife Gift-Tod
+    // Erntefieber. Plus die grau-Animation der geernteten Panzer.
     if (GARTEN_MODE) {
+      const stufe = buildStufe(runClock);
       for (let i = roster.length - 1; i >= 0; i--) {
         const e = roster[i];
         if (!e) continue;
@@ -1312,6 +1317,16 @@ function boot(combatStyle: CombatStyle): void {
           continue;
         }
         if (!e.combatant.alive || !e.gift) continue;
+
+        if (stufe < 2) {
+          // St 1 (Z): reiner Köchel-DoT — kein Reifen, kein Reif-Status, keine Ansteckung. Tötet langsam.
+          e.gift.tickCd -= simDt;
+          if (e.gift.tickCd <= 0) { e.gift.tickCd += gartenCfg.tickEvery; damageEnemyTick(e, GIFT_DOT_ST1); }
+          if (e.combatant.alive) setGiftGlow(e, 1); // konstant giftgrün (reift nicht)
+          continue;
+        }
+
+        // St 2+ (ZZ/ZZZ): volle Seuche — reifen, reif=tödlich, Ansteckung.
         const warReif = istReif(e.gift, gartenCfg); // schon reif → dieser Tick ist tödliches Gift
         const r = tickGift(e.gift, simDt, gartenCfg, erntefieber); // köchelt+reift, oder reif→tödlich
         if (r.dmg > 0) {
@@ -1320,11 +1335,13 @@ function boot(combatStyle: CombatStyle): void {
           if (e.combatant.hp <= 0) {
             e.combatant.hp = 0; e.combatant.alive = false;
             if (warReif) {
-              // ERNTESIEG: ein REIFER Panzer ist am Gift gestorben → dauerhafter Erntefieber-Buff.
-              erntefieber += 1;
+              // reifer Gift-Tod → grau-Ernte-Optik. Erntefieber-Buff aber ERST ab St 3 (ZZZ).
               e.harvested = GARTEN_HARVEST_TIME; e.gift = undefined; setEnemyGlow(e, GIFT_GREY);
-              showToast(`🦠 ERNTESIEG — Erntefieber +${erntefieber}`);
-              alog.log('ernte', { fieber: erntefieber, t: +runClock.toFixed(1) });
+              if (stufe >= 3) {
+                erntefieber += 1;
+                showToast(`🦠 ERNTESIEG — Erntefieber +${erntefieber}`);
+                alog.log('ernte', { fieber: erntefieber, t: +runClock.toFixed(1) });
+              }
             } else {
               killEnemy(e, 'player'); // mitten in der Reifung gestorben → normaler Tod, kein Buff
             }
@@ -1489,7 +1506,11 @@ function boot(combatStyle: CombatStyle): void {
             });
           } else sniperCrosshair.style.display = 'none';
           for (const m of markPool) m.style.display = 'none'; // keine Auto-Ziel-Ringe im Garten
-          if (scopeBadge) scopeBadge.textContent = `🦠 SEUCHE · infizieren — Erntefieber +${erntefieber}`;
+          if (scopeBadge) {
+            const bs = buildStufe(runClock);
+            const nm = BUILD_STUFE_NAME[Math.min(bs, BUILD_STUFE_NAME.length - 1)];
+            scopeBadge.textContent = bs >= 3 ? `🦠 St${bs} · ${nm} — Erntefieber +${erntefieber}` : `🦠 St${bs} · ${nm}`;
+          }
         } else {
           const coreStage = evo.unlockedStagesByChannel.sniper_core;
           sniperTargets = fireCd <= 0 ? pickTargets(maxMarks(), coreStage, px, pz, sniperRange) : [];
