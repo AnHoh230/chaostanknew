@@ -710,6 +710,24 @@ function boot(combatStyle: CombatStyle): void {
     fxList.push({ mesh: disc, mat, life: 0.45, max: 0.45, fade: true, alpha0: 0.55 });
   }
 
+  /** ZZZ-Ernte: ein zackiger schwarzer Tentakel, der vom Ernte-Ort nach einem Panzer greift. */
+  function spawnTentakel(ax: number, az: number, bx: number, bz: number): void {
+    const segs = 5;
+    const dx = bx - ax, dz = bz - az, l = Math.hypot(dx, dz) || 1;
+    const nx = -dz / l, nz = dx / l; // senkrecht zur Greifrichtung (für die Zacken)
+    const pts: Vector3[] = [];
+    for (let i = 0; i <= segs; i++) {
+      const t = i / segs;
+      // pseudo-zufälliger Seiten-Zacken (deterministisch per Ort), an den Enden 0 → greift sauber an
+      const jag = i > 0 && i < segs ? Math.sin((ax + bz) * 9.7 + i * 2.1) * 2.4 : 0;
+      pts.push(new Vector3(ax + dx * t + nx * jag, 0.7 + Math.sin(i * 1.3) * 0.35, az + dz * t + nz * jag));
+    }
+    const line = MeshBuilder.CreateLines('fx_tentakel', { points: pts }, scene);
+    line.color = new Color3(0.06, 0.0, 0.09); // fast schwarz, ein Hauch Seuchen-Violett
+    line.isPickable = false;
+    fxList.push({ mesh: line as unknown as Mesh, mat: null as unknown as StandardMaterial, life: 0.5, max: 0.5, fade: false, alpha0: 1 });
+  }
+
   /** Effekt-Meshes altern lassen (Fade) und am Ende entsorgen. */
   function updateFx(dt: number): void {
     for (let i = fxList.length - 1; i >= 0; i--) {
@@ -1329,20 +1347,21 @@ function boot(combatStyle: CombatStyle): void {
           if (!b.combatant.alive) continue;
           if (Math.hypot(a.combatant.x - b.combatant.x, a.combatant.z - b.combatant.z) > gartenCfg.auraRadius * 2) continue;
           const cx = (a.combatant.x + b.combatant.x) / 2, cz = (a.combatant.z + b.combatant.z) / 2;
-          for (const e of [a, b]) { // die Auslöser sterben (grau-Animation)
+          for (const e of [a, b]) { // die Auslöser sterben (grau-Animation), Tentakel greift sie
             e.combatant.hp = 0; e.combatant.alive = false;
             e.harvested = GARTEN_HARVEST_TIME; e.gift = undefined; setEnemyGlow(e, GIFT_GREY);
+            spawnTentakel(cx, cz, e.combatant.x, e.combatant.z);
           }
           dotKraft += gartenCfg.dotKraftProErnte; // Spieler wird dauerhaft stärker
           let gegriffen = 0;
-          for (const o of roster) { // Tentakeln greifen riesig um sich
+          for (const o of roster) { // Tentakeln greifen riesig nach allen Panzern im Radius
             if (!o.combatant.alive || o.harvested != null || o === a || o === b) continue;
             if (Math.hypot(o.combatant.x - cx, o.combatant.z - cz) > gartenCfg.ausbreitRadius) continue;
             if (o.gift) o.gift.potency = gartenCfg.erntePot; // hat Dot → Ernte-Status (reif)
             else o.gift = saeGift(undefined, gartenCfg, dotKraft); // kein Dot → frischer gebuffter Dot
+            spawnTentakel(cx, cz, o.combatant.x, o.combatant.z);
             gegriffen++;
           }
-          spawnBurstDisc(cx, cz, gartenCfg.ausbreitRadius * 0.6); // Platzhalter-FX (Tentakeln folgen)
           alog.log('ernte', { kraft: dotKraft, gegriffen, t: +runClock.toFixed(1) });
           break; // a ist geerntet → nächstes i
         }
