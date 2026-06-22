@@ -176,6 +176,7 @@ function boot(combatStyle: CombatStyle): void {
   // Fest an für diesen Test; der Spieler IST der Garten (noch kein Kompass/Formung).
   const GARTEN_MODE = true;
   const gartenCfg = { ...DEFAULT_GARTEN };
+  const GARTEN_SNAP_PX = 150; // großzügiger Cursor-Fang fürs manuelle Säen (du wählst die Ziele selbst)
   let returnBoostCd = 0; // Kern-Stufe 3: kurzes Tempo-Fenster nach dem Auspacken
   let sniperCrosshair: HTMLDivElement | null = null; // Cursor-Fadenkreuz (grün=bereit / orange=nachladen)
   let markPool: HTMLDivElement[] = []; // Ziel-Ringe um die getroffenen Gegner (1..maxMarks)
@@ -1409,29 +1410,40 @@ function boot(combatStyle: CombatStyle): void {
     // Ringe = die getroffenen Ziele. Bei maxMarks=1 ist das der bisherige Einzel-Schuss.
     if (sniperCrosshair) {
       if (combatStyle === 'sniper' && scopeActive) {
-        const coreStage = evo.unlockedStagesByChannel.sniper_core;
-        sniperTargets = fireCd <= 0
-          ? pickTargets(maxMarks(), coreStage, px, pz, sniperRange)
-          : [];
         const col = fireCd <= 0 ? '#9be36b' : '#ffa94d'; // grün = feuerbereit, orange = nachladen
-        // Kein Cursor-Fadenkreuz mehr — Targeting ist cursor-unabhängig (alle in Reichweite).
-        // Feedback läuft nur über die Ziel-Ringe (Farbe = Feuerbereitschaft).
-        sniperCrosshair.style.display = 'none';
-        // Ringe um jedes Ziel, das der nächste Schuss trifft.
-        for (let i = 0; i < markPool.length; i++) {
-          const tb = i < sniperTargets.length ? screenBlips.find((b) => b.id === sniperTargets[i]) : null;
-          if (tb) {
-            markPool[i]!.style.display = 'block';
-            markPool[i]!.style.left = tb.sx + 'px';
-            markPool[i]!.style.top = tb.sy + 'px';
-            markPool[i]!.style.borderColor = col;
-          } else markPool[i]!.style.display = 'none';
-        }
-        // Aktuelle Ziel-Priorität sichtbar machen (am Anfang Allrounder, ab St1 Racer, ab St2 ×2).
-        if (scopeBadge) {
-          const tgt = coreStage >= 1 ? 'Racer' : 'Allrounder';
-          const cnt = maxMarks();
-          scopeBadge.textContent = `🔭 SCOPE · Ziel: ${tgt}${cnt > 1 ? ` ×${cnt}` : ''}`;
+        if (GARTEN_MODE) {
+          // Garten: DU wählst, wen du ansäst — Ziel unter dem Cursor. Manuell verteilen statt Auto-Snap.
+          const cand = fireCd <= 0 ? nearestToPointer(mouseX, mouseY, screenBlips, GARTEN_SNAP_PX) : null;
+          sniperTargets = cand ? [cand] : [];
+          const cb = cand ? screenBlips.find((b) => b.id === cand) : null;
+          if (cb) {
+            sniperCrosshair.style.display = 'block';
+            sniperCrosshair.style.left = cb.sx + 'px';
+            sniperCrosshair.style.top = cb.sy + 'px';
+            sniperCrosshair.querySelectorAll<HTMLElement>('[data-ring],[data-tick]').forEach((el) => {
+              if (el.hasAttribute('data-ring')) el.style.borderColor = col; else el.style.background = col;
+            });
+          } else sniperCrosshair.style.display = 'none';
+          for (const m of markPool) m.style.display = 'none'; // keine Auto-Ziel-Ringe im Garten
+          if (scopeBadge) scopeBadge.textContent = '🔭 GARTEN — Ziel anvisieren & säen';
+        } else {
+          const coreStage = evo.unlockedStagesByChannel.sniper_core;
+          sniperTargets = fireCd <= 0 ? pickTargets(maxMarks(), coreStage, px, pz, sniperRange) : [];
+          sniperCrosshair.style.display = 'none'; // Auto-Targeting: Feedback nur über die Ziel-Ringe
+          for (let i = 0; i < markPool.length; i++) {
+            const tb = i < sniperTargets.length ? screenBlips.find((b) => b.id === sniperTargets[i]) : null;
+            if (tb) {
+              markPool[i]!.style.display = 'block';
+              markPool[i]!.style.left = tb.sx + 'px';
+              markPool[i]!.style.top = tb.sy + 'px';
+              markPool[i]!.style.borderColor = col;
+            } else markPool[i]!.style.display = 'none';
+          }
+          if (scopeBadge) {
+            const tgt = coreStage >= 1 ? 'Racer' : 'Allrounder';
+            const cnt = maxMarks();
+            scopeBadge.textContent = `🔭 SCOPE · Ziel: ${tgt}${cnt > 1 ? ` ×${cnt}` : ''}`;
+          }
         }
       } else {
         if (sniperCrosshair.style.display !== 'none') sniperCrosshair.style.display = 'none';
