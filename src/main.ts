@@ -16,7 +16,7 @@ import { createProjectileView } from './combat/projectileView';
 import { createCombatSystem, type Combatant } from './combat/combat';
 import { createStyleTracker } from './doctrine/styleTracker';
 import { createDoctrineDirector } from './doctrine/doctrineDirector';
-import { DOCTRINES, HEAT_STRONG, HEAT_MID, HEAT_LIGHT, DECAY, BANDS } from './doctrine/doctrineConfig';
+import { DOCTRINES, DECAY, BANDS } from './doctrine/doctrineConfig';
 import { planSwarm, type SwarmDirection } from './doctrine/spawnPlan';
 import { emptyProfile, STATIONARY_SPEED, type PlayerStyleProfile } from './doctrine/styleProfile';
 import { type Enemy } from './enemy/enemy';
@@ -353,9 +353,11 @@ function boot(combatStyle: CombatStyle): void {
   // genutzte Richtung heizt schnell, ungenutzte kühlt langsam → mehrere Richtungen gleichzeitig.
   // Alle Heat-Zahlen sind Regler (Kategorie „Doktrin").
   const styleTracker = createStyleTracker();
-  const heatStrongGet = tunables.add({ label: 'Heat +stark', category: 'Doktrin', value: HEAT_STRONG, min: 1, max: 60, step: 1 });
-  const heatMidGet = tunables.add({ label: 'Heat +mittel', category: 'Doktrin', value: HEAT_MID, min: 1, max: 60, step: 1 });
-  const heatLightGet = tunables.add({ label: 'Heat +leicht', category: 'Doktrin', value: HEAT_LIGHT, min: 0, max: 40, step: 1 });
+  // Heat-Anstieg bewusst LANGSAM (Default), damit die Gegner-Eskalation erst spät kommt und der
+  // Spieler Zeit hat, sich über den Kompass zu entwickeln. (Konstanten HEAT_* bleiben für Tests.)
+  const heatStrongGet = tunables.add({ label: 'Heat +stark', category: 'Doktrin', value: 8, min: 1, max: 60, step: 1 });
+  const heatMidGet = tunables.add({ label: 'Heat +mittel', category: 'Doktrin', value: 5, min: 1, max: 60, step: 1 });
+  const heatLightGet = tunables.add({ label: 'Heat +leicht', category: 'Doktrin', value: 2, min: 0, max: 40, step: 1 });
   const decayGet = tunables.add({ label: 'Abkühlung/Puls', category: 'Doktrin', value: DECAY, min: 0, max: 40, step: 1 });
   const band1Get = tunables.add({ label: 'Stufe-1-Schwelle', category: 'Doktrin', value: BANDS[0]!, min: 5, max: 95, step: 1 });
   const band2Get = tunables.add({ label: 'Stufe-2-Schwelle', category: 'Doktrin', value: BANDS[1]!, min: 5, max: 99, step: 1 });
@@ -395,7 +397,7 @@ function boot(combatStyle: CombatStyle): void {
   let playerStationary = false; // für „Schaden im Stand" + Stil
   let prevPx = 0, prevPz = 0, prevPosInit = false; // echtes Spielertempo aus Positionsdelta
   let playerVelX = 0, playerVelZ = 0; // Spieler-Geschwindigkeit (blocker-Verhalten)
-  let pulseLen = 10; // Frontlage-Puls (s): so kurz, dass der Stil-Konter INNERHALB eines Lebens rampt
+  let pulseLen = 14; // Frontlage-Puls (s): bewusst länger → Heat rampt langsam (Spieler-Entwicklung vorweg)
   let pulseCd = pulseLen;
 
   const combat = createCombatSystem(pool, liveCombatants, {
