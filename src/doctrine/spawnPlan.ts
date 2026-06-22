@@ -20,8 +20,8 @@ export interface SwarmPlan {
   weights: Record<string, number>; // Typ-ID → relatives Gewicht beim Nachspawnen
 }
 
-/** Bevor der Spieler einen Stil zeigt (alles kalt): von allem etwas. */
-export const NEUTRAL_TYPES = ['closer', 'flanker', 'swarm', 'disruptor', 'blocker'];
+/** Heat 0 (alles kalt): nur Allrounder — der Grund-Gegner des Sniper-Setups. */
+export const NEUTRAL_TYPES = ['allrounder'];
 
 export function planSwarm(
   dirs: SwarmDirection[],

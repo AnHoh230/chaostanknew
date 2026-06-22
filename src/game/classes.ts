@@ -21,7 +21,7 @@ export const TANK_CLASSES: readonly TankClass[] = [
     name: 'Panzer',
     beschreibung: 'Schwer gepanzert, harte Schläge. Weiche per Dash (Shift+WASD) aus.',
     composition: { chassis: 'c_wide', wheels: 'w_tread', turret: 't_big', weapon: 'g_long' },
-    speed: 5,
+    speed: 12, // = alter Späher (vom Nutzer getestet: alles Langsamere macht keinen Spaß)
     maxHp: 160,
     damage: 36,
   },

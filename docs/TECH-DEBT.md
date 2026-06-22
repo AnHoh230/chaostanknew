@@ -175,4 +175,29 @@ weiter ausbauen.** Ersatz (zu Richtung A), später festzulegen, wenn der Kampf s
 - bei späterer Wellen-Struktur: Shop **nur zwischen Wellen** (Kampf pausiert).
 
 **Status:** markiert als raus; Rückbau/Ersatz erst nach Kampf-Feel (Fix A/B). Siehe
-[[balancing-strukturschluss]].
+[[balancing-strukturschluss]]. **Nachtrag (2026-06-22): ERLEDIGT** — das ganze Item-/
+Shop-/Loot-/Inventar-/Geld-System ist gelöscht (commit bdfa70e). Damit sind auch
+TD-2/TD-5 (gear-basiert) gegenstandslos.
+
+---
+
+## TD-8 — Inaktive Gegner-Typen & Doktrin-Richtungen aufräumen (2026-06-22)
+
+Beim Umbau auf den **Sniper-Roster** (Allrounder/Racer/Bunker, Werte in
+`enemy/roster.ts`, Heat-gestuft über `nebel`/Distanz) wurden die alten Typen und zwei
+Richtungen nur **inaktiviert**, nicht gelöscht:
+
+- **Inaktive Typen** in `enemy/enemyTypes.ts`: `closer`, `flanker`, `swarm`, `disruptor`,
+  `blocker` (nicht mehr im Spawn — kommen weder über `NEUTRAL_TYPES` noch über eine
+  Doktrin). Ihre Verhaltens-Cases in `enemyBehavior.ts` (`flanker`/`swarm`/`disruptor`/
+  `blocker`) sind dadurch ungenutzt; `closer` wird noch von Allrounder/Bunker benutzt,
+  `racer` aktiv.
+- **Inaktive Richtungen** in `doctrine/doctrineConfig.ts`: `stoerkrieg` (Auto-Turret —
+  entfiel mit den Items) und `sperrkrieg` (Rush) haben alle Stufen `[]`.
+
+**Warum noch nicht weg:** erst muss der Sniper-Loop tragen; AoE/DoT bekommen eigene
+Stile/Richtungen (Spec 4.2–4.7). Wenn der neue Satz auch AoE/DoT mitträgt, fliegt das
+Inaktive raus (Typen, ungenutzte Behavior-Cases, leere Doktrinen). **Delete-don't-
+deactivate gilt — das hier ist eine bewusste, befristete Ausnahme.**
+
+**Status:** bewusst inaktiv geparkt; Aufräumen, sobald AoE/DoT-Roster steht.

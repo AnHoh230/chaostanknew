@@ -54,11 +54,19 @@ describe('DoctrineDirector (Schwarm-Heat pro Richtung)', () => {
     expect(heatOf(d, 'nebel')).toBe(30);
   });
 
-  it('jede Richtung hat 4 Stufen-Typsets (0..3)', () => {
+  it('jede Richtung hat 4 Stufen-Typsets (0..3), Stufe 0 leer', () => {
     for (const c of DOCTRINES) {
       expect(c.enemyTypesByStufe).toHaveLength(4);
       expect(c.enemyTypesByStufe[0]).toEqual([]); // Stufe 0 = keine Sonder-Typen
-      expect(c.enemyTypesByStufe[3]!.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('die aktive Richtung (nebel/Distanz) hat ab Stufe 1 Typen; inaktive sind komplett leer', () => {
+    const nebel = DOCTRINES.find((c) => c.id === 'nebel')!;
+    expect(nebel.enemyTypesByStufe[3]!.length).toBeGreaterThan(0);
+    // Sniper-Setup: nur 'nebel' aktiv; stoerkrieg/sperrkrieg vorerst inaktiviert (alle Stufen leer).
+    for (const c of DOCTRINES.filter((d) => d.id !== 'nebel')) {
+      expect(c.enemyTypesByStufe.every((s) => s.length === 0)).toBe(true);
     }
   });
 });

@@ -41,6 +41,7 @@ import { createTunables } from './ui/tunables';
 import { createTuningPanel } from './ui/tuningPanel';
 import { TANK_CLASSES } from './game/classes';
 import { computeFlowState, pruneDeathTimes, type FlowState } from './game/flowState';
+import { ROSTER, DEFAULT_ESCALATION, scaleStats } from './enemy/roster';
 import { createProgression } from './progression/progression';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
@@ -55,7 +56,6 @@ const SEED = 1337;
 const TANK_RADIUS = 1.5; // Treffer-Radius eines Panzers (XZ)
 const PROJECTILE_RADIUS = 0.3;
 const HIT_DAMAGE = 20; // Schaden pro Treffer (100 HP -> 5 Treffer)
-const ENEMY_SPEED = 5; // langsamer als der Spieler (8)
 const ENEMY_FIRE_COOLDOWN = 1.4; // Sekunden zwischen Gegner-Schüssen
 const DAMAGE_TICK = 0.5; // Länge eines „Ticks" (s) für DoT/AoE-Schaden
 
@@ -180,17 +180,37 @@ function boot(combatStyle: CombatStyle): void {
   const roster: Enemy[] = []; // lebende Gegner (dynamisch)
   // — Gegner-Aufkommen (Richtung A): feste, gedeckelte Zahl bedeutsamer Gegner-Panzer
   // (KEIN Schwarm/keine Dichte-aus-Heat mehr). Der Heat bestimmt nur noch die Typ-AUSWAHL.
-  const maxEnemiesGet = tunables.add({ label: 'Max Gegner', category: 'Gegner', value: 3, min: 1, max: 20, step: 1 });
-  const swarmIntervalGet = tunables.add({ label: 'Spawn-Takt s', category: 'Gegner', value: 1.5, min: 0.2, max: 6, step: 0.1 });
-  const enemyHpGet = tunables.add({ label: 'Gegner-HP-Faktor', category: 'Gegner', value: 0.5, min: 0.1, max: 2, step: 0.05 });
-  const enemyDmgGet = tunables.add({ label: 'Gegner-Schaden-Faktor', category: 'Gegner', value: 0.5, min: 0.1, max: 2, step: 0.05 });
+  const maxEnemiesGet = tunables.add({ label: 'Max Gegner', category: 'Gegner', value: 7, min: 1, max: 24, step: 1 });
+  const swarmIntervalGet = tunables.add({ label: 'Spawn-Takt s', category: 'Gegner', value: 1.0, min: 0.2, max: 6, step: 0.1 });
+  // — Aktiver Sniper-Roster: Werte je Typ (Basis = Stufe 0) + Heat-Stufen-Eskalation (×/Stufe) —
+  const rosterGet: Record<string, { speed(): number; hp(): number; dmg(): number; loot: number }> = {
+    allrounder: {
+      speed: tunables.add({ label: 'Allrounder-Tempo', category: 'Roster', value: ROSTER.allrounder!.speed, min: 1, max: 20, step: 0.5 }),
+      hp: tunables.add({ label: 'Allrounder-HP', category: 'Roster', value: ROSTER.allrounder!.hp, min: 10, max: 400, step: 5 }),
+      dmg: tunables.add({ label: 'Allrounder-Schaden', category: 'Roster', value: ROSTER.allrounder!.damage, min: 1, max: 120, step: 1 }),
+      loot: ROSTER.allrounder!.lootValue,
+    },
+    racer: {
+      speed: tunables.add({ label: 'Racer-Tempo', category: 'Roster', value: ROSTER.racer!.speed, min: 1, max: 24, step: 0.5 }),
+      hp: tunables.add({ label: 'Racer-HP', category: 'Roster', value: ROSTER.racer!.hp, min: 10, max: 400, step: 5 }),
+      dmg: tunables.add({ label: 'Racer-Schaden', category: 'Roster', value: ROSTER.racer!.damage, min: 1, max: 120, step: 1 }),
+      loot: ROSTER.racer!.lootValue,
+    },
+    bunker: {
+      speed: tunables.add({ label: 'Bunker-Tempo', category: 'Roster', value: ROSTER.bunker!.speed, min: 1, max: 20, step: 0.5 }),
+      hp: tunables.add({ label: 'Bunker-HP', category: 'Roster', value: ROSTER.bunker!.hp, min: 20, max: 1200, step: 10 }),
+      dmg: tunables.add({ label: 'Bunker-Schaden', category: 'Roster', value: ROSTER.bunker!.damage, min: 1, max: 200, step: 1 }),
+      loot: ROSTER.bunker!.lootValue,
+    },
+  };
+  const escHpGet = tunables.add({ label: 'Heat-HP ×/Stufe', category: 'Roster', value: DEFAULT_ESCALATION.hp, min: 1, max: 2.5, step: 0.05 });
+  const escSpeedGet = tunables.add({ label: 'Heat-Tempo ×/Stufe', category: 'Roster', value: DEFAULT_ESCALATION.speed, min: 1, max: 2, step: 0.02 });
+  const escDmgGet = tunables.add({ label: 'Heat-Schaden ×/Stufe', category: 'Roster', value: DEFAULT_ESCALATION.damage, min: 1, max: 2.5, step: 0.05 });
   const spawner = createSpawner(scene, TANK_RADIUS, () => aiRng.next(), {
     interval: swarmIntervalGet,
     radiusMin: 55, // größere, weiter gestreute Spawn-Area (kein Dauerfeuer auf der Stelle)
     radiusMax: 130,
     maxLevel: 3,
-    hpMul: enemyHpGet,
-    dmgMul: enemyDmgGet,
   });
 
   // Combatant des Spielers (Gegner-Combatants liefert der Roster dynamisch).
@@ -626,7 +646,7 @@ function boot(combatStyle: CombatStyle): void {
   function openInspect(id: string): void {
     const e = roster.find((r) => r.id === id && r.combatant.alive);
     if (!e) return;
-    const info = buildEnemyInfo({ ...e, speed: ENEMY_SPEED, activeBuffs: e.buffs.active().map((b) => b.label ?? b.id) });
+    const info = buildEnemyInfo({ ...e, speed: e.speed, activeBuffs: e.buffs.active().map((b) => b.label ?? b.id) });
     prevSimSpeed = clock.simSpeed;
     clock.simSpeed = 0; // Welt pausiert; beim Schließen wird prevSimSpeed wiederhergestellt
     inspecting = true;
@@ -786,7 +806,7 @@ function boot(combatStyle: CombatStyle): void {
     openInspect: (id: string) => { openInspect(id); return { open: inspecting, simSpeed: clock.simSpeed }; },
     enemyInfoOf: (id: string) => {
       const e = roster.find((r) => r.id === id);
-      return e ? buildEnemyInfo({ ...e, speed: ENEMY_SPEED, activeBuffs: e.buffs.active().map((b) => b.label ?? b.id) }) : null;
+      return e ? buildEnemyInfo({ ...e, speed: e.speed, activeBuffs: e.buffs.active().map((b) => b.label ?? b.id) }) : null;
     },
     teleportTo: (x: number, z: number) => {
       tank.view.root.position.set(x, 0, z);
@@ -881,7 +901,21 @@ function boot(combatStyle: CombatStyle): void {
     const aliveCount = roster.reduce((n, e) => n + (e.combatant.alive ? 1 : 0), 0);
     // BROKEN: keine neuen Spawns (Druck raus, Loop erholt sich). Sonst normaler gedeckelter Nachschub.
     const spawned = flowState === 'broken' ? null : spawner.update(simDt, px, pz, aliveCount, currentSwarmPlan());
-    if (spawned) { roster.push(spawned); metrics.onSpawn(spawned.typeId); spawnTimes.set(spawned.id, runClock); }
+    if (spawned) {
+      // Stats aus dem Roster × aktueller Distanz-Heat-Stufe setzen (überschreibt die Level-Defaults).
+      const r = rosterGet[spawned.typeId];
+      if (r) {
+        const stufe = director.states().find((s) => s.id === 'nebel')?.stufe ?? 0;
+        const s = scaleStats(
+          { speed: r.speed(), hp: r.hp(), damage: r.dmg(), lootValue: r.loot },
+          stufe,
+          { hp: escHpGet(), speed: escSpeedGet(), damage: escDmgGet() },
+        );
+        spawned.combatant.maxHp = s.hp; spawned.combatant.hp = s.hp;
+        spawned.damage = s.damage; spawned.speed = s.speed; spawned.combatant.lootValue = s.lootValue;
+      }
+      roster.push(spawned); metrics.onSpawn(spawned.typeId); spawnTimes.set(spawned.id, runClock);
+    }
 
     // Idle-Erkennung: aktiver Input = Fahren ODER kürzlich manuell gefeuert ODER Ziel bewegt.
     const aimT = input.getAimTarget();
@@ -928,7 +962,7 @@ function boot(combatStyle: CombatStyle): void {
       if (distToPlayer > out.standoff) {
         const tdx = out.tx - er.position.x, tdz = out.tz - er.position.z;
         const tl = Math.hypot(tdx, tdz) || 1;
-        const step = ENEMY_SPEED * out.speedMul * mods.speedMul * simDt;
+        const step = e.speed * mods.speedMul * simDt; // Tempo type-/stufen-getrieben (out.speedMul = Muster, nicht Tempo)
         er.position.x += (tdx / tl) * step;
         er.position.z += (tdz / tl) * step;
         er.rotation.y = Math.atan2(tdx, tdz);

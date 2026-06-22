@@ -40,29 +40,35 @@ export function stufeFromHeat(heat: number, bands: readonly number[] = BANDS): n
  */
 export const DOCTRINES: DoctrineConfig[] = [
   {
-    id: 'stoerkrieg', // Auto-Turret-lastig → Typen, die in den Nahbereich/hinter die Wanne drängen
+    id: 'stoerkrieg', // INAKTIV: Auto-Turret entfiel mit den Items → keine Typen mehr (nur Sniper-Setup)
     displayName: 'Störkrieg',
     triggers: [{ field: 'autoTurretDamageRatio', mid: 0.35, strong: 0.55 }],
-    enemyTypesByStufe: [[], ['closer'], ['closer', 'flanker'], ['closer', 'flanker', 'swarm']],
+    enemyTypesByStufe: [[], [], [], []],
   },
   // 'belagerung' (Bunker) entfernt: stationäres Snipern triggerte es zusätzlich zu Distanz →
   // zwei Konter für den Sniper. Bunker war zugleich der EINZIGE Trigger für AoE — der AoE-Konter
   // muss daher neu durchdacht werden (offen). Bis dahin hat AoE keine eigene Heat-Richtung.
   {
-    id: 'nebel', // Distanz/Sniper → schnelle Typen, die die Distanz schließen / Sichtlinie brechen
-    displayName: 'Nahkampfdruck',
+    id: 'nebel', // Distanz/Sniper — die EINZIGE aktive Richtung im Sniper-Setup.
+    displayName: 'Distanz',
     triggers: [{ field: 'longRangeKillRatio', mid: 0.4, strong: 0.65 }],
-    // Konter zum Sniper = der schnelle Racer. In JEDER Stufe präsent → je höher der Distanz-Heat,
-    // desto mehr Racer (höherer targetCount + Anteil); ab Stufe 2/3 zusätzlich Closer/Flanker.
-    enemyTypesByStufe: [[], ['racer'], ['racer', 'closer'], ['racer', 'closer', 'flanker']],
+    // Heat 0 (neutral) = nur allrounder. Stufe 1: meist allrounder, vereinzelt racer. Stufe 2:
+    // allrounder≈racer + bunker (langsamer Schwer-Panzer). Stufe 3: meist racer+bunker, kaum
+    // allrounder. Wiederholte Einträge = höheres Gewicht (planSwarm verteilt je Vorkommen).
+    enemyTypesByStufe: [
+      [],
+      ['allrounder', 'allrounder', 'allrounder', 'racer'],
+      ['allrounder', 'racer', 'bunker'],
+      ['racer', 'racer', 'bunker', 'bunker', 'allrounder'],
+    ],
   },
   {
-    id: 'sperrkrieg', // Rush → Typen, die den Vorstoß stoppen / sich in den Weg stellen
-    displayName: 'Sperrkrieg',
+    id: 'sperrkrieg', // INAKTIV: erst wenn Sniper trägt, kommen AoE/DoT-Richtungen dran (offen)
+    displayName: 'Rush',
     triggers: [
       { field: 'closeRangeKillRatio', mid: 0.4, strong: 0.6 },
       { field: 'avgSpeed', mid: 6, strong: 9 },
     ],
-    enemyTypesByStufe: [[], ['blocker'], ['blocker', 'swarm'], ['blocker', 'swarm', 'disruptor']],
+    enemyTypesByStufe: [[], [], [], []],
   },
 ];

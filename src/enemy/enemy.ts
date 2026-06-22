@@ -18,6 +18,7 @@ export interface Enemy {
   buffs: BuffStack; // passiver Empfänger der Spieler-Debuffs (Zielmarkierung/Rauch)
   typeId: string; // Gegner-Typ (bestimmt das Verhalten)
   behavior: EnemyBehavior; // Bewegungs-/Angriffsmuster
+  speed: number; // Welt-Einheiten/s (aus Roster × Heat-Stufe; main setzt es beim Spawn)
   phase: number; // 0..1 fester per-Gegner-Versatz (Orbit-Richtung / Schwarm-Streuung)
   dot?: { left: number; tickCd: number }; // aktive DoT (Restdauer s + Zeit bis nächster Tick)
 }
@@ -80,6 +81,7 @@ export function createEnemyEntity(
     buffs: createBuffStack(),
     typeId: spec.typeId,
     behavior: spec.behavior,
+    speed: 6, // Platzhalter; main überschreibt aus Roster × Heat-Stufe direkt nach dem Spawn
     phase: rng(),
   };
 }
