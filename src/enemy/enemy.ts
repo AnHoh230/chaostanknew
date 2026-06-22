@@ -21,7 +21,8 @@ export interface Enemy {
   speed: number; // Welt-Einheiten/s (aus Roster × Heat-Stufe; main setzt es beim Spawn)
   phase: number; // 0..1 fester per-Gegner-Versatz (Orbit-Richtung / Schwarm-Streuung)
   dot?: { left: number; tickCd: number }; // aktive DoT (Restdauer s + Zeit bis nächster Tick)
-  gift?: { potency: number; tickCd: number; life: number }; // Garten-Build: reifendes Gift (GiftState)
+  gift?: { potency: number; tickCd: number }; // Garten-Build: reifendes Gift (GiftState)
+  harvested?: number; // Garten: s bis Tod nach der Ernte (grau-Animation läuft, dann killEnemy)
 }
 
 export interface EnemySpec {

@@ -1,75 +1,67 @@
 /**
  * Garten-Build (Z-Z-Z) — reine Reife-Logik, kein Engine-Bezug (TDD).
  *
- * Die drei Z-Schichten als eine spielbare Mechanik:
- * - SÄEN (Slot 1): Ein Schuss erhöht die Potenz (= Schaden pro Tick) + frischt die Dauer auf.
- * - VERTIEFEN (Slot 2): Jeder Tick macht Schaden = Potenz und lässt sie REIFEN (×reife > 1).
- *   Die Potenz bestimmt die sichtbare Reife-Stufe (Aufrufer färbt den Gegner ein).
- * - ERNTEN (Slot 3): Erreicht die Potenz die Ernteschwelle, BRICHT die Wunde auf — ein
- *   großer Knall (Burst), der Aufrufer löst ihn aus. Der Höhepunkt.
+ * Der Loop: SÄEN → REIFEN lassen → ERNTEN.
+ * - SÄEN: ein Schuss erhöht die Potenz. Ein einzelner Saat reift von selbst bis „reif" — kein
+ *   Nachhämmern nötig (Nachsäen ist optional, treibt nur die Potenz für zähe Gegner höher).
+ * - REIFEN: jeder Tick köchelt einen kleinen DoT (tötet allein nicht) und lässt die Potenz reifen
+ *   (×reife). Erreicht sie die Schwelle, ist das Gift REIF (rot) — Reifen + Köcheln stoppen, es
+ *   wartet (kein Verfall).
+ * - ERNTEN: ein Schuss auf ein reifes Ziel löst den Erntebruch aus (Aufrufer) — der tödliche Knall.
  */
 export interface GiftState {
-  potency: number; // Giftstärke = Schaden pro Tick; wächst beim Säen UND beim Reifen
+  potency: number; // Giftstärke; wächst beim Säen und beim Reifen, bestimmt Glühen + Erntebruch
   tickCd: number; // s bis zum nächsten Tick
-  life: number; // s Restdauer ohne Nachschuss
 }
 
 export interface GartenConfig {
   saat: number; // Potenz-Zuwachs pro Schuss
-  reife: number; // Potenz-Faktor pro Tick (>1 = reift, Schaden wächst)
+  reife: number; // Potenz-Faktor pro Tick (>1 = reift)
   tickEvery: number; // s zwischen Ticks
-  giftDur: number; // s, die Gift ohne Nachschuss hält
-  slow: number; // 0..1 Tempo-Drosselung vergifteter Gegner (Bedrohung sofort runter)
-  erntePot: number; // Potenz-Schwelle: ab hier bricht die Wunde auf (Ernte)
-  ernteBurst: number; // Erntebruch-Schaden = Potenz × ernteBurst (der Knall)
+  tickDmg: number; // kleiner Köchel-Schaden pro Tick (DoT, tötet allein nicht)
+  slow: number; // 0..1 Tempo-Drosselung vergifteter Gegner
+  erntePot: number; // Potenz-Schwelle: ab hier ist das Gift reif (rot, wartet auf Ernte)
+  ernteBurst: number; // Erntebruch-Schaden = Potenz × ernteBurst (der tödliche Knall)
 }
 
 export const DEFAULT_GARTEN: GartenConfig = {
-  saat: 3,
-  reife: 1.18,
+  saat: 4,
+  reife: 1.2,
   tickEvery: 0.5,
-  giftDur: 6,
+  tickDmg: 3,
   slow: 0.5,
   erntePot: 24,
-  ernteBurst: 6, // Erntebruch wuchtig genug, dass er der tödliche Höhepunkt ist (nicht das Ticken)
+  ernteBurst: 10,
 };
 
-/** Ein Schuss sät/erneuert Gift: Potenz dazu, Dauer zurücksetzen. */
+/** Ein Schuss sät/erneuert Gift: Potenz dazu. Kein Verfall — frisches Gift reift von selbst weiter. */
 export function saeGift(g: GiftState | undefined, cfg: GartenConfig): GiftState {
-  return {
-    potency: (g?.potency ?? 0) + cfg.saat,
-    tickCd: g?.tickCd ?? cfg.tickEvery,
-    life: cfg.giftDur,
-  };
+  return { potency: (g?.potency ?? 0) + cfg.saat, tickCd: g?.tickCd ?? cfg.tickEvery };
+}
+
+/** Reif = Potenz hat die Ernteschwelle erreicht (rot, bereit für den Erntebruch). */
+export function istReif(g: GiftState, cfg: GartenConfig): boolean {
+  return g.potency >= cfg.erntePot;
 }
 
 /** Sichtbare Reife-Stufe 0..3 aus der Potenz (Aufrufer mappt sie auf eine Glüh-Farbe). */
 export function reifeStufe(g: GiftState, cfg: GartenConfig): 0 | 1 | 2 | 3 {
   const f = g.potency / cfg.erntePot;
-  if (f >= 1) return 3; // reif → bricht beim nächsten Tick auf
+  if (f >= 1) return 3; // reif (rot)
   if (f >= 0.6) return 2;
   if (f >= 0.3) return 1;
   return 0;
 }
 
 /**
- * Gift um dt weiterrechnen (mutiert g). Liefert:
- * - dmg: fälliger Tick-Schaden (0 = noch kein Tick)
- * - expired: Gift verfallen (→ Aufrufer entfernt es)
- * - ernte: Potenz hat die Schwelle erreicht → Aufrufer löst den Erntebruch aus
+ * Gift um dt weiterrechnen (mutiert g). Liefert den fälligen Köchel-Schaden (0 = noch kein Tick
+ * oder bereits reif). Reifes Gift köchelt/reift NICHT mehr — es wartet auf die Ernte (Schuss).
  */
-export function tickGift(
-  g: GiftState,
-  dt: number,
-  cfg: GartenConfig,
-): { dmg: number; expired: boolean; ernte: boolean } {
-  g.life -= dt;
-  if (g.life <= 0) return { dmg: 0, expired: true, ernte: false };
+export function tickGift(g: GiftState, dt: number, cfg: GartenConfig): { dmg: number } {
   g.tickCd -= dt;
-  if (g.tickCd > 0) return { dmg: 0, expired: false, ernte: false };
+  if (g.tickCd > 0) return { dmg: 0 };
   g.tickCd += cfg.tickEvery;
-  if (g.potency >= cfg.erntePot) return { dmg: 0, expired: false, ernte: true }; // reif → Erntebruch
-  const dmg = Math.round(g.potency);
-  g.potency *= cfg.reife; // reift weiter → nächster Tick trifft härter
-  return { dmg, expired: false, ernte: false };
+  if (g.potency >= cfg.erntePot) return { dmg: 0 }; // reif → wartet, kein Schaden/Reifen mehr
+  g.potency *= cfg.reife; // reift weiter Richtung Ernteschwelle
+  return { dmg: cfg.tickDmg }; // köchelt (kleiner DoT)
 }
