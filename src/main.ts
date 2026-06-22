@@ -345,6 +345,7 @@ function boot(combatStyle: CombatStyle): void {
   let lastRespawnAt = 0; // runClock des letzten Respawns (Respawn-Schonfrist)
   let flowState: FlowState = 'flow';
   let prevFlowState: FlowState = 'flow';
+  let runOver = false; // Tod = Run vorbei (kein Respawn) → alles auf Anfang per Reload
   const fxList: { mesh: Mesh; mat: StandardMaterial; life: number; max: number; fade: boolean; alpha0: number }[] = []; // kurzlebige Effekt-Meshes (Laser, Rauch)
 
   // — Reaktive Schwarm-Welt (R1): Stil messen → Heat pro Richtung je Frontlage-Puls.
@@ -894,18 +895,38 @@ function boot(combatStyle: CombatStyle): void {
 
   // Spieler-Respawn: bei 0 HP nicht „tot weiterballern", sondern neu aufbauen —
   // volle HP, an eine neue zufällige Position, mit kurzer Mercy-Unverwundbarkeit.
+  // Tod = Run vorbei: kein Respawn, kompletter Reset auf Anfang (Reload → Stil-Auswahl).
   function killPlayer(cause: string): void {
-    // Doppel-Auslösung im selben Frame verhindern (nach Respawn ist man invulnerable).
-    // NICHT auf alive prüfen: combat.ts setzt alive=false VOR onDeath → würde echten Tod schlucken.
-    if (playerCombatant.invulnerable) return;
+    if (playerCombatant.invulnerable || runOver) return; // (alive-Check NICHT: combat setzt alive=false vor onDeath)
     playerCombatant.hp = 0;
     playerCombatant.alive = false;
     log.warn('player died', { cause });
     metrics.onDeath();
-    deathTimes.push(runClock); // Deathloop-Erkennung (Flow-State)
-    alog.log('player.death', { cause, byType: metrics.lastDamager(), idle: Math.round(idleFor), flow: flowState }); // byType=Schädiger; idle≥2s = „Hände weg", nicht werten
+    alog.log('player.death', { cause, byType: metrics.lastDamager(), t: +runClock.toFixed(1) });
     bus.emit('tank.died', { tankId: 'player' });
-    respawnPlayer();
+    endRun(cause);
+  }
+
+  // „Gefallen"-Overlay; Neustart lädt die Seite neu = garantiert leckfreier Voll-Reset auf Anfang.
+  function endRun(cause: string): void {
+    runOver = true;
+    alog.log('run.over', { cause, t: +runClock.toFixed(1), level: progression.level });
+    const ov = document.createElement('div');
+    ov.style.cssText =
+      'position:fixed;inset:0;z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+      'background:#06080cee;color:#e8e0c8;font-family:system-ui,sans-serif;text-align:center;';
+    ov.innerHTML =
+      '<div style="font-size:44px;font-weight:800;letter-spacing:4px;color:#ff6b6b">GEFALLEN</div>' +
+      `<div style="margin-top:10px;opacity:.85;font-size:15px">Zeit überlebt: ${Math.round(runClock)}s · Level ${progression.level}</div>` +
+      '<div style="margin-top:6px;opacity:.5;font-size:13px">tot heißt tot — alles auf Anfang</div>';
+    const btn = document.createElement('button');
+    btn.textContent = 'Neu starten';
+    btn.style.cssText =
+      'margin-top:24px;padding:11px 28px;font:700 15px system-ui;color:#06080c;background:#9be36b;border:none;border-radius:8px;cursor:pointer;';
+    btn.onclick = () => window.location.reload();
+    ov.appendChild(btn);
+    document.body.appendChild(ov);
+    window.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') window.location.reload(); });
   }
 
   function respawnPlayer(): void {
@@ -1037,6 +1058,7 @@ function boot(combatStyle: CombatStyle): void {
 
   // GENAU EIN Loop. Reihenfolge: Steuerung -> Pool-Logik -> Boden-Recenter -> Mesh-Sync.
   startLoop(engine, scene, clock, (simDt) => {
+    if (runOver) return; // Tod = Run vorbei → Updates einfrieren (Overlay läuft, Reload startet neu)
     simTime += simDt;
     // SH2: Buffs altern, effektive Spieler-Stats (Tempo/Rüstung) = Loadout × Buffs.
     fireCd -= simDt;
