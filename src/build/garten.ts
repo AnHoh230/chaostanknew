@@ -15,13 +15,16 @@ export interface GiftState {
 }
 
 export interface GartenConfig {
-  saat: number; // Potenz-Zuwachs pro Schuss
+  saat: number; // Grund-Potenz-Zuwachs pro Schuss
   reife: number; // Potenz-Faktor pro Tick (>1 = reift)
   tickEvery: number; // s zwischen Ticks
   tickDmg: number; // kleiner Köchel-Schaden pro Tick (DoT, tötet allein nicht)
   slow: number; // 0..1 Tempo-Drosselung vergifteter Gegner
-  erntePot: number; // Potenz-Schwelle: ab hier ist das Gift reif (rot, wartet auf Ernte)
-  ernteBurst: number; // Erntebruch-Schaden = Potenz × ernteBurst (der tödliche Knall)
+  erntePot: number; // Potenz-Schwelle: ab hier ist das Gift reif (rot, Aura aktiv)
+  // ZZZ — Aura-Kaskade. RIESIG im Welt-Maßstab (Feld ist 130+), sonst gilt nie ein Panzer als nah:
+  auraRadius: number; // Welt-Radius der Reife-Aura; berühren sich zwei → Ernte
+  ausbreitRadius: number; // riesiger Radius, in dem die Ernte (Tentakeln) nach Panzern greift
+  dotKraftProErnte: number; // additive Dot-Stärke pro Ernte (bleibt — Spieler wird stärker)
 }
 
 export const DEFAULT_GARTEN: GartenConfig = {
@@ -31,12 +34,17 @@ export const DEFAULT_GARTEN: GartenConfig = {
   tickDmg: 3,
   slow: 0.5,
   erntePot: 24,
-  ernteBurst: 10,
+  auraRadius: 28,
+  ausbreitRadius: 80,
+  dotKraftProErnte: 1,
 };
 
-/** Ein Schuss sät/erneuert Gift: Potenz dazu. Kein Verfall — frisches Gift reift von selbst weiter. */
-export function saeGift(g: GiftState | undefined, cfg: GartenConfig): GiftState {
-  return { potency: (g?.potency ?? 0) + cfg.saat, tickCd: g?.tickCd ?? cfg.tickEvery };
+/**
+ * Ein Schuss sät/erneuert Gift: Grund-Potenz + die angesammelte Dot-Kraft (Buff) dazu. Kein Verfall.
+ * `dotKraft` hebt frische UND nachgesäte Dots auf die aktuelle Stärke des Spielers an.
+ */
+export function saeGift(g: GiftState | undefined, cfg: GartenConfig, dotKraft = 0): GiftState {
+  return { potency: (g?.potency ?? 0) + cfg.saat + dotKraft, tickCd: g?.tickCd ?? cfg.tickEvery };
 }
 
 /** Reif = Potenz hat die Ernteschwelle erreicht (rot, bereit für den Erntebruch). */

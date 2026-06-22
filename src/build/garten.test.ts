@@ -2,16 +2,20 @@ import { describe, it, expect } from 'vitest';
 import { saeGift, tickGift, istReif, reifeStufe, DEFAULT_GARTEN, type GartenConfig } from './garten';
 
 const CFG: GartenConfig = {
-  saat: 4, reife: 1.2, tickEvery: 0.5, tickDmg: 3, slow: 0.5, erntePot: 24, ernteBurst: 10,
+  saat: 4, reife: 1.2, tickEvery: 0.5, tickDmg: 3, slow: 0.5, erntePot: 24,
+  auraRadius: 28, ausbreitRadius: 80, dotKraftProErnte: 1,
 };
 
 describe('saeGift', () => {
   it('sät auf leerem Ziel die volle Saat', () => {
     expect(saeGift(undefined, CFG).potency).toBe(4);
   });
-  it('stapelt Potenz beim Nachsäen (optional, für zähe Gegner)', () => {
+  it('stapelt Potenz beim Nachsäen', () => {
     const g = saeGift(saeGift(undefined, CFG), CFG);
     expect(g.potency).toBe(8);
+  });
+  it('hebt mit Dot-Kraft (Buff) auf höhere Stärke an', () => {
+    expect(saeGift(undefined, CFG, 5).potency).toBe(9); // saat 4 + Kraft 5
   });
 });
 
@@ -56,10 +60,11 @@ describe('istReif / reifeStufe', () => {
 });
 
 describe('DEFAULT_GARTEN', () => {
-  it('reift, drosselt, köchelt klein und erntet wuchtig', () => {
+  it('reift, drosselt und hat riesige Aura/Ausbreitung im Welt-Maßstab', () => {
     expect(DEFAULT_GARTEN.reife).toBeGreaterThan(1);
     expect(DEFAULT_GARTEN.slow).toBeGreaterThan(0);
     expect(DEFAULT_GARTEN.erntePot).toBeGreaterThan(DEFAULT_GARTEN.saat);
-    expect(DEFAULT_GARTEN.ernteBurst).toBeGreaterThan(1);
+    expect(DEFAULT_GARTEN.auraRadius).toBeGreaterThan(20); // nicht mikrig
+    expect(DEFAULT_GARTEN.ausbreitRadius).toBeGreaterThan(DEFAULT_GARTEN.auraRadius);
   });
 });

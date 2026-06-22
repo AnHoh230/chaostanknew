@@ -181,6 +181,7 @@ function boot(combatStyle: CombatStyle): void {
   const GIFT_GLOW = [new Color3(0.04, 0.13, 0.02), new Color3(0.08, 0.3, 0.03), new Color3(0.45, 0.32, 0), new Color3(0.7, 0.06, 0)];
   const GIFT_GREY = new Color3(0.22, 0.22, 0.26); // geerntet: Rot SOFORT weg, fahles Grau (sterbender Bruchkörper)
   const GARTEN_HARVEST_TIME = 0.4; // s grau-Animation nach der Ernte, dann Tod
+  let dotKraft = 0; // ZZZ-Buff: jede Ernte erhöht ihn dauerhaft → stärkere Grund-Dots
   const setEnemyGlow = (e: Enemy, col: Color3): void => {
     for (const m of e.view.root.getChildMeshes()) {
       const mat = m.material as StandardMaterial | null;
@@ -506,20 +507,9 @@ function boot(combatStyle: CombatStyle): void {
       turret.rotation.y = yawTo(origin.x, origin.z, e.combatant.x, e.combatant.z) - root.rotation.y;
       spawnLaser(origin.x, origin.z, e.combatant.x, e.combatant.z);
       if (GARTEN_MODE) {
-        if (e.gift && istReif(e.gift, gartenCfg)) {
-          // ERNTEN: Schuss auf reifes (rotes) Ziel → Erntebruch. Rot SOFORT weg → grau, dann Tod.
-          const ernteSchaden = Math.round(e.gift.potency * gartenCfg.ernteBurst);
-          e.gift = undefined;
-          spawnBurstDisc(e.combatant.x, e.combatant.z, 7);
-          alog.log('ernte', { id: e.id, dmg: ernteSchaden });
-          e.combatant.hp -= ernteSchaden; metrics.onHitDealt(ernteSchaden);
-          if (e.combatant.hp <= 0) { // tödliche Ernte → grau-Animation statt sofort weg
-            e.combatant.hp = 0; e.combatant.alive = false;
-            e.harvested = GARTEN_HARVEST_TIME; setEnemyGlow(e, GIFT_GREY);
-          }
-        } else {
-          e.gift = saeGift(e.gift, gartenCfg); // SÄEN (frisch/unreif)
-        }
+        // ZZZ ist dot-getrieben: ein Schuss SÄT immer (mit der angesammelten Dot-Kraft). KEIN
+        // Schuss-Zünder — die Ernte läuft ausschließlich über Aura-Berührung (siehe Loop).
+        e.gift = saeGift(e.gift, gartenCfg, dotKraft);
         hits += 1; continue;
       }
       let hitDmg = dmg;
@@ -1326,6 +1316,39 @@ function boot(combatStyle: CombatStyle): void {
       }
     }
 
+    // ZZZ — Aura-Kaskade: berühren sich zwei reife Auren, zündet die Ernte. Sie greift RIESIG um sich
+    // (Tentakeln = Schicht 2): Panzer mit Dot → Ernte-Status (reif), ohne Dot → frischer (gebuffter)
+    // Dot. Die neu-reifen → neue Auren → nächste Ernte: die Kaskade rollt übers Feld.
+    if (GARTEN_MODE) {
+      const reif = roster.filter((e) => e.combatant.alive && e.harvested == null && e.gift && istReif(e.gift, gartenCfg));
+      for (let i = 0; i < reif.length; i++) {
+        const a = reif[i]!;
+        if (!a.combatant.alive) continue;
+        for (let j = i + 1; j < reif.length; j++) {
+          const b = reif[j]!;
+          if (!b.combatant.alive) continue;
+          if (Math.hypot(a.combatant.x - b.combatant.x, a.combatant.z - b.combatant.z) > gartenCfg.auraRadius * 2) continue;
+          const cx = (a.combatant.x + b.combatant.x) / 2, cz = (a.combatant.z + b.combatant.z) / 2;
+          for (const e of [a, b]) { // die Auslöser sterben (grau-Animation)
+            e.combatant.hp = 0; e.combatant.alive = false;
+            e.harvested = GARTEN_HARVEST_TIME; e.gift = undefined; setEnemyGlow(e, GIFT_GREY);
+          }
+          dotKraft += gartenCfg.dotKraftProErnte; // Spieler wird dauerhaft stärker
+          let gegriffen = 0;
+          for (const o of roster) { // Tentakeln greifen riesig um sich
+            if (!o.combatant.alive || o.harvested != null || o === a || o === b) continue;
+            if (Math.hypot(o.combatant.x - cx, o.combatant.z - cz) > gartenCfg.ausbreitRadius) continue;
+            if (o.gift) o.gift.potency = gartenCfg.erntePot; // hat Dot → Ernte-Status (reif)
+            else o.gift = saeGift(undefined, gartenCfg, dotKraft); // kein Dot → frischer gebuffter Dot
+            gegriffen++;
+          }
+          spawnBurstDisc(cx, cz, gartenCfg.ausbreitRadius * 0.6); // Platzhalter-FX (Tentakeln folgen)
+          alog.log('ernte', { kraft: dotKraft, gegriffen, t: +runClock.toFixed(1) });
+          break; // a ist geerntet → nächstes i
+        }
+      }
+    }
+
     // Zielnetz-Kontamination: liegende Marken ticken Schaden auf den markierten Gegner (ab St2 auch
     // auf Gegner in der Nähe = „Druck im Raum zwischen den Zielen"). Abgelaufene/tote Marken raus.
     if (netMarks.length) {
@@ -1465,7 +1488,7 @@ function boot(combatStyle: CombatStyle): void {
             });
           } else sniperCrosshair.style.display = 'none';
           for (const m of markPool) m.style.display = 'none'; // keine Auto-Ziel-Ringe im Garten
-          if (scopeBadge) scopeBadge.textContent = '🔭 GARTEN — Ziel anvisieren & säen';
+          if (scopeBadge) scopeBadge.textContent = `🔭 GARTEN · säen — Dot-Kraft +${dotKraft}`;
         } else {
           const coreStage = evo.unlockedStagesByChannel.sniper_core;
           sniperTargets = fireCd <= 0 ? pickTargets(maxMarks(), coreStage, px, pz, sniperRange) : [];
