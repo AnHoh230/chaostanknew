@@ -178,6 +178,12 @@ function boot(combatStyle: CombatStyle): void {
   let returnBoostCd = 0; // Kern-Stufe 3: kurzes Tempo-Fenster nach dem Auspacken
   let sniperCrosshair: HTMLDivElement | null = null; // Kandidaten-Fadenkreuz
   let markPool: HTMLDivElement[] = []; // Anzeiger für bereits gesetzte Marken
+  // — Routen-Zustand (greifen nach freigeschalteter Stufe; Kompass lenkt nur, WO man wächst) —
+  const netMarks: { id: string; left: number }[] = []; // Zielnetz: Marken bleiben liegen + kontaminieren
+  let netTickCd = 0;
+  let netLinger = 4, netDmg = 8, netSpreadR = 10; // s Restdauer / Schaden je Tick / Streuradius (ab St2)
+  const woundPressure = new Map<string, number>(); // Auswahl-Wundbruch: Wunddruck je Ziel
+  let woundStep = 20, woundCap = 90, woundBurstDmg = 60, woundBurstR = 14; // Aufbau / Bruch-Schwelle / Bruch-AoE
   let aoeRange = 26, aoeRadius = 4, aoeDmg = 14, aoeTickCount = 5; // AoE-Feld (Radius ~2 Späher)
   let dotDmg = 36, dotEvery = DAMAGE_TICK * 2, dotDur = DAMAGE_TICK * 8; // DoT: alle 2 Ticks, 8 Ticks lang
   let scopeActive = false; // Sniper: RMB gedrückt → Scope an (kein Fahren, weiter zoomen)
@@ -431,13 +437,33 @@ function boot(combatStyle: CombatStyle): void {
     const root = tank.view.root, turret = tank.view.turretNode;
     const origin = root.getAbsolutePosition();
     const dmg = Math.round(playerStats().damage * sniperDmgMul);
+    const woundOn = evo.unlockedStagesByChannel.sniper_dot_aoe >= 1; // Auswahl-Wundbruch freigeschaltet
+    const netOn = evo.unlockedStagesByChannel.sniper_aoe_dot >= 1; // Zielnetz freigeschaltet
     let hits = 0;
     for (const id of sniperMarks) {
       const e = roster.find((r) => r.id === id && r.combatant.alive);
       if (!e) continue;
       turret.rotation.y = yawTo(origin.x, origin.z, e.combatant.x, e.combatant.z) - root.rotation.y;
       spawnLaser(origin.x, origin.z, e.combatant.x, e.combatant.z);
-      damageEnemyTick(e, dmg);
+      let hitDmg = dmg;
+      // Wundbruch: wiederholte Wahl baut Wunddruck; Bonus = Druck; bei Schwelle bricht der Gegner
+      // lokal auf (AoE um ihn herum) und der Druck wird zurückgesetzt.
+      if (woundOn) {
+        const p = woundPressure.get(id) ?? 0;
+        hitDmg += Math.round(p);
+        const np = p + woundStep;
+        if (np >= woundCap) {
+          for (const o of roster) {
+            if (o === e || !o.combatant.alive) continue;
+            if (Math.hypot(o.combatant.x - e.combatant.x, o.combatant.z - e.combatant.z) <= woundBurstR) damageEnemyTick(o, woundBurstDmg);
+          }
+          spawnBurstDisc(e.combatant.x, e.combatant.z, woundBurstR);
+          woundPressure.delete(id);
+          alog.log('wundbruch', { target: id });
+        } else woundPressure.set(id, np);
+      }
+      damageEnemyTick(e, hitDmg);
+      if (netOn && e.combatant.alive) netMarks.push({ id, left: netLinger }); // Zielnetz: Marke bleibt liegen
       gainImpulse(e.typeId === 'bunker' ? 6 : 4);
       hits += 1;
     }
@@ -603,6 +629,19 @@ function boot(combatStyle: CombatStyle): void {
     fxList.push({ mesh: line as unknown as Mesh, mat: null as unknown as StandardMaterial, life: 0.4, max: 0.4, fade: false, alpha0: 1 });
   }
 
+  /** Kurze verblassende Scheibe (Wundbruch-Aufbruch). */
+  function spawnBurstDisc(x: number, z: number, r: number): void {
+    const disc = MeshBuilder.CreateCylinder('fx_burst', { diameter: r * 2, height: 0.3, tessellation: 24 }, scene);
+    disc.position.set(x, 0.16, z);
+    disc.isPickable = false;
+    const mat = new StandardMaterial('fx_burst_mat', scene);
+    mat.emissiveColor = new Color3(1, 0.45, 0.2);
+    mat.disableLighting = true;
+    mat.alpha = 0.55;
+    disc.material = mat;
+    fxList.push({ mesh: disc, mat, life: 0.45, max: 0.45, fade: true, alpha0: 0.55 });
+  }
+
   /** Effekt-Meshes altern lassen (Fade) und am Ende entsorgen. */
   function updateFx(dt: number): void {
     for (let i = fxList.length - 1; i >= 0; i--) {
@@ -714,6 +753,15 @@ function boot(combatStyle: CombatStyle): void {
   tunables.add({ label: 'Sniper-Reichweite', category: 'Stile', value: sniperRange, min: 40, max: 200, step: 5, onChange: (v) => { sniperRange = v; } });
   tunables.add({ label: 'Sniper-Schadensfaktor', category: 'Stile', value: sniperDmgMul, min: 1, max: 5, step: 0.5, onChange: (v) => { sniperDmgMul = v; } });
   tunables.add({ label: 'Sniper-Snap-Radius px', category: 'Stile', value: sniperSnapRadius, min: 40, max: 600, step: 10, onChange: (v) => { sniperSnapRadius = v; } });
+  // Zielnetz-Route
+  tunables.add({ label: 'Netz-Restdauer s', category: 'Routen', value: netLinger, min: 1, max: 12, step: 0.5, onChange: (v) => { netLinger = v; } });
+  tunables.add({ label: 'Netz-Schaden/Tick', category: 'Routen', value: netDmg, min: 1, max: 40, step: 1, onChange: (v) => { netDmg = v; } });
+  tunables.add({ label: 'Netz-Streuradius', category: 'Routen', value: netSpreadR, min: 3, max: 30, step: 1, onChange: (v) => { netSpreadR = v; } });
+  // Auswahl-Wundbruch-Route
+  tunables.add({ label: 'Wunddruck/Treffer', category: 'Routen', value: woundStep, min: 2, max: 60, step: 2, onChange: (v) => { woundStep = v; } });
+  tunables.add({ label: 'Wundbruch-Schwelle', category: 'Routen', value: woundCap, min: 20, max: 300, step: 10, onChange: (v) => { woundCap = v; } });
+  tunables.add({ label: 'Wundbruch-AoE-Schaden', category: 'Routen', value: woundBurstDmg, min: 10, max: 250, step: 10, onChange: (v) => { woundBurstDmg = v; } });
+  tunables.add({ label: 'Wundbruch-AoE-Radius', category: 'Routen', value: woundBurstR, min: 4, max: 40, step: 1, onChange: (v) => { woundBurstR = v; } });
   tunables.add({ label: 'Sniper-Kamera-Höhe', category: 'Stile', value: sniperCamHeight, min: 20, max: 200, step: 5, onChange: (v) => { sniperCamHeight = v; } });
   tunables.add({ label: 'Sniper-Kamera-Distanz', category: 'Stile', value: sniperCamBack, min: 20, max: 260, step: 5, onChange: (v) => { sniperCamBack = v; } });
   tunables.add({ label: 'AoE-Wurfweite', category: 'Stile', value: aoeRange, min: 8, max: 60, step: 1, onChange: (v) => { aoeRange = v; } });
@@ -1130,6 +1178,30 @@ function boot(combatStyle: CombatStyle): void {
       e.dot.tickCd -= simDt;
       if (e.dot.tickCd <= 0) { e.dot.tickCd += dotEvery; damageEnemyTick(e, dotDmg); }
       if (e.combatant.alive && e.dot && e.dot.left <= 0) e.dot = undefined;
+    }
+
+    // Zielnetz-Kontamination: liegende Marken ticken Schaden auf den markierten Gegner (ab St2 auch
+    // auf Gegner in der Nähe = „Druck im Raum zwischen den Zielen"). Abgelaufene/tote Marken raus.
+    if (netMarks.length) {
+      netTickCd -= simDt;
+      const doTick = netTickCd <= 0;
+      if (doTick) netTickCd = DAMAGE_TICK;
+      const spread = evo.unlockedStagesByChannel.sniper_aoe_dot >= 2;
+      for (let i = netMarks.length - 1; i >= 0; i--) {
+        const nm = netMarks[i]!;
+        nm.left -= simDt;
+        const e = roster.find((r) => r.id === nm.id && r.combatant.alive);
+        if (!e || nm.left <= 0) { netMarks.splice(i, 1); continue; }
+        if (doTick) {
+          damageEnemyTick(e, netDmg);
+          if (spread && e.combatant.alive) {
+            for (const o of roster) {
+              if (o === e || !o.combatant.alive) continue;
+              if (Math.hypot(o.combatant.x - e.combatant.x, o.combatant.z - e.combatant.z) <= netSpreadR) damageEnemyTick(o, Math.round(netDmg * 0.5));
+            }
+          }
+        }
+      }
     }
 
     // AoE-Felder: ticken Schaden an alle Gegner im Radius; nach Ablauf entfernen.
