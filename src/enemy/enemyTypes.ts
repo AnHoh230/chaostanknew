@@ -25,6 +25,8 @@ export const ENEMY_TYPES: Record<string, EnemyType> = {
   allrounder: { id: 'allrounder', behavior: 'closer', label: 'Allrounder', color: '#cfd8dc', comp: { chassis: 'c_box', wheels: 'w_tread', turret: 't_small', weapon: 'g_long' } },
   racer: { id: 'racer', behavior: 'racer', label: 'Racer', color: '#69db7c', comp: { chassis: 'c_box', wheels: 'w_round', turret: 't_small', weapon: 'g_short' } },
   bunker: { id: 'bunker', behavior: 'closer', label: 'Bunker', color: '#3b5bdb', comp: { chassis: 'c_wide', wheels: 'w_tread', turret: 't_big', weapon: 'g_long' } },
+  // — Häscher: graue, zähe Vollstrecker aus dem Bewegungs-Heat (heatTracker/haescher); geben KEINE Belohnung —
+  haescher: { id: 'haescher', behavior: 'closer', label: 'Häscher', color: '#8a8a90', comp: { chassis: 'c_wide', wheels: 'w_tread', turret: 't_big', weapon: 'g_short' } },
 };
 
 export const ENEMY_TYPE_IDS = Object.keys(ENEMY_TYPES);

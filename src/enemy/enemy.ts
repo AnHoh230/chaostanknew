@@ -23,6 +23,7 @@ export interface Enemy {
   dot?: { left: number; tickCd: number }; // aktive DoT (Restdauer s + Zeit bis nächster Tick)
   gift?: { potency: number; tickCd: number }; // Garten-Build: reifendes Gift (GiftState)
   harvested?: number; // Garten: s bis Tod nach der Ernte (grau-Animation läuft, dann killEnemy)
+  haescher?: boolean; // Bewegungs-Heat-Spawn: zäh, grau, gibt KEINE Belohnung (Impuls/XP/Ernte/Heal)
 }
 
 export interface EnemySpec {

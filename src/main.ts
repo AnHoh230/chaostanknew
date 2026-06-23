@@ -19,7 +19,7 @@ import { createDoctrineDirector } from './doctrine/doctrineDirector';
 import { DOCTRINES, DECAY, BANDS } from './doctrine/doctrineConfig';
 import { planSwarm, type SwarmDirection } from './doctrine/spawnPlan';
 import { emptyProfile, STATIONARY_SPEED, type PlayerStyleProfile } from './doctrine/styleProfile';
-import { type Enemy } from './enemy/enemy';
+import { createEnemyEntity, type Enemy, type EnemySpec } from './enemy/enemy';
 import { enemyMk } from './enemy/enemyStats';
 import { createSpawner } from './enemy/spawner';
 import { behaviorTarget } from './enemy/enemyBehavior';
@@ -46,6 +46,8 @@ import { computeFlowState, pruneDeathTimes, type FlowState } from './game/flowSt
 import { ROSTER, DEFAULT_ESCALATION, scaleStats } from './enemy/roster';
 import { saeGift, tickGift, istReif, reifeStufe, giftSlow, DEFAULT_GARTEN } from './build/garten';
 import { gegnerWelle, gartenTypStats, pulkGroesse, BUILD_STUFE_NAME } from './build/gartenProgression';
+import { createHeatState, updateHeat, DEFAULT_HEAT_CFG, type HeatState } from './build/heatTracker';
+import { haescherSoll, haescherStats } from './build/haescher';
 import {
   createSkillState, applySkills, chooseUlt, spendTalent, activeUltDef, ULTS, TALENTS,
   HEAL_PRO_ERNTE, EXECUTE_FRAC, AUSBRUCH_RADIUS, AUSBRUCH_FIEBER, PUNKT_KOSTEN, TALENT_MAX,
@@ -200,6 +202,15 @@ function boot(combatStyle: CombatStyle): void {
     }
   };
   const setGiftGlow = (e: Enemy, stufe: number): void => setEnemyGlow(e, GIFT_GLOW[stufe] ?? GIFT_GLOW[0]!);
+  // Häscher-Optik: dunkles Grau-Schwarz als BASIS-Farbe (nicht nur Glow) — hebt die Vollstrecker ab.
+  const HAESCHER_DIFFUSE = new Color3(0.1, 0.1, 0.12);
+  const HAESCHER_EMISSIVE = new Color3(0.02, 0.02, 0.03);
+  const tintHaescher = (e: Enemy): void => {
+    for (const m of e.view.root.getChildMeshes()) {
+      const mat = m.material as StandardMaterial | null;
+      if (mat) { mat.diffuseColor = HAESCHER_DIFFUSE; mat.emissiveColor = HAESCHER_EMISSIVE; }
+    }
+  };
   let returnBoostCd = 0; // Kern-Stufe 3: kurzes Tempo-Fenster nach dem Auspacken
   let sniperCrosshair: HTMLDivElement | null = null; // Cursor-Fadenkreuz (grün=bereit / orange=nachladen)
   let markPool: HTMLDivElement[] = []; // Ziel-Ringe um die getroffenen Gegner (1..maxMarks)
@@ -232,6 +243,10 @@ function boot(combatStyle: CombatStyle): void {
     Object.assign(gartenCfg, a.cfg); // Talente wirken über die geteilte gartenCfg (saat/reife/…)
     giftDotEff = GIFT_DOT_ST1 + a.st1DotBonus;
   };
+  // — Bewegungs-Heat (intern, dem Spieler NICHT angezeigt): treibt den Häscher-Nachschub —
+  let heatState: HeatState = createHeatState();
+  let haescherSeq = 0, haescherCd = 0; // Häscher-Spawn-Zähler + Nachschub-Takt
+  const HAESCHER_SPAWN_CD = 0.8; // s zwischen einzelnen Häscher-Spawns (kein Schlag auf einmal)
   // Eine Ernte (reifer Gift-Tod ODER Gnadenstoß-Execute): grau sterben + Erntefieber + aktive Ult-Effekte.
   const doErnte = (e: Enemy): void => {
     e.combatant.hp = 0; e.combatant.alive = false;
@@ -504,17 +519,52 @@ function boot(combatStyle: CombatStyle): void {
       // Impuls-Orb in der aktuellen Kompass-Richtung droppen (nur im Flow → keine Deathloop-Punkte).
       // Garten: Kills droppen einen Impuls in den ZUSTAND (dot_core). Schwarm = Futter → KEIN Impuls
       // (sonst flutet der späte Schwarm den Aufbau); Rest gibt weniger als früher → Progress gestreckt.
-      if (flowState === 'flow' && e.typeId !== 'swarm') spawnImpulseOrb(e.combatant.x, e.combatant.z, GARTEN_MODE ? 'dot_core' : activeChannelNow(), e.typeId === 'bunker' ? 8 : 4);
-      const up = progression.addXp(Math.round(18 + (e.combatant.lootValue ?? 0.4) * 60));
-      if (up.gained > 0) {
-        const mkNote = up.newMkUnlocks.length ? ` — MK${up.newMkUnlocks[up.newMkUnlocks.length - 1]} frei!` : '';
-        showToast(`Level ${progression.level}${mkNote}`);
+      // Häscher geben NICHTS: kein Impuls-Orb, keine XP (reiner Druck, kein Futter fürs Build).
+      if (!e.haescher) {
+        if (flowState === 'flow' && e.typeId !== 'swarm') spawnImpulseOrb(e.combatant.x, e.combatant.z, GARTEN_MODE ? 'dot_core' : activeChannelNow(), e.typeId === 'bunker' ? 8 : 4);
+        const up = progression.addXp(Math.round(18 + (e.combatant.lootValue ?? 0.4) * 60));
+        if (up.gained > 0) {
+          const mkNote = up.newMkUnlocks.length ? ` — MK${up.newMkUnlocks[up.newMkUnlocks.length - 1]} frei!` : '';
+          showToast(`Level ${progression.level}${mkNote}`);
+        }
       }
     }
     spawnTimes.delete(e.id);
     e.view.root.dispose();
     const idx = roster.indexOf(e);
     if (idx >= 0) roster.splice(idx, 1);
+  }
+
+  // Häscher-Spawn (aus dem Bewegungs-Heat): zäher grauer Vollstrecker, ON TOP zum normalen Spawn.
+  // vorne=true → voraus in Fahrtrichtung (Fährte); sonst rings um den Spieler, näher (Kessel).
+  const haescherType = ENEMY_TYPES['haescher']!;
+  function spawnHaescher(cx: number, cz: number, vx: number, vz: number, vorne: boolean): Enemy {
+    const speed = Math.hypot(vx, vz);
+    let ang: number, r: number;
+    if (vorne && speed > 1) {
+      ang = Math.atan2(vz, vx) + (aiRng.next() - 0.5) * (Math.PI / 2); // ±45° um die Fahrtrichtung
+      r = 70 + aiRng.next() * 50; // voraus, etwas weiter — man fährt hinein
+    } else {
+      ang = aiRng.next() * Math.PI * 2; // rundum
+      r = 45 + aiRng.next() * 35; // näher — der Kessel schließt sich
+    }
+    const spec: EnemySpec = {
+      id: 'h' + haescherSeq++,
+      comp: haescherType.comp,
+      spawn: { x: cx + Math.cos(ang) * r, z: cz + Math.sin(ang) * r },
+      level: 1,
+      displayName: 'Häscher',
+      typeId: 'haescher',
+      behavior: haescherType.behavior,
+    };
+    const e = createEnemyEntity(scene, spec, TANK_RADIUS, () => aiRng.next());
+    const hs = haescherStats(runClock);
+    e.combatant.maxHp = hs.hp; e.combatant.hp = hs.hp;
+    e.damage = hs.damage; e.speed = hs.speed;
+    e.combatant.lootValue = 0; // keine XP
+    e.haescher = true;
+    tintHaescher(e);
+    return e;
   }
 
   // Tick-Schaden (DoT/AoE) direkt auf HP, Rüstung ignoriert; tötet bei <=0.
@@ -887,7 +937,7 @@ function boot(combatStyle: CombatStyle): void {
   const minimap = createMinimap(168, 150); // Reichweite 150 (Spawn-Ring reicht bis 130 — sonst fallen Gegner von der Karte)
   const enemyBars = createEnemyBars(scene, camera, engine); // HP-Balken über den Gegnern
   const swarmHud = createSwarmHud(); // Schwarm-Lage: Anzahl je Typ + Zieldichte
-  const heatHud = createHeatHud(); // Heat je Stil-Richtung (warum dieser Mix)
+  const heatHud = GARTEN_MODE ? null : createHeatHud(); // Garten: Heat-Lage ist interne Mechanik, NICHT angezeigt // Heat je Stil-Richtung (warum dieser Mix)
   // Spielernahe Namen der Richtungen (was den Heat treibt). Bunker entfernt (s. doctrineConfig).
   const STYLE_LABEL: Record<string, string> = {
     stoerkrieg: 'Auto-Turret', nebel: 'Distanz', sperrkrieg: 'Rush',
@@ -1340,6 +1390,7 @@ function boot(combatStyle: CombatStyle): void {
     if (!prevPosInit) { prevPx = px; prevPz = pz; prevPosInit = true; }
     const actualSpeed = simDt > 0 ? Math.hypot(px - prevPx, pz - prevPz) / simDt : 0;
     if (simDt > 0) { playerVelX = (px - prevPx) / simDt; playerVelZ = (pz - prevPz) / simDt; }
+    heatState = updateHeat(heatState, playerVelX, playerVelZ, realDt, DEFAULT_HEAT_CFG); // intern: Steh-(Kessel)/Einseitig-(Fährte)Druck
     prevPx = px; prevPz = pz;
     playerStationary = actualSpeed < STATIONARY_SPEED;
     if (simDt > 0) styleTracker.onMove({ speed: actualSpeed, x: px, z: pz, dt: simDt });
@@ -1384,6 +1435,17 @@ function boot(combatStyle: CombatStyle): void {
       roster.push(spawned); metrics.onSpawn(spawned.typeId); spawnTimes.set(spawned.id, runClock);
     }
 
+    // Häscher-Nachschub (ON TOP, aus dem Bewegungs-Heat): getaktet auf die Soll-Zahl auffüllen.
+    const hSoll = haescherSoll(runClock, heatState.kessel, heatState.faehrte);
+    const hAlive = roster.reduce((n, e) => n + (e.combatant.alive && e.haescher ? 1 : 0), 0);
+    haescherCd -= simDt;
+    if (flowState !== 'broken' && hAlive < hSoll.front + hSoll.ring && haescherCd <= 0) {
+      haescherCd = HAESCHER_SPAWN_CD;
+      const vorne = hSoll.front > 0 && heatState.faehrte >= heatState.kessel; // Fährte dominiert → voraus
+      const h = spawnHaescher(px, pz, playerVelX, playerVelZ, vorne);
+      roster.push(h); spawnTimes.set(h.id, runClock);
+    }
+
     // Idle-Erkennung: aktiver Input = Fahren ODER kürzlich manuell gefeuert ODER Ziel bewegt.
     const aimT = input.getAimTarget();
     const aimMoved = prevAimInit && aimT != null ? Math.hypot(aimT.x - prevAimX, aimT.z - prevAimZ) > 0.5 : aimT != null;
@@ -1413,8 +1475,15 @@ function boot(combatStyle: CombatStyle): void {
         roster.filter((e) => e.combatant.alive).map((e) => ({ x: e.combatant.x, z: e.combatant.z })),
         enemyShotRange,
       );
+      // Bewegungs-Heat + Häscher-Lage (intern, nur fürs Log): Kessel/Fährte + Soll/lebende Häscher.
+      const hSollLog = haescherSoll(runClock, heatState.kessel, heatState.faehrte);
+      const hAliveLog = roster.reduce((n, e) => n + (e.combatant.alive && e.haescher ? 1 : 0), 0);
       // idle = Sekunden ohne Input; ab ~2 s ist „Hände weg" → Analyse ignoriert diese Zeilen.
-      alog.log('snap', { ...(snap as unknown as Record<string, unknown>), idle: Math.round(idleFor), flow: flowState, rel });
+      alog.log('snap', {
+        ...(snap as unknown as Record<string, unknown>), idle: Math.round(idleFor), flow: flowState, rel,
+        heat: { kes: +heatState.kessel.toFixed(2), fae: +heatState.faehrte.toFixed(2) },
+        hae: { soll: hSollLog.front + hSollLog.ring, alive: hAliveLog },
+      });
     }
 
     // Gegner-Verhalten (R2): jeder Typ steuert nach seinem Muster auf einen Zielpunkt zu,
@@ -1520,8 +1589,8 @@ function boot(combatStyle: CombatStyle): void {
           metrics.onHitDealt(r.dmg);
           if (e.combatant.hp <= 0) {
             e.combatant.hp = 0; e.combatant.alive = false;
-            if (warReif && stufe >= 3) {
-              doErnte(e); // ZZZ: Ernte = Erntefieber + aktive Ult-Effekte (Heilung/Ausbruch)
+            if (warReif && stufe >= 3 && !e.haescher) {
+              doErnte(e); // ZZZ: Ernte = Erntefieber + aktive Ult-Effekte (Heilung/Ausbruch) — NIE für Häscher
             } else if (warReif) {
               // ZZ (noch kein ZZZ): reif gestorben, grau-Optik, aber kein Erntefieber.
               e.harvested = GARTEN_HARVEST_TIME; e.gift = undefined; setEnemyGlow(e, GIFT_GREY);
@@ -1532,7 +1601,7 @@ function boot(combatStyle: CombatStyle): void {
           }
         }
         // Gnadenstoß (Befehl-Ult, aktiv): angesteckte Panzer unter der HP-Schwelle sofort ernten.
-        if (skill.ult === 'gnadenstoss' && ultActive > 0 && e.combatant.alive && e.gift && e.combatant.hp < EXECUTE_FRAC * e.combatant.maxHp) {
+        if (skill.ult === 'gnadenstoss' && ultActive > 0 && !e.haescher && e.combatant.alive && e.gift && e.combatant.hp < EXECUTE_FRAC * e.combatant.maxHp) {
           doErnte(e); continue;
         }
         // ANSTECKUNG: bei jedem Tick steckt der Infizierte den NÄCHSTEN Gesunden in Reichweite an.
@@ -1672,7 +1741,7 @@ function boot(combatStyle: CombatStyle): void {
           weight: plan.weights[t.id] ?? 0,
         })),
       });
-      heatHud.update(director.states().map((s) => ({
+      heatHud?.update(director.states().map((s) => ({
         label: STYLE_LABEL[s.id] ?? s.id, heat: Math.round(s.heat), stufe: s.stufe,
       })));
     }
