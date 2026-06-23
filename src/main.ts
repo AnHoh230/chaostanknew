@@ -782,6 +782,7 @@ function boot(combatStyle: CombatStyle): void {
       return m;
     });
     const setScope = (on: boolean): void => {
+      if (on && reloadCd > 0) return; // Nachladen ist die mobile Ausweich-Phase → kein Scope/Slomo währenddessen
       if (scopeActive === on) return;
       scopeActive = on;
       badge.style.display = on ? 'block' : 'none';
