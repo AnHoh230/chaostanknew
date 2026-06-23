@@ -57,6 +57,10 @@ function actionLogPlugin(): Plugin {
 }
 
 export default defineConfig({
+  // Relative Asset-Pfade → der Build läuft unter JEDER URL (Projekt-/User-Pages,
+  // Custom-Domain, lokal geöffnete dist/index.html), unabhängig vom Repo-Namen.
+  // Reines Canvas-SPA ohne Client-Routing → './' ist hier die robusteste Wahl.
+  base: './',
   plugins: [actionLogPlugin()],
   server: {
     open: false,
