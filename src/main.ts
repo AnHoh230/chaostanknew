@@ -211,6 +211,8 @@ function boot(combatStyle: CombatStyle): void {
   let reloadCd = 0;
   const RELOAD_TIME = 2.2, RELOAD_SPEED = 1.7; // Nachlade-Dauer (s) + Tempo-Faktor währenddessen
   const SLOMO_SCALE = 0.2; // Welt-Zeit im Slomo (Bullet-Time beim Infizieren); Spieler-Feuertakt bleibt real
+  let slomoTime = 3; // Slomo-Zeit-Budget pro Magazin (s) — sonst klebt man ewig im Slomo
+  const SLOMO_TIME = 3;
   let scopeApplied = false, savedShotRange = 40; // Übergangs-Zustand für den Scope
   const aoeFields: { x: number; z: number; r: number; left: number; tickCd: number; disc: Mesh }[] = [];
 
@@ -812,7 +814,8 @@ function boot(combatStyle: CombatStyle): void {
   // Nachladen: R füllt die 3 Infektions-Schüsse wieder auf (CD; Tempo-Schub läuft solange = mobil).
   window.addEventListener('keydown', (ev) => {
     if (ev.key !== 'r' && ev.key !== 'R') return;
-    if (!GARTEN_MODE || reloadCd > 0 || ammo >= AMMO_MAX || !playerCombatant.alive) return;
+    if (!GARTEN_MODE || reloadCd > 0 || !playerCombatant.alive) return;
+    if (ammo >= AMMO_MAX && slomoTime >= SLOMO_TIME) return; // schon randvoll
     reloadCd = RELOAD_TIME;
     alog.log('reload', { t: +runClock.toFixed(1) });
   });
@@ -1123,12 +1126,13 @@ function boot(combatStyle: CombatStyle): void {
   startLoop(engine, scene, clock, (simDt) => {
     if (runOver) return; // Tod = Run vorbei → Updates einfrieren (Overlay läuft, Reload startet neu)
     const realDt = simDt; // ungebremste Zeit — für Feuertakt, Nachladen und die Slomo-Entscheidung
-    // SLOMO: im Scope mit Munition kriecht die WELT (Bullet-Time). Der Spieler steht eh (Scope hält an),
-    // sein Feuertakt bleibt real → man setzt die 3 Dots zügig, während die Gegner kriechen.
-    const slomoOn = GARTEN_MODE && scopeActive && ammo > 0;
-    if (slomoOn) simDt = realDt * SLOMO_SCALE;
-    // Nachladen (R) läuft in Echtzeit; solange es läuft, gibt es Tempo-Schub (mobile Ausweich-Phase).
-    if (reloadCd > 0) { reloadCd -= realDt; if (reloadCd <= 0) ammo = AMMO_MAX; }
+    // SLOMO: im Scope kriecht die WELT (Bullet-Time), Feuertakt bleibt real → 3 Dots zügig setzen.
+    // Begrenzt durch ein ZEIT-Budget (sonst klebt man ewig im Slomo, indem man den letzten Schuss hält).
+    // Endet, sobald Munition ODER Slomo-Zeit leer ist — was zuerst kommt.
+    const slomoOn = GARTEN_MODE && scopeActive && ammo > 0 && slomoTime > 0;
+    if (slomoOn) { simDt = realDt * SLOMO_SCALE; slomoTime = Math.max(0, slomoTime - realDt); }
+    // Nachladen (R) läuft in Echtzeit + Tempo-Schub (mobile Ausweich-Phase); füllt Munition UND Slomo-Zeit.
+    if (reloadCd > 0) { reloadCd -= realDt; if (reloadCd <= 0) { ammo = AMMO_MAX; slomoTime = SLOMO_TIME; } }
     simTime += simDt;
     // SH2: Buffs altern, effektive Spieler-Stats (Tempo/Rüstung) = Loadout × Buffs.
     fireCd -= realDt;
@@ -1483,11 +1487,12 @@ function boot(combatStyle: CombatStyle): void {
         .map((e) => ({ x: e.combatant.x, z: e.combatant.z, color: '#e8a23c' })),
     ]);
     if (GARTEN_MODE) {
+      const mag = `${'●'.repeat(ammo)}${'○'.repeat(AMMO_MAX - ammo)}`;
       ammoHud.textContent = reloadCd > 0
         ? `⟳ Nachladen ${reloadCd.toFixed(1)}s`
-        : ammo > 0
-          ? `Munition ${'●'.repeat(ammo)}${'○'.repeat(AMMO_MAX - ammo)}`
-          : 'Munition ○○○ — R drücken';
+        : (ammo <= 0 || slomoTime <= 0.05)
+          ? `Munition ${mag} · Slomo ${slomoTime.toFixed(1)}s — R nachladen`
+          : `Munition ${mag} · Slomo ${slomoTime.toFixed(1)}s`;
     }
     // HP-Balken schweben über den Gegnern.
     enemyBars.update(
