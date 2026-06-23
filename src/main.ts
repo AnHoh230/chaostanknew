@@ -44,6 +44,11 @@ import { computeFlowState, pruneDeathTimes, type FlowState } from './game/flowSt
 import { ROSTER, DEFAULT_ESCALATION, scaleStats } from './enemy/roster';
 import { saeGift, tickGift, istReif, reifeStufe, giftSlow, DEFAULT_GARTEN } from './build/garten';
 import { gegnerWelle, gartenTypStats, pulkGroesse, BUILD_STUFE_NAME } from './build/gartenProgression';
+import {
+  createSkillState, applySkills, chooseUlt, spendTalent, activeUltDef, ULTS, TALENTS,
+  HEAL_PRO_ERNTE, EXECUTE_FRAC, AUSBRUCH_RADIUS, AUSBRUCH_FIEBER, PUNKT_KOSTEN, TALENT_MAX,
+  type TalentId, type UltId,
+} from './build/skilltree';
 import { thresholdForStage, maxStage, type TuningProfile } from './evolution/profiles';
 import { CHANNEL_DISPLAY, type BaseMode, type EvolutionChannelId } from './evolution/channels';
 import { createEvolutionState, gainProgress, tryTriggerEvolution, emergingChannel } from './evolution/evolution';
@@ -213,6 +218,34 @@ function boot(combatStyle: CombatStyle): void {
   const SLOMO_SCALE = 0.2; // Welt-Zeit im Slomo (Bullet-Time beim Infizieren); Spieler-Feuertakt bleibt real
   let slomoTime = 3; // Slomo-Zeit-Budget pro Magazin (s) — sonst klebt man ewig im Slomo
   const SLOMO_TIME = 3;
+  // Skill-System: ab St3 (ZZZ) werden Impuls-Überschüsse zu Skillpunkten. Eine aktivierte Pol-Ult
+  // (Taste/Dauer/CD) + passive Wert-Talente. Talente mutieren gartenCfg + giftDotEff (recomputeSkills).
+  const skill = createSkillState();
+  let skillProgress = 0; // gesammelter Impuls-Überschuss Richtung nächstem Skillpunkt
+  let ultActive = 0, ultCd = 0; // Ult-Timer: s noch aktiv / s noch Cooldown
+  let giftDotEff = GIFT_DOT_ST1; // effektiver St1-Köchel (Köchel-Talent hebt ihn)
+  const recomputeSkills = (): void => {
+    const a = applySkills(DEFAULT_GARTEN, skill);
+    Object.assign(gartenCfg, a.cfg); // Talente wirken über die geteilte gartenCfg (saat/reife/…)
+    giftDotEff = GIFT_DOT_ST1 + a.st1DotBonus;
+  };
+  // Eine Ernte (reifer Gift-Tod ODER Gnadenstoß-Execute): grau sterben + Erntefieber + aktive Ult-Effekte.
+  const doErnte = (e: Enemy): void => {
+    e.combatant.hp = 0; e.combatant.alive = false;
+    e.harvested = GARTEN_HARVEST_TIME; e.gift = undefined; setEnemyGlow(e, GIFT_GREY);
+    erntefieber += 1;
+    if (ultActive > 0 && skill.ult === 'naehrboden') // Zustand-Ult: Ernte heilt
+      playerCombatant.hp = Math.min(playerCombatant.maxHp, playerCombatant.hp + HEAL_PRO_ERNTE);
+    if (ultActive > 0 && skill.ult === 'ausbruch') { // Raum-Ult: Ernte steckt den Umkreis an
+      erntefieber += AUSBRUCH_FIEBER;
+      for (const o of roster) {
+        if (!o.combatant.alive || o.gift || o.harvested != null) continue;
+        if (Math.hypot(o.combatant.x - e.combatant.x, o.combatant.z - e.combatant.z) <= AUSBRUCH_RADIUS) o.gift = saeGift(undefined, gartenCfg);
+      }
+    }
+    showToast(`🦠 ERNTESIEG — Erntefieber +${erntefieber}`);
+    alog.log('ernte', { fieber: erntefieber, t: +runClock.toFixed(1) });
+  };
   let scopeApplied = false, savedShotRange = 40; // Übergangs-Zustand für den Scope
   const aoeFields: { x: number; z: number; r: number; left: number; tickCd: number; disc: Mesh }[] = [];
 
@@ -825,6 +858,15 @@ function boot(combatStyle: CombatStyle): void {
     alog.log('reload', { t: +runClock.toFixed(1) });
   });
 
+  // Pol-Ult auslösen (Q): drücken → dauer s aktiv → cd s Cooldown. Nur wenn gewählt + bereit.
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'q' && ev.key !== 'Q') return;
+    const u = activeUltDef(skill);
+    if (!u || ultActive > 0 || ultCd > 0 || !playerCombatant.alive) return;
+    ultActive = u.dauer;
+    alog.log('ult', { id: u.id, t: +runClock.toFixed(1) });
+  });
+
   // OS-Mauszeiger über dem Canvas ausblenden — das Spiel zeichnet sein eigenes
   // Fadenkreuz, das frame-synchron mit dem Turm läuft (kein Render-Weg-Versatz).
   canvas.style.cursor = 'none';
@@ -922,6 +964,66 @@ function boot(combatStyle: CombatStyle): void {
     'min-width:78px;text-align:center;background:rgba(8,12,16,0.78);border:1px solid #2a343b;' +
     'border-radius:7px;padding:5px 8px;font:600 10px system-ui,sans-serif;';
   dashHud.appendChild(dashSlotEl);
+  // — ZZZ-Skill-UI: Ult-Icon-Slot (aktiv/CD), Skillpunkt-Hinweis und das pausierende Wähl-/Vergabe-Panel —
+  const ultSlotEl = document.createElement('div');
+  ultSlotEl.style.cssText =
+    'min-width:92px;text-align:center;background:rgba(8,12,16,0.78);border:1px solid #2a343b;' +
+    'border-radius:7px;padding:5px 8px;font:600 11px system-ui,sans-serif;display:none;';
+  dashHud.appendChild(ultSlotEl);
+  function updateUltHud(): void {
+    const u = activeUltDef(skill);
+    if (!u) { ultSlotEl.style.display = 'none'; return; }
+    ultSlotEl.style.display = 'block';
+    if (ultActive > 0) { ultSlotEl.style.borderColor = '#69db7c'; ultSlotEl.innerHTML = `${u.icon} <b style="color:#9be36b">AKTIV ${ultActive.toFixed(1)}s</b>`; }
+    else if (ultCd > 0) { ultSlotEl.style.borderColor = '#5a4a2a'; ultSlotEl.innerHTML = `${u.icon} <span style="color:#ffae5b">CD ${ultCd.toFixed(1)}s</span>`; }
+    else { ultSlotEl.style.borderColor = '#2a343b'; ultSlotEl.innerHTML = `${u.icon} <span style="color:#cdd6dd">[${u.taste}]</span>`; }
+  }
+  const skillHint = document.createElement('div');
+  skillHint.style.cssText =
+    'position:fixed;left:50%;top:54px;transform:translateX(-50%);z-index:20;pointer-events:none;display:none;' +
+    'font:700 13px system-ui,sans-serif;color:#ffe08a;text-shadow:0 1px 3px #000;';
+  document.body.appendChild(skillHint);
+  let skillOpen = false, skillPrevSpeed = 1;
+  const skillPanel = document.createElement('div');
+  skillPanel.style.cssText =
+    'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;display:none;width:340px;' +
+    'background:#0e141bf2;border:1px solid #33485c;border-radius:10px;padding:14px 16px;font:600 12px system-ui,sans-serif;color:#cfe3ee;';
+  document.body.appendChild(skillPanel);
+  const skillRow = (act: string, title: string, sub: string, dim: boolean): string =>
+    `<div data-act="${act}" style="margin-top:5px;padding:6px 8px;border:1px solid ${dim ? '#243240' : '#3a5a72'};` +
+    `border-radius:6px;cursor:${dim ? 'default' : 'pointer'};opacity:${dim ? 0.5 : 1}">` +
+    `<div>${title}</div><div style="opacity:.65;font-size:10px;margin-top:1px">${sub}</div></div>`;
+  function renderSkillPanel(): void {
+    let html = `<div style="font-size:14px;color:#9be36b">✦ Skillpunkte: ${skill.punkte}</div>`;
+    if (!skill.ult) {
+      html += `<div style="opacity:.7;margin:7px 0 1px">Wähle deine Pol-Ult (kostet 1 Punkt):</div>`;
+      for (const u of ULTS) html += skillRow(`ult:${u.id}`, `${u.icon} ${u.name} · ${u.pol}`, `${u.text} (Taste ${u.taste}, ${u.dauer}s / CD ${u.cd}s)`, skill.punkte <= 0);
+    } else {
+      const u = activeUltDef(skill)!;
+      html += `<div style="margin:7px 0 1px">Ult: <b>${u.icon} ${u.name}</b> · Taste [${u.taste}]</div>`;
+      html += `<div style="opacity:.7;margin:5px 0 1px">Talente (Rang/${TALENT_MAX}):</div>`;
+      for (const t of TALENTS) {
+        const rk = skill.ranks[t.id]; const max = rk >= TALENT_MAX;
+        html += skillRow(`tal:${t.id}`, `${t.name} &nbsp; ${'●'.repeat(rk)}${'○'.repeat(TALENT_MAX - rk)}`, t.text, skill.punkte <= 0 || max);
+      }
+    }
+    html += `<div style="opacity:.5;margin-top:11px;font-size:10px">[T] / [Esc] schließen</div>`;
+    skillPanel.innerHTML = html;
+  }
+  skillPanel.addEventListener('click', (ev) => {
+    const el = (ev.target as HTMLElement).closest('[data-act]') as HTMLElement | null;
+    if (!el) return;
+    const act = el.getAttribute('data-act') ?? '';
+    if (act.startsWith('ult:')) chooseUlt(skill, act.slice(4) as UltId);
+    else if (act.startsWith('tal:')) spendTalent(skill, act.slice(4) as TalentId);
+    recomputeSkills(); renderSkillPanel();
+  });
+  const openSkill = (): void => { skillOpen = true; skillPrevSpeed = clock.simSpeed; clock.simSpeed = 0; renderSkillPanel(); skillPanel.style.display = 'block'; };
+  const closeSkill = (): void => { skillOpen = false; clock.simSpeed = skillPrevSpeed; skillPanel.style.display = 'none'; };
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key === 't' || ev.key === 'T') { if (skillOpen) closeSkill(); else openSkill(); }
+    else if (ev.key === 'Escape' && skillOpen) closeSkill();
+  });
   function updateDashHud(): void {
     const ready = dashCd <= 0;
     dashSlotEl.style.borderColor = ready ? '#3c7d6e' : '#2a343b';
@@ -1138,6 +1240,9 @@ function boot(combatStyle: CombatStyle): void {
     if (slomoOn) { simDt = realDt * SLOMO_SCALE; slomoTime = Math.max(0, slomoTime - realDt); }
     // Nachladen (R) läuft in Echtzeit + Tempo-Schub (mobile Ausweich-Phase); füllt Munition UND Slomo-Zeit.
     if (reloadCd > 0) { reloadCd -= realDt; if (reloadCd <= 0) { ammo = AMMO_MAX; slomoTime = SLOMO_TIME; } }
+    // Ult-Timer (Echtzeit): aktiv runter → bei 0 in den Cooldown; danach Cooldown runter.
+    if (ultActive > 0) { ultActive -= realDt; if (ultActive <= 0) { const u = activeUltDef(skill); ultCd = u ? u.cd : 0; } }
+    else if (ultCd > 0) ultCd -= realDt;
     simTime += simDt;
     // SH2: Buffs altern, effektive Spieler-Stats (Tempo/Rüstung) = Loadout × Buffs.
     fireCd -= realDt;
@@ -1202,6 +1307,11 @@ function boot(combatStyle: CombatStyle): void {
       const d = Math.hypot(dx, dz) || 1;
       if (d < 1.8) {
         gainProgress(evo, o.channel, o.points, currentTuningProfile);
+        // ZZZ fertig (dot_core St3) → Impuls-Überschuss wird zu Skillpunkten.
+        if (evo.unlockedStagesByChannel.dot_core >= 3) {
+          skillProgress += o.points;
+          while (skillProgress >= PUNKT_KOSTEN) { skillProgress -= PUNKT_KOSTEN; skill.punkte += 1; showToast('✦ Skillpunkt frei — [T]'); }
+        }
         o.mesh.dispose(); orbs.splice(i, 1); continue;
       }
       const step = Math.min(d, ORB_SPEED * simDt);
@@ -1375,7 +1485,7 @@ function boot(combatStyle: CombatStyle): void {
         if (stufe < 2) {
           // St 1 (Z): reiner Köchel-DoT — kein Reifen, kein Reif-Status, keine Ansteckung. Tötet langsam.
           e.gift.tickCd -= simDt;
-          if (e.gift.tickCd <= 0) { e.gift.tickCd += gartenCfg.tickEvery; damageEnemyTick(e, GIFT_DOT_ST1); }
+          if (e.gift.tickCd <= 0) { e.gift.tickCd += gartenCfg.tickEvery; damageEnemyTick(e, giftDotEff); }
           if (e.combatant.alive) setGiftGlow(e, 1); // konstant giftgrün (reift nicht)
           continue;
         }
@@ -1388,19 +1498,20 @@ function boot(combatStyle: CombatStyle): void {
           metrics.onHitDealt(r.dmg);
           if (e.combatant.hp <= 0) {
             e.combatant.hp = 0; e.combatant.alive = false;
-            if (warReif) {
-              // reifer Gift-Tod → grau-Ernte-Optik. Erntefieber-Buff aber ERST ab St 3 (ZZZ).
+            if (warReif && stufe >= 3) {
+              doErnte(e); // ZZZ: Ernte = Erntefieber + aktive Ult-Effekte (Heilung/Ausbruch)
+            } else if (warReif) {
+              // ZZ (noch kein ZZZ): reif gestorben, grau-Optik, aber kein Erntefieber.
               e.harvested = GARTEN_HARVEST_TIME; e.gift = undefined; setEnemyGlow(e, GIFT_GREY);
-              if (stufe >= 3) {
-                erntefieber += 1;
-                showToast(`🦠 ERNTESIEG — Erntefieber +${erntefieber}`);
-                alog.log('ernte', { fieber: erntefieber, t: +runClock.toFixed(1) });
-              }
             } else {
               killEnemy(e, 'player'); // mitten in der Reifung gestorben → normaler Tod, kein Buff
             }
             continue;
           }
+        }
+        // Gnadenstoß (Befehl-Ult, aktiv): angesteckte Panzer unter der HP-Schwelle sofort ernten.
+        if (skill.ult === 'gnadenstoss' && ultActive > 0 && e.combatant.alive && e.gift && e.combatant.hp < EXECUTE_FRAC * e.combatant.maxHp) {
+          doErnte(e); continue;
         }
         // ANSTECKUNG: bei jedem Tick steckt der Infizierte den NÄCHSTEN Gesunden in Reichweite an.
         if (r.ticked) {
@@ -1500,6 +1611,11 @@ function boot(combatStyle: CombatStyle): void {
           ? `Munition ${mag} · Slomo ${slomoTime.toFixed(1)}s — R nachladen`
           : `Munition ${mag} · Slomo ${slomoTime.toFixed(1)}s`;
     }
+    updateUltHud();
+    if (GARTEN_MODE && skill.punkte > 0 && !skillOpen) {
+      skillHint.style.display = 'block';
+      skillHint.textContent = `✦ ${skill.punkte} Skillpunkt${skill.punkte > 1 ? 'e' : ''} frei — [T]`;
+    } else skillHint.style.display = 'none';
     // HP-Balken schweben über den Gegnern.
     enemyBars.update(
       roster
