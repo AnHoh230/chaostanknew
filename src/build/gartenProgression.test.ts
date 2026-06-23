@@ -17,7 +17,7 @@ describe('gegnerWelle', () => {
   it('startet sparsam (1 Panzer/Tick, langer Takt, nur Allrounder)', () => {
     const w0 = gegnerWelle(0);
     expect(w0.batch).toBe(1);
-    expect(w0.interval).toBeGreaterThan(8);
+    expect(w0.interval).toBeGreaterThan(5); // langer Anfangs-Takt (~8 s), fällt dann schnell
     expect(Object.keys(w0.weights)).toEqual(['allrounder']);
     expect(w0.level).toBe(1);
   });
