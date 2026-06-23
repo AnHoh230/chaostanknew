@@ -29,8 +29,8 @@ describe('gegnerWelle', () => {
     expect(Object.keys(late.weights).length).toBeGreaterThan(1);
     expect(late.level).toBeGreaterThan(early.level);
   });
-  it('Takt fällt nicht unter ~1,5s (kein unendlicher Spawn-Sturm)', () => {
-    expect(gegnerWelle(99999).interval).toBeGreaterThanOrEqual(1.5);
+  it('Takt fällt nicht unter den Boden ~2,5s (kein unendlicher Spawn-Sturm)', () => {
+    expect(gegnerWelle(99999).interval).toBeGreaterThanOrEqual(2.5);
   });
   it('Schwarm + Brocken erscheinen gestaffelt (Schwarm vor Brocken)', () => {
     expect(gegnerWelle(120).weights.swarm).toBeUndefined(); // frühe Phase: nur Allrounder/Läufer

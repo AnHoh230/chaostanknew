@@ -41,10 +41,10 @@ export function gegnerWelle(t: number): GegnerWelle {
   else if (t < 360) { weights = { allrounder: 5, racer: 3, swarm: 2 }; level = 2; }
   else if (t < 540) { weights = { allrounder: 4, racer: 3, swarm: 3, bunker: 1 }; level = 3; }
   else { weights = { allrounder: 2, racer: 3, swarm: 4, bunker: 2 }; level = 4 + Math.floor((t - 540) / 180); }
-  // Spawn-Rate eskaliert: Takt ~8s → schneller Abfall auf ~4s (~1:40), dann sanft auf 1,5s (~6 min).
-  // Exponentiell = die tote Anfangs-Leere fällt schnell weg, die Eskalation bleibt insgesamt sanft.
-  const interval = Math.max(1.5, 1.5 + 6.5 * Math.exp(-t / 100));
-  const batch = 1 + Math.floor(t / 150); // +1 alle 2,5 min (Spät-Dichte unverändert)
+  // Spawn-Rate: Takt ~8s → schneller Früh-Abfall (tote Leere weg), aber Boden bei 2,5s statt 1,5s →
+  // die Spät-Eskalation bleibt deutlich sanfter. Batch wächst langsam (+1 alle ~3,3 min).
+  const interval = Math.max(2.5, 1.5 + 6.5 * Math.exp(-t / 100));
+  const batch = 1 + Math.floor(t / 200);
   return { interval, batch, weights, level, cap: 50 };
 }
 
