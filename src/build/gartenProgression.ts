@@ -32,18 +32,18 @@ export interface GegnerWelle {
 
 /** Zeit (s) → was auf dem Feld stehen soll. An die buildStufe-Schwellen ausgerichtet (Wettrennen). */
 export function gegnerWelle(t: number): GegnerWelle {
-  if (t < 25) return { targetCount: 6, weights: { allrounder: 1 }, level: 1, interval: 1.4 };
-  if (t < 70) return { targetCount: 7, weights: { allrounder: 1 }, level: 1, interval: 1.3 };
-  if (t < 130) return { targetCount: 9, weights: { allrounder: 6, racer: 4 }, level: 2, interval: 1.1 };
-  if (t < 210) return { targetCount: 12, weights: { allrounder: 4, racer: 3, swarm: 3, bunker: 1 }, level: 3, interval: 0.9 };
-  // ab 3:30 — Endlos-Eskalation: mehr, fieser (Schwarm-lastig), stärker, schnellerer Nachschub.
-  const over = t - 210;
-  const step = Math.floor(over / 60);
+  if (t < 60) return { targetCount: 4, weights: { allrounder: 1 }, level: 1, interval: 1.8 }; // ruhiger, dünner Start
+  if (t < 150) return { targetCount: 6, weights: { allrounder: 7, racer: 3 }, level: 1, interval: 1.6 }; // +Läufer
+  if (t < 270) return { targetCount: 8, weights: { allrounder: 5, racer: 3, swarm: 2 }, level: 2, interval: 1.4 }; // +Schwarm
+  if (t < 420) return { targetCount: 11, weights: { allrounder: 4, racer: 3, swarm: 3, bunker: 1 }, level: 3, interval: 1.1 }; // +Brocken
+  // ab 7:00 — langsame Endlos-Eskalation (trägt einen ~10-min-Run und darüber hinaus).
+  const over = t - 420;
+  const step = Math.floor(over / 90);
   return {
-    targetCount: Math.min(30, 16 + step * 2),
+    targetCount: Math.min(24, 13 + step * 2),
     weights: { allrounder: 2, racer: 3, swarm: 4, bunker: 2 },
-    level: 3 + Math.floor(over / 90),
-    interval: Math.max(0.5, 0.9 - step * 0.05),
+    level: 4 + Math.floor(over / 150),
+    interval: Math.max(0.6, 1.1 - step * 0.05),
   };
 }
 

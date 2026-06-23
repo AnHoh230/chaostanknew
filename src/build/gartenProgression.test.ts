@@ -16,20 +16,21 @@ describe('buildStufe', () => {
 describe('gegnerWelle', () => {
   it('startet dünn (nur Allrounder) und wird über die Zeit mehr, gemischter, stärker', () => {
     const w0 = gegnerWelle(0);
-    expect(w0.targetCount).toBe(6);
+    expect(w0.targetCount).toBe(4);
     expect(Object.keys(w0.weights)).toEqual(['allrounder']);
-    const wLate = gegnerWelle(400);
+    const wLate = gegnerWelle(500);
     expect(wLate.targetCount).toBeGreaterThan(w0.targetCount);
     expect(Object.keys(wLate.weights).length).toBeGreaterThan(1);
     expect(wLate.level).toBeGreaterThan(w0.level);
   });
   it('targetCount ist gedeckelt (rennt nicht ins Unendliche)', () => {
-    expect(gegnerWelle(99999).targetCount).toBeLessThanOrEqual(30);
+    expect(gegnerWelle(99999).targetCount).toBeLessThanOrEqual(24);
   });
-  it('Schwarm + Brocken erscheinen erst ab der ZZZ-Phase', () => {
-    expect(gegnerWelle(100).weights.swarm).toBeUndefined(); // ZZ-Phase: noch kein Schwarm
-    expect(gegnerWelle(150).weights.swarm).toBeGreaterThan(0); // ZZZ-Phase
-    expect(gegnerWelle(150).weights.bunker).toBeGreaterThan(0);
+  it('Schwarm + Brocken erscheinen gestaffelt (Schwarm vor Brocken)', () => {
+    expect(gegnerWelle(100).weights.swarm).toBeUndefined(); // frühe Phase: nur Allrounder/Läufer
+    expect(gegnerWelle(200).weights.swarm).toBeGreaterThan(0); // Schwarm-Phase
+    expect(gegnerWelle(200).weights.bunker).toBeUndefined(); // Brocken noch nicht
+    expect(gegnerWelle(300).weights.bunker).toBeGreaterThan(0); // Brocken-Phase
   });
 });
 

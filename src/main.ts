@@ -496,8 +496,9 @@ function boot(combatStyle: CombatStyle): void {
       metrics.onKill(e.typeId, runClock - (spawnTimes.get(e.id) ?? runClock));
       styleTracker.onKill({ dist: Math.hypot(e.combatant.x - playerCombatant.x, e.combatant.z - playerCombatant.z) });
       // Impuls-Orb in der aktuellen Kompass-Richtung droppen (nur im Flow → keine Deathloop-Punkte).
-      // Garten: jeder Kill droppt einen Impuls in den ZUSTAND (dot_core) — egal was der Kompass zeigt.
-      if (flowState === 'flow') spawnImpulseOrb(e.combatant.x, e.combatant.z, GARTEN_MODE ? 'dot_core' : activeChannelNow(), e.typeId === 'bunker' ? 9 : 5);
+      // Garten: Kills droppen einen Impuls in den ZUSTAND (dot_core). Schwarm = Futter → KEIN Impuls
+      // (sonst flutet der späte Schwarm den Aufbau); Rest gibt weniger als früher → Progress gestreckt.
+      if (flowState === 'flow' && e.typeId !== 'swarm') spawnImpulseOrb(e.combatant.x, e.combatant.z, GARTEN_MODE ? 'dot_core' : activeChannelNow(), e.typeId === 'bunker' ? 8 : 4);
       const up = progression.addXp(Math.round(18 + (e.combatant.lootValue ?? 0.4) * 60));
       if (up.gained > 0) {
         const mkNote = up.newMkUnlocks.length ? ` — MK${up.newMkUnlocks[up.newMkUnlocks.length - 1]} frei!` : '';
