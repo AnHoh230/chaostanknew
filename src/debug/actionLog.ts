@@ -1,7 +1,7 @@
 /**
  * Run-Action-Log: schreibt Spieler-/Welt-Ereignisse pro Run über den Vite-Endpunkt
- * /__log nach logs/run-<NNN>.<kategorie>.log. Aufgeteilt in mehrere Dateien, damit
- * jede für sich lesbar bleibt (statt einer riesigen Sammeldatei):
+ * /__log nach logs/run-<NNN>/<kategorie>.log — ein Ordner pro Run, darin je Kategorie
+ * eine Datei, damit jede für sich lesbar bleibt (statt einer riesigen Sammeldatei):
  *   - snap   : periodische Diagnose-Snapshots (Verlauf/Kennzahlen) — die Balance-Sicht.
  *   - combat : Kampf-Aktionen (Schuss/Salve/DoT/Ernte/Dash/Nachladen/Ult …).
  *   - event  : Meilensteine (Klassenwahl/Flow/Evolution/Tod/Respawn/Regler/Run-Start+Ende).

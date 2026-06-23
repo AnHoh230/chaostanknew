@@ -15,7 +15,7 @@ function actionLogPlugin(): Plugin {
     try {
       let max = 0;
       for (const f of fs.readdirSync(dir)) {
-        const m = /^run-(\d+)\./.exec(f); // matcht run-NNN.log UND run-NNN.<kat>.log
+        const m = /^run-(\d+)(?:\.|$)/.exec(f); // matcht Ordner run-NNN UND alte Dateien run-NNN.*.log
         if (m) max = Math.max(max, parseInt(m[1]!, 10) || 0);
       }
       return max + 1;
@@ -41,7 +41,9 @@ function actionLogPlugin(): Plugin {
           const q = new URL(req.url ?? '', 'http://x').searchParams;
           const run = q.get('run') ?? '0';
           const cat = (q.get('cat') ?? 'combat').replace(/[^a-z]/gi, '') || 'combat'; // nur a–z, sonst combat
-          const file = path.join(dir, `run-${String(run).padStart(3, '0')}.${cat}.log`);
+          const runDir = path.join(dir, `run-${String(run).padStart(3, '0')}`); // ein Ordner pro Run
+          fs.mkdirSync(runDir, { recursive: true });
+          const file = path.join(runDir, `${cat}.log`);
           const chunks: Buffer[] = [];
           req.on('data', (c: Buffer) => chunks.push(c));
           req.on('end', () => {
