@@ -794,9 +794,11 @@ function boot(combatStyle: CombatStyle): void {
       log.info('scope', { on });
     };
     // Rechtsklick HALTEN = Scope+Slomo (zielen/infizieren), loslassen = Fahrmodus (ausweichen).
+    // POINTER-Events (nicht mouse-): Babylon preventDefault't den Pointer am Canvas und unterdrückt
+    // damit die Legacy-mousedown-Events. Capture-Phase, damit der Canvas sie nicht vorher schluckt.
     window.addEventListener('contextmenu', (ev) => ev.preventDefault(), true);
-    window.addEventListener('mousedown', (ev) => { if (ev.button === 2) setScope(true); });
-    window.addEventListener('mouseup', (ev) => { if (ev.button === 2) setScope(false); });
+    window.addEventListener('pointerdown', (ev) => { if (ev.button === 2) setScope(true); }, true);
+    window.addEventListener('pointerup', (ev) => { if (ev.button === 2) setScope(false); }, true);
   }
 
   // Dash-Auslöser: Shift = kurzer Burst in Fahrtrichtung (der Panzer fährt eh vorwärts).
