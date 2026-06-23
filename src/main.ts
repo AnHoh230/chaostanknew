@@ -454,7 +454,7 @@ function boot(combatStyle: CombatStyle): void {
       metrics.onKill(e.typeId, runClock - (spawnTimes.get(e.id) ?? runClock));
       styleTracker.onKill({ dist: Math.hypot(e.combatant.x - playerCombatant.x, e.combatant.z - playerCombatant.z) });
       // Impuls-Orb in der aktuellen Kompass-Richtung droppen (nur im Flow → keine Deathloop-Punkte).
-      if (flowState === 'flow') spawnImpulseOrb(e.combatant.x, e.combatant.z, activeChannelNow(), e.typeId === 'bunker' ? 9 : 5);
+      if (flowState === 'flow' && !GARTEN_MODE) spawnImpulseOrb(e.combatant.x, e.combatant.z, activeChannelNow(), e.typeId === 'bunker' ? 9 : 5);
       const up = progression.addXp(Math.round(18 + (e.combatant.lootValue ?? 0.4) * 60));
       if (up.gained > 0) {
         const mkNote = up.newMkUnlocks.length ? ` — MK${up.newMkUnlocks[up.newMkUnlocks.length - 1]} frei!` : '';
@@ -1128,14 +1128,18 @@ function boot(combatStyle: CombatStyle): void {
     if (flowState !== prevFlowState) { alog.log('flow', { from: prevFlowState, to: flowState, t: +runClock.toFixed(1) }); prevFlowState = flowState; }
 
     // Schicht 2: vorgemerkte Evolution im sicheren Fenster freischalten (Kompass = gezogener Punkt).
-    const evoUnlock = tryTriggerEvolution(evo, {
-      now: runClock, flow: flowState,
-      minSecondsBeforeFirst: evoMinFirst, minSecondsBetween: evoMinBetween,
-      dominantChannel: activeChannelNow(),
-    });
-    if (evoUnlock) {
-      showToast(`NEUE FORMUNG · ${CHANNEL_DISPLAY[evoUnlock.channelId].displayName} ${evoUnlock.stage}`);
-      alog.log('evolution', { ch: evoUnlock.channelId, stage: evoUnlock.stage, t: +runClock.toFixed(1) });
+    // Im GARTEN-Test AUS — dort treibt buildStufe (Zeit) den ZZZ-Aufbau; das alte Sniper-Evo wäre nur
+    // doppelte, irreführende Formung. (Evo-System bleibt intakt für die spätere Kompass-auf-dot-Kopplung.)
+    if (!GARTEN_MODE) {
+      const evoUnlock = tryTriggerEvolution(evo, {
+        now: runClock, flow: flowState,
+        minSecondsBeforeFirst: evoMinFirst, minSecondsBetween: evoMinBetween,
+        dominantChannel: activeChannelNow(),
+      });
+      if (evoUnlock) {
+        showToast(`NEUE FORMUNG · ${CHANNEL_DISPLAY[evoUnlock.channelId].displayName} ${evoUnlock.stage}`);
+        alog.log('evolution', { ch: evoUnlock.channelId, stage: evoUnlock.stage, t: +runClock.toFixed(1) });
+      }
     }
     frontHudCd -= simDt;
     if (frontHudCd <= 0) { frontHudCd = 0.1; updateFrontHud(); }
