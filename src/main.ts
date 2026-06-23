@@ -364,6 +364,7 @@ function boot(combatStyle: CombatStyle): void {
   const buffHud = createBuffHud();
   let fireCd = 0; // Spieler-Feuer-Cooldown (Kühlmittel senkt ihn über fireRateMul)
   const PLAYER_FIRE_BASE = 0.28; // s zwischen Schüssen bei fireRate 1
+  const GARTEN_FIRE_BASE = 0.14; // Garten: knapperer Takt — die 3 Dots sollen zügig sitzen (Munition limitiert, nicht die Rate)
   const BASE_TURRET_SLEW = 22; // rad/s Turm-Dreh-Tempo (Turmservo verdoppelt; Schüsse bleiben pixelgenau)
   let spawnGraceCd = 5; // 5s nach Erscheinen: unverwundbar (Spawn & Respawn)
   // — Schicht 0/1: Bauprofil (aus evolution/profiles) + Flow-State-Maschine —
@@ -554,7 +555,7 @@ function boot(combatStyle: CombatStyle): void {
     if (hits > 0) {
       metrics.onShot(); lastFireClock = runClock; bus.emit('tank.fired', { tankId: tank.id });
       alog.log('volley', { hits });
-      fireCd = PLAYER_FIRE_BASE / playerBuffs.aggregate().fireRateMul; // Cooldown nach der Salve
+      fireCd = (GARTEN_MODE ? GARTEN_FIRE_BASE : PLAYER_FIRE_BASE) / playerBuffs.aggregate().fireRateMul; // Cooldown nach der Salve
     }
   }
 
@@ -1558,8 +1559,10 @@ function boot(combatStyle: CombatStyle): void {
         const col = fireCd <= 0 ? '#9be36b' : '#ffa94d'; // grün = feuerbereit, orange = nachladen
         if (GARTEN_MODE) {
           // Garten: DU wählst, wen du ansäst — Ziel unter dem Cursor. Manuell verteilen statt Auto-Snap.
-          const cand = fireCd <= 0 ? nearestToPointer(mouseX, mouseY, screenBlips, GARTEN_SNAP_PX) : null;
-          sniperTargets = cand ? [cand] : [];
+          // Fadenkreuz IMMER aufs Cursor-Ziel zeigen (im Cooldown orange statt verschwinden) — sonst
+          // flackert beim Nachfeuern die Zielmarke weg ("seltsam"). Feuerbar nur ohne Cooldown.
+          const cand = nearestToPointer(mouseX, mouseY, screenBlips, GARTEN_SNAP_PX);
+          sniperTargets = fireCd <= 0 && cand ? [cand] : [];
           const cb = cand ? screenBlips.find((b) => b.id === cand) : null;
           if (cb) {
             sniperCrosshair.style.display = 'block';
