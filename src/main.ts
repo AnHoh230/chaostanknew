@@ -514,7 +514,11 @@ function boot(combatStyle: CombatStyle): void {
         // Stufenweise: St 0 = Grundschuss (direkter Treffer, Z noch nicht ausgebildet); ab St 1
         // INFIZIERT der Schuss (Gift säen) — töten tut dann nur das Gift. „Markieren" = anschießen.
         if (buildStufe(runClock) < 1) damageEnemyTick(e, dmg);
-        else e.gift = saeGift(e.gift, gartenCfg);
+        else {
+          const fresh = !e.gift; // nur die ERSTE Infektion loggen, nicht jedes Nachsäen
+          e.gift = saeGift(e.gift, gartenCfg);
+          if (fresh) alog.log('dot', { id: e.id, src: 'schuss', typ: e.typeId, t: +runClock.toFixed(1) });
+        }
         hits += 1; continue;
       }
       let hitDmg = dmg;
@@ -801,7 +805,7 @@ function boot(combatStyle: CombatStyle): void {
 
   // HUD (Spieler/Gegner-HP) + Minimap (Named = roter Punkt = Wiedererkennung auf der Karte).
   const playerBar = createPlayerBar(scene, camera, engine); // HP+EP über dem eigenen Panzer
-  const minimap = createMinimap();
+  const minimap = createMinimap(168, 150); // Reichweite 150 (Spawn-Ring reicht bis 130 — sonst fallen Gegner von der Karte)
   const enemyBars = createEnemyBars(scene, camera, engine); // HP-Balken über den Gegnern
   const swarmHud = createSwarmHud(); // Schwarm-Lage: Anzahl je Typ + Zieldichte
   const heatHud = createHeatHud(); // Heat je Stil-Richtung (warum dieser Mix)
@@ -815,6 +819,9 @@ function boot(combatStyle: CombatStyle): void {
   const cam0 = camApi?.get() ?? { height: 25, back: 55, fov: 0.87 };
   let camH = cam0.height, camB = cam0.back, camF = cam0.fov;
   const applyCam = (): void => camApi?.set(camH, camB, camF);
+  // Garten: Fahr-Kamera weiter raus (Höhe 50 / Distanz 90), sonst fährt man blind in Gegner, die
+  // schon auf 40 schießen. Scope bleibt mit 95/150 deutlich weiter (Survey). Per __cam-Panel feinjustierbar.
+  if (GARTEN_MODE) { camH = 50; camB = 90; applyCam(); }
   tunables.add({ label: 'Höhe', category: 'Kamera', value: camH, min: 8, max: 60, step: 1, onChange: (v) => { camH = v; applyCam(); } });
   tunables.add({ label: 'Distanz', category: 'Kamera', value: camB, min: 5, max: 80, step: 1, onChange: (v) => { camB = v; applyCam(); } });
   tunables.add({ label: 'Zoom (FOV)', category: 'Kamera', value: camF, min: 0.3, max: 1.0, step: 0.01, onChange: (v) => { camF = v; applyCam(); } });
@@ -1360,7 +1367,10 @@ function boot(combatStyle: CombatStyle): void {
             const d = Math.hypot(o.combatant.x - e.combatant.x, o.combatant.z - e.combatant.z);
             if (d < bestD) { bestD = d; best = o; }
           }
-          if (best) best.gift = saeGift(undefined, gartenCfg);
+          if (best) {
+            best.gift = saeGift(undefined, gartenCfg);
+            alog.log('dot', { id: best.id, src: 'ansteckung', von: e.id, typ: best.typeId, t: +runClock.toFixed(1) });
+          }
         }
         // Glühen grün→rot; reif pulsiert (raucht/krank, wartet auf den Tod).
         if (e.gift && e.combatant.alive) {
