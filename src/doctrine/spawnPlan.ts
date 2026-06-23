@@ -16,9 +16,10 @@ export interface SwarmTuning {
 }
 
 export interface SwarmPlan {
-  targetCount: number; // so viele Gegner sollen gleichzeitig leben
+  targetCount: number; // Auffüll-Modus: so viele gleichzeitig. Batch-Modus: nur Safety-Obergrenze.
   weights: Record<string, number>; // Typ-ID → relatives Gewicht beim Nachspawnen
-  interval?: number; // optional: s zwischen Spawns (überschreibt den Spawner-Default); für zeit-getriebene Wellen
+  interval?: number; // optional: s zwischen Spawn-Ticks (überschreibt den Spawner-Default)
+  batch?: number; // gesetzt = BATCH-Modus: `batch` Gegner pro Tick, KEIN Auffüllen (Timer-Eskalation)
 }
 
 /** Heat 0 (alles kalt): nur Allrounder — der Grund-Gegner des Sniper-Setups. */

@@ -14,23 +14,29 @@ describe('buildStufe', () => {
 });
 
 describe('gegnerWelle', () => {
-  it('startet dünn (nur Allrounder) und wird über die Zeit mehr, gemischter, stärker', () => {
+  it('startet sparsam (1 Panzer/Tick, langer Takt, nur Allrounder)', () => {
     const w0 = gegnerWelle(0);
-    expect(w0.targetCount).toBe(4);
+    expect(w0.batch).toBe(1);
+    expect(w0.interval).toBeGreaterThan(8);
     expect(Object.keys(w0.weights)).toEqual(['allrounder']);
-    const wLate = gegnerWelle(500);
-    expect(wLate.targetCount).toBeGreaterThan(w0.targetCount);
-    expect(Object.keys(wLate.weights).length).toBeGreaterThan(1);
-    expect(wLate.level).toBeGreaterThan(w0.level);
+    expect(w0.level).toBe(1);
   });
-  it('targetCount ist gedeckelt (rennt nicht ins Unendliche)', () => {
-    expect(gegnerWelle(99999).targetCount).toBeLessThanOrEqual(24);
+  it('eskaliert über die Zeit: Takt schrumpft, Batch wächst, Mix + Level steigen', () => {
+    const early = gegnerWelle(0);
+    const late = gegnerWelle(600);
+    expect(late.interval).toBeLessThan(early.interval);
+    expect(late.batch).toBeGreaterThan(early.batch);
+    expect(Object.keys(late.weights).length).toBeGreaterThan(1);
+    expect(late.level).toBeGreaterThan(early.level);
+  });
+  it('Takt fällt nicht unter ~1,5s (kein unendlicher Spawn-Sturm)', () => {
+    expect(gegnerWelle(99999).interval).toBeGreaterThanOrEqual(1.5);
   });
   it('Schwarm + Brocken erscheinen gestaffelt (Schwarm vor Brocken)', () => {
-    expect(gegnerWelle(100).weights.swarm).toBeUndefined(); // frühe Phase: nur Allrounder/Läufer
-    expect(gegnerWelle(200).weights.swarm).toBeGreaterThan(0); // Schwarm-Phase
-    expect(gegnerWelle(200).weights.bunker).toBeUndefined(); // Brocken noch nicht
-    expect(gegnerWelle(300).weights.bunker).toBeGreaterThan(0); // Brocken-Phase
+    expect(gegnerWelle(120).weights.swarm).toBeUndefined(); // frühe Phase: nur Allrounder/Läufer
+    expect(gegnerWelle(300).weights.swarm).toBeGreaterThan(0); // Schwarm-Phase
+    expect(gegnerWelle(300).weights.bunker).toBeUndefined(); // Brocken noch nicht
+    expect(gegnerWelle(450).weights.bunker).toBeGreaterThan(0); // Brocken-Phase
   });
 });
 

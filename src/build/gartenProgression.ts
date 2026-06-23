@@ -24,27 +24,27 @@ export function buildStufe(t: number): number {
 }
 
 export interface GegnerWelle {
-  targetCount: number; // so viele Gegner sollen gleichzeitig leben
+  interval: number; // s zwischen Spawn-Ticks — schrumpft über die Zeit (= Eskalation)
+  batch: number; // Gegner pro Tick — wächst über die Zeit (1 → mehr)
   weights: Record<string, number>; // ENEMY_TYPES-IDs → relatives Spawn-Gewicht
   level: number; // Stärke-Stufe der einzelnen Gegner (skaliert ihre Stats)
-  interval: number; // s zwischen Spawns
+  cap: number; // Safety-Obergrenze gleichzeitig lebender (selten erreicht; verhindert Runaway)
 }
 
-/** Zeit (s) → was auf dem Feld stehen soll. An die buildStufe-Schwellen ausgerichtet (Wettrennen). */
+/** Zeit (s) → Spawn-Eskalation: Mix + Level schalten gestaffelt frei; Takt schrumpft, Batch wächst. */
 export function gegnerWelle(t: number): GegnerWelle {
-  if (t < 60) return { targetCount: 4, weights: { allrounder: 1 }, level: 1, interval: 1.8 }; // ruhiger, dünner Start
-  if (t < 150) return { targetCount: 6, weights: { allrounder: 7, racer: 3 }, level: 1, interval: 1.6 }; // +Läufer
-  if (t < 270) return { targetCount: 8, weights: { allrounder: 5, racer: 3, swarm: 2 }, level: 2, interval: 1.4 }; // +Schwarm
-  if (t < 420) return { targetCount: 11, weights: { allrounder: 4, racer: 3, swarm: 3, bunker: 1 }, level: 3, interval: 1.1 }; // +Brocken
-  // ab 7:00 — langsame Endlos-Eskalation (trägt einen ~10-min-Run und darüber hinaus).
-  const over = t - 420;
-  const step = Math.floor(over / 90);
-  return {
-    targetCount: Math.min(24, 13 + step * 2),
-    weights: { allrounder: 2, racer: 3, swarm: 4, bunker: 2 },
-    level: 4 + Math.floor(over / 150),
-    interval: Math.max(0.6, 1.1 - step * 0.05),
-  };
+  // Typ-Mix + Stärke schalten langsam frei (Schwarm, dann Brocken).
+  let weights: Record<string, number>;
+  let level: number;
+  if (t < 90) { weights = { allrounder: 1 }; level = 1; }
+  else if (t < 210) { weights = { allrounder: 7, racer: 3 }; level = 1; }
+  else if (t < 360) { weights = { allrounder: 5, racer: 3, swarm: 2 }; level = 2; }
+  else if (t < 540) { weights = { allrounder: 4, racer: 3, swarm: 3, bunker: 1 }; level = 3; }
+  else { weights = { allrounder: 2, racer: 3, swarm: 4, bunker: 2 }; level = 4 + Math.floor((t - 540) / 180); }
+  // Spawn-Rate eskaliert: Takt ~10s → ~1,5s (über ~8 min), Batch +1 alle 2,5 min. Sparsamer Start.
+  const interval = Math.max(1.5, 10 - t * (8.5 / 480));
+  const batch = 1 + Math.floor(t / 150);
+  return { interval, batch, weights, level, cap: 50 };
 }
 
 export interface GartenTypStats {

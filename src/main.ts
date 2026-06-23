@@ -1340,9 +1340,9 @@ function boot(combatStyle: CombatStyle): void {
     runClock += simDt;
     const aliveCount = roster.reduce((n, e) => n + (e.combatant.alive ? 1 : 0), 0);
     // BROKEN: keine neuen Spawns (Druck raus, Loop erholt sich). Sonst normaler gedeckelter Nachschub.
-    const welle = GARTEN_MODE ? gegnerWelle(runClock) : null; // Garten: zeit-getriebene Welle (Menge/Mix/Level/Takt)
+    const welle = GARTEN_MODE ? gegnerWelle(runClock) : null; // Garten: Timer+Batch-Eskalation (kein Auffüllen)
     const spawnPlan = welle
-      ? { targetCount: welle.targetCount, weights: welle.weights, interval: welle.interval }
+      ? { targetCount: welle.cap, weights: welle.weights, interval: welle.interval, batch: welle.batch }
       : currentSwarmPlan();
     const spawnedList = flowState === 'broken' ? [] : spawner.update(simDt, px, pz, aliveCount, spawnPlan);
     for (const spawned of spawnedList) {
