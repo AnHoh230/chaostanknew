@@ -204,7 +204,13 @@ function boot(combatStyle: CombatStyle): void {
   let woundStep = 20, woundCap = 90, woundBurstDmg = 60, woundBurstR = 14; // Aufbau / Bruch-Schwelle / Bruch-AoE
   let aoeRange = 26, aoeRadius = 4, aoeDmg = 14, aoeTickCount = 5; // AoE-Feld (Radius ~2 Späher)
   let dotDmg = 36, dotEvery = DAMAGE_TICK * 2, dotDur = DAMAGE_TICK * 8; // DoT: alle 2 Ticks, 8 Ticks lang
-  let scopeActive = false; // Sniper: RMB gedrückt → Scope an (kein Fahren, weiter zoomen)
+  let scopeActive = false; // Sniper: RMB GEHALTEN → Scope+Slomo an (kein Fahren, weiter zoomen)
+  // Garten-Waffen-Ökonomie: 3 Infektions-Schüsse, dann auf R nachladen (mit Tempo-Schub = mobil).
+  let ammo = 3;
+  const AMMO_MAX = 3;
+  let reloadCd = 0;
+  const RELOAD_TIME = 2.2, RELOAD_SPEED = 1.7; // Nachlade-Dauer (s) + Tempo-Faktor währenddessen
+  const SLOMO_SCALE = 0.2; // Welt-Zeit im Slomo (Bullet-Time beim Infizieren); Spieler-Feuertakt bleibt real
   let scopeApplied = false, savedShotRange = 40; // Übergangs-Zustand für den Scope
   const aoeFields: { x: number; z: number; r: number; left: number; tickCd: number; disc: Mesh }[] = [];
 
@@ -581,7 +587,9 @@ function boot(combatStyle: CombatStyle): void {
     if (combatStyle === 'sniper') {
       if (fireCd > 0) return; // nach einer Salve kurz nachladen
       if (!sniperTargets.length) return; // kein Ziel in Reichweite → kein Schuss (kein Cooldown verbraten)
+      if (GARTEN_MODE && ammo <= 0) return; // leer → erst auf R nachladen
       fireVolley(sniperTargets);
+      if (GARTEN_MODE) ammo = Math.max(0, ammo - 1); // ein Infektions-Schuss verbraucht
       return;
     }
     if (fireCd > 0) return; // Feuer-Cooldown (Kühlmittel senkt ihn)
@@ -771,19 +779,22 @@ function boot(combatStyle: CombatStyle): void {
       document.body.appendChild(m);
       return m;
     });
-    const toggleScope = (): void => {
-      scopeActive = !scopeActive;
-      badge.style.display = scopeActive ? 'block' : 'none';
-      if (!scopeActive) {
+    const setScope = (on: boolean): void => {
+      if (scopeActive === on) return;
+      scopeActive = on;
+      badge.style.display = on ? 'block' : 'none';
+      if (!on) {
         // Scope aus → Ziel-Ringe weg; Kern-Stufe 3 „Rückkehrfenster": kurzer Tempo-Schub.
         sniperTargets = [];
         ch.style.display = 'none'; for (const m of markPool) m.style.display = 'none';
         if (evo.unlockedStagesByChannel.sniper_core >= 3) returnBoostCd = 1.5;
       }
-      log.info('scope', { on: scopeActive });
+      log.info('scope', { on });
     };
-    // contextmenu feuert genau einmal pro Rechtsklick (ideal für einen Schalter) und wird eh unterdrückt.
-    window.addEventListener('contextmenu', (ev) => { ev.preventDefault(); toggleScope(); }, true);
+    // Rechtsklick HALTEN = Scope+Slomo (zielen/infizieren), loslassen = Fahrmodus (ausweichen).
+    window.addEventListener('contextmenu', (ev) => ev.preventDefault(), true);
+    window.addEventListener('mousedown', (ev) => { if (ev.button === 2) setScope(true); });
+    window.addEventListener('mouseup', (ev) => { if (ev.button === 2) setScope(false); });
   }
 
   // Dash-Auslöser: Shift = kurzer Burst in Fahrtrichtung (der Panzer fährt eh vorwärts).
@@ -796,6 +807,14 @@ function boot(combatStyle: CombatStyle): void {
     dashTimer = dashDur;
     dashCd = dashCdMax;
     alog.log('dash', {});
+  });
+
+  // Nachladen: R füllt die 3 Infektions-Schüsse wieder auf (CD; Tempo-Schub läuft solange = mobil).
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'r' && ev.key !== 'R') return;
+    if (!GARTEN_MODE || reloadCd > 0 || ammo >= AMMO_MAX || !playerCombatant.alive) return;
+    reloadCd = RELOAD_TIME;
+    alog.log('reload', { t: +runClock.toFixed(1) });
   });
 
   // OS-Mauszeiger über dem Canvas ausblenden — das Spiel zeichnet sein eigenes
@@ -924,6 +943,13 @@ function boot(combatStyle: CombatStyle): void {
     'font:700 16px system-ui,sans-serif;color:#ffe08a;background:rgba(8,10,12,0.72);' +
     'padding:8px 16px;border-radius:8px;opacity:0;transition:opacity 0.2s;text-shadow:0 1px 3px #000;';
   document.body.appendChild(toast);
+  // Munitions-/Nachlade-Anzeige (Garten): Punkte = Schüsse, sonst Nachlade-Countdown.
+  const ammoHud = document.createElement('div');
+  ammoHud.id = 'ammo-hud';
+  ammoHud.style.cssText =
+    'position:fixed;left:50%;bottom:40px;transform:translateX(-50%);z-index:20;pointer-events:none;' +
+    'font:700 15px system-ui,sans-serif;color:#bfe3ff;text-shadow:0 1px 3px #000;letter-spacing:2px;';
+  document.body.appendChild(ammoHud);
   function showToast(msg: string): void {
     toast.textContent = msg;
     toast.style.opacity = '1';
@@ -1096,16 +1122,23 @@ function boot(combatStyle: CombatStyle): void {
   // GENAU EIN Loop. Reihenfolge: Steuerung -> Pool-Logik -> Boden-Recenter -> Mesh-Sync.
   startLoop(engine, scene, clock, (simDt) => {
     if (runOver) return; // Tod = Run vorbei → Updates einfrieren (Overlay läuft, Reload startet neu)
+    const realDt = simDt; // ungebremste Zeit — für Feuertakt, Nachladen und die Slomo-Entscheidung
+    // SLOMO: im Scope mit Munition kriecht die WELT (Bullet-Time). Der Spieler steht eh (Scope hält an),
+    // sein Feuertakt bleibt real → man setzt die 3 Dots zügig, während die Gegner kriechen.
+    const slomoOn = GARTEN_MODE && scopeActive && ammo > 0;
+    if (slomoOn) simDt = realDt * SLOMO_SCALE;
+    // Nachladen (R) läuft in Echtzeit; solange es läuft, gibt es Tempo-Schub (mobile Ausweich-Phase).
+    if (reloadCd > 0) { reloadCd -= realDt; if (reloadCd <= 0) ammo = AMMO_MAX; }
     simTime += simDt;
     // SH2: Buffs altern, effektive Spieler-Stats (Tempo/Rüstung) = Loadout × Buffs.
-    fireCd -= simDt;
+    fireCd -= realDt;
     playerBuffs.tick(simDt);
     const pmods = playerBuffs.aggregate();
     const pst = playerStats();
     // Kern-Stufe 3 „Rückkehrfenster": kurzer Tempo-Schub direkt nach dem Auspacken.
     if (returnBoostCd > 0) returnBoostCd = Math.max(0, returnBoostCd - simDt);
     const returnBoost = returnBoostCd > 0 ? 1.5 : 1;
-    playerSpeed = pst.speed * pmods.speedMul * playerSpeedMul * returnBoost;
+    playerSpeed = pst.speed * pmods.speedMul * playerSpeedMul * returnBoost * (reloadCd > 0 ? RELOAD_SPEED : 1);
     playerCombatant.armor = pst.armor + pmods.armorAdd;
     playerCombatant.dodge = pst.dodge + pmods.dodgeAdd; // Ausweichen aus Buffs (Basis 0)
     playerCombatant.incomingMul = pmods.incomingMul; // Verwundbarkeit (falls Gegner später markieren)
@@ -1449,6 +1482,13 @@ function boot(combatStyle: CombatStyle): void {
         .filter((e) => e.combatant.alive)
         .map((e) => ({ x: e.combatant.x, z: e.combatant.z, color: '#e8a23c' })),
     ]);
+    if (GARTEN_MODE) {
+      ammoHud.textContent = reloadCd > 0
+        ? `⟳ Nachladen ${reloadCd.toFixed(1)}s`
+        : ammo > 0
+          ? `Munition ${'●'.repeat(ammo)}${'○'.repeat(AMMO_MAX - ammo)}`
+          : 'Munition ○○○ — R drücken';
+    }
     // HP-Balken schweben über den Gegnern.
     enemyBars.update(
       roster
