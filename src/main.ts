@@ -43,7 +43,7 @@ import { TANK_CLASSES } from './game/classes';
 import { computeFlowState, pruneDeathTimes, type FlowState } from './game/flowState';
 import { ROSTER, DEFAULT_ESCALATION, scaleStats } from './enemy/roster';
 import { saeGift, tickGift, istReif, reifeStufe, giftSlow, DEFAULT_GARTEN } from './build/garten';
-import { buildStufe, gegnerWelle, gartenTypStats, pulkGroesse, BUILD_STUFE_NAME } from './build/gartenProgression';
+import { gegnerWelle, gartenTypStats, pulkGroesse, BUILD_STUFE_NAME } from './build/gartenProgression';
 import { thresholdForStage, maxStage, type TuningProfile } from './evolution/profiles';
 import { CHANNEL_DISPLAY, type BaseMode, type EvolutionChannelId } from './evolution/channels';
 import { createEvolutionState, gainProgress, tryTriggerEvolution, emergingChannel } from './evolution/evolution';
@@ -334,7 +334,7 @@ function boot(combatStyle: CombatStyle): void {
   document.body.appendChild(frontHud);
   let frontHudCd = 0;
   const updateFrontHud = (): void => {
-    const ch = activeChannelNow();
+    const ch: EvolutionChannelId = GARTEN_MODE ? 'dot_core' : activeChannelNow();
     const stage = evo.unlockedStagesByChannel[ch];
     const thrNext = thresholdForStage(currentTuningProfile, stage + 1);
     const prevThr = stage >= 1 ? thresholdForStage(currentTuningProfile, stage) ?? 0 : 0;
@@ -462,7 +462,8 @@ function boot(combatStyle: CombatStyle): void {
       metrics.onKill(e.typeId, runClock - (spawnTimes.get(e.id) ?? runClock));
       styleTracker.onKill({ dist: Math.hypot(e.combatant.x - playerCombatant.x, e.combatant.z - playerCombatant.z) });
       // Impuls-Orb in der aktuellen Kompass-Richtung droppen (nur im Flow → keine Deathloop-Punkte).
-      if (flowState === 'flow' && !GARTEN_MODE) spawnImpulseOrb(e.combatant.x, e.combatant.z, activeChannelNow(), e.typeId === 'bunker' ? 9 : 5);
+      // Garten: jeder Kill droppt einen Impuls in den ZUSTAND (dot_core) — egal was der Kompass zeigt.
+      if (flowState === 'flow') spawnImpulseOrb(e.combatant.x, e.combatant.z, GARTEN_MODE ? 'dot_core' : activeChannelNow(), e.typeId === 'bunker' ? 9 : 5);
       const up = progression.addXp(Math.round(18 + (e.combatant.lootValue ?? 0.4) * 60));
       if (up.gained > 0) {
         const mkNote = up.newMkUnlocks.length ? ` — MK${up.newMkUnlocks[up.newMkUnlocks.length - 1]} frei!` : '';
@@ -521,7 +522,7 @@ function boot(combatStyle: CombatStyle): void {
       if (GARTEN_MODE) {
         // Stufenweise: St 0 = Grundschuss (direkter Treffer, Z noch nicht ausgebildet); ab St 1
         // INFIZIERT der Schuss (Gift säen) — töten tut dann nur das Gift. „Markieren" = anschießen.
-        if (buildStufe(runClock) < 1) damageEnemyTick(e, dmg);
+        if (evo.unlockedStagesByChannel.dot_core < 1) damageEnemyTick(e, dmg);
         else {
           const fresh = !e.gift; // nur die ERSTE Infektion loggen, nicht jedes Nachsäen
           e.gift = saeGift(e.gift, gartenCfg);
@@ -1174,17 +1175,18 @@ function boot(combatStyle: CombatStyle): void {
     flowState = computeFlowState({ alive: playerCombatant.alive, now: runClock, lastRespawnAt, deathTimes });
     if (flowState !== prevFlowState) { alog.log('flow', { from: prevFlowState, to: flowState, t: +runClock.toFixed(1) }); prevFlowState = flowState; }
 
-    // Schicht 2: vorgemerkte Evolution im sicheren Fenster freischalten (Kompass = gezogener Punkt).
-    // Im GARTEN-Test AUS — dort treibt buildStufe (Zeit) den ZZZ-Aufbau; das alte Sniper-Evo wäre nur
-    // doppelte, irreführende Formung. (Evo-System bleibt intakt für die spätere Kompass-auf-dot-Kopplung.)
-    if (!GARTEN_MODE) {
+    // Schicht 2: vorgemerkte Evolution im sicheren Fenster freischalten. Im GARTEN levelt sie den
+    // ZUSTAND (dot_core) — egal was der Kompass zeigt (alle Impulse fließen dorthin, siehe Orb-Drop).
+    {
       const evoUnlock = tryTriggerEvolution(evo, {
         now: runClock, flow: flowState,
         minSecondsBeforeFirst: evoMinFirst, minSecondsBetween: evoMinBetween,
-        dominantChannel: activeChannelNow(),
+        dominantChannel: GARTEN_MODE ? 'dot_core' : activeChannelNow(),
       });
       if (evoUnlock) {
-        showToast(`NEUE FORMUNG · ${CHANNEL_DISPLAY[evoUnlock.channelId].displayName} ${evoUnlock.stage}`);
+        showToast(GARTEN_MODE && evoUnlock.channelId === 'dot_core'
+          ? `🦠 STUFE ${evoUnlock.stage} · ${BUILD_STUFE_NAME[Math.min(evoUnlock.stage, BUILD_STUFE_NAME.length - 1)]}`
+          : `NEUE FORMUNG · ${CHANNEL_DISPLAY[evoUnlock.channelId].displayName} ${evoUnlock.stage}`);
         alog.log('evolution', { ch: evoUnlock.channelId, stage: evoUnlock.stage, t: +runClock.toFixed(1) });
       }
     }
@@ -1356,7 +1358,7 @@ function boot(combatStyle: CombatStyle): void {
     // ab St 2 reifen + anstecken (reif steht & stirbt am Gift); ab St 3 gibt der reife Gift-Tod
     // Erntefieber. Plus die grau-Animation der geernteten Panzer.
     if (GARTEN_MODE) {
-      const stufe = buildStufe(runClock);
+      const stufe = evo.unlockedStagesByChannel.dot_core;
       for (let i = roster.length - 1; i >= 0; i--) {
         const e = roster[i];
         if (!e) continue;
@@ -1569,7 +1571,7 @@ function boot(combatStyle: CombatStyle): void {
           } else sniperCrosshair.style.display = 'none';
           for (const m of markPool) m.style.display = 'none'; // keine Auto-Ziel-Ringe im Garten
           if (scopeBadge) {
-            const bs = buildStufe(runClock);
+            const bs = evo.unlockedStagesByChannel.dot_core;
             const nm = BUILD_STUFE_NAME[Math.min(bs, BUILD_STUFE_NAME.length - 1)];
             scopeBadge.textContent = bs >= 3 ? `🦠 St${bs} · ${nm} — Erntefieber +${erntefieber}` : `🦠 St${bs} · ${nm}`;
           }
