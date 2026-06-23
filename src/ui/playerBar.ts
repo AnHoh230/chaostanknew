@@ -23,8 +23,9 @@ function hpColor(frac: number): string {
 export function createPlayerBar(scene: Scene, camera: Camera, engine: Engine): PlayerBar {
   const wrap = document.createElement('div');
   wrap.id = 'player-bar';
+  wrap.className = 'hud-bar'; // UI-Scale: translate(-50%,-100%) + scale via Klasse; Position bleibt per Projektion
   wrap.style.cssText =
-    'position:fixed;z-index:18;transform:translate(-50%,-100%);pointer-events:none;display:none;' +
+    'position:fixed;z-index:18;pointer-events:none;display:none;' +
     'width:120px;text-align:center;';
 
   const label = document.createElement('div');

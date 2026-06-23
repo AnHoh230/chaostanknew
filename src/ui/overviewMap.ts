@@ -33,8 +33,9 @@ export function createOverviewMap(): OverviewMap {
   cv.width = SIZE;
   cv.height = SIZE;
   cv.id = 'overview-map';
+  cv.className = 'hud-cc'; // UI-Scale: bildschirmmittig; translate(-50%,-50%) + scale via Klasse
   cv.style.cssText =
-    'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);display:none;z-index:30;' +
+    'position:fixed;left:50%;top:50%;display:none;z-index:30;' +
     'border:2px solid #2a343b;border-radius:10px;background:rgba(8,12,10,0.86);' +
     'box-shadow:0 12px 40px rgba(0,0,0,0.55);';
   document.body.appendChild(cv);

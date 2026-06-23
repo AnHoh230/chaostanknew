@@ -19,8 +19,9 @@ function heatColor(heat: number): string {
 
 export function createHeatHud(): HeatHud {
   const panel = document.createElement('div');
+  panel.className = 'hud-tl'; // UI-Scale: oben-links-Stapel; top mitskaliert, damit es nicht überlappt
   panel.style.cssText =
-    'position:fixed;left:12px;top:188px;z-index:18;width:150px;pointer-events:none;' +
+    'position:fixed;left:12px;top:calc(188px * var(--ui-scale));z-index:18;width:150px;pointer-events:none;' +
     'background:rgba(13,17,22,0.82);border:1px solid #2a343b;border-radius:8px;padding:7px 9px;' +
     'font:700 11px system-ui,sans-serif;color:#cdd6dd;';
   const head = document.createElement('div');

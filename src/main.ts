@@ -25,6 +25,7 @@ import { createSpawner } from './enemy/spawner';
 import { behaviorTarget } from './enemy/enemyBehavior';
 import { ENEMY_TYPES } from './enemy/enemyTypes';
 import { createPlayerBar } from './ui/playerBar';
+import { installUiScale } from './ui/uiScale';
 import { createMinimap } from './ui/minimap';
 import { createEnemyBars } from './ui/enemyBars';
 import { createSwarmHud } from './ui/swarmHud';
@@ -158,6 +159,7 @@ function boot(combatStyle: CombatStyle): void {
 
   // Kamera auf den Panzer-Root
   const camera = createCameraRig(scene, tank.view.root);
+  installUiScale(); // globales DOM-HUD-Scaling (CSS-Var --ui-scale + Anker-Klassen) auf große/4K-Displays
   const tunables = createTunables(); // Registry für alle live-stellbaren Magic Numbers
 
   // Projektil-Pool (rein logisch) + sichtbare Mesh-Brücke
@@ -332,7 +334,8 @@ function boot(combatStyle: CombatStyle): void {
   // — Sichtbarer Kompass: Dreieck mit ZIEHBAREM Punkt (oben Kern, unten-links Raum, -rechts Zustand) —
   const KERN = { x: 80, y: 20 }, RAUMP = { x: 24, y: 116 }, ZUSTP = { x: 136, y: 116 };
   const compassBox = document.createElement('div');
-  compassBox.style.cssText = 'position:fixed;right:12px;bottom:120px;z-index:41;width:160px;height:140px;cursor:grab;touch-action:none;user-select:none;';
+  compassBox.className = 'hud-br'; // UI-Scale: unten-rechts-Stapel mit frontHud; bottom mitskaliert
+  compassBox.style.cssText = 'position:fixed;right:12px;bottom:calc(120px * var(--ui-scale));z-index:41;width:160px;height:140px;cursor:grab;touch-action:none;user-select:none;';
   compassBox.innerHTML =
     '<svg width="160" height="140" style="overflow:visible">' +
     `<polygon points="${KERN.x},${KERN.y} ${RAUMP.x},${RAUMP.y} ${ZUSTP.x},${ZUSTP.y}" fill="#10151cdd" stroke="#3a4a5a" stroke-width="1.5"/>` +
@@ -350,7 +353,8 @@ function boot(combatStyle: CombatStyle): void {
   };
   const compassFromEvent = (ev: PointerEvent): void => {
     const r = compassBox.getBoundingClientRect();
-    const b = baryWeights({ x: ev.clientX - r.left, y: ev.clientY - r.top }, KERN, RAUMP, ZUSTP);
+    const s = r.width / 160 || 1; // CSS-UI-Scale herausrechnen (Box ist 160px breit · --ui-scale)
+    const b = baryWeights({ x: (ev.clientX - r.left) / s, y: (ev.clientY - r.top) / s }, KERN, RAUMP, ZUSTP);
     compass.raw = { sniper: b.wa, aoe: b.wb, dot: b.wc };
     renderCompassDot();
   };
@@ -361,8 +365,9 @@ function boot(combatStyle: CombatStyle): void {
 
   // Frontformung-HUD (unten rechts unter dem Kompass): entstehende Form + Stufe/Fortschritt.
   const frontHud = document.createElement('div');
+  frontHud.className = 'hud-br'; // UI-Scale: unten-rechts-Stapel mit Kompass
   frontHud.style.cssText =
-    'position:fixed;right:12px;bottom:12px;z-index:40;width:212px;background:#10151cdd;border:1px solid #2a3a4a;' +
+    'position:fixed;right:12px;bottom:calc(12px * var(--ui-scale));z-index:40;width:212px;background:#10151cdd;border:1px solid #2a3a4a;' +
     'border-radius:8px;padding:9px 11px;font:600 11px system-ui,sans-serif;color:#cfe3ee;pointer-events:none;';
   document.body.appendChild(frontHud);
   let frontHudCd = 0;
@@ -791,14 +796,16 @@ function boot(combatStyle: CombatStyle): void {
     // Sichtbarer Scope-Indikator — sonst rät man, ob der Schalter ankam (Debug: erst sichtbar machen).
     const badge = document.createElement('div');
     badge.textContent = '🔭 SCOPE';
+    badge.className = 'hud-tc'; // UI-Scale: oben-zentriert (translateX(-50%) + scale via Klasse)
     badge.style.cssText =
-      'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:50;background:#16240fee;' +
+      'position:fixed;top:calc(12px * var(--ui-scale));left:50%;z-index:50;background:#16240fee;' +
       'color:#9be36b;border:1px solid #9be36b;border-radius:6px;padding:4px 14px;display:none;' +
       'font:700 13px system-ui,sans-serif;letter-spacing:1.5px;pointer-events:none;';
     document.body.appendChild(badge);
     scopeBadge = badge; // im Loop für die Ziel-Prio-Anzeige genutzt
     // Fadenkreuz-Overlay: Ring + 4 Striche; Farbe signalisiert bereit (grün) / nachladen (orange).
     const ch = document.createElement('div');
+    ch.className = 'hud-c'; // UI-Scale: cursor-gebunden, nur skalieren (margin zentriert bereits)
     ch.style.cssText = 'position:fixed;width:46px;height:46px;margin:-23px 0 0 -23px;z-index:45;display:none;pointer-events:none;';
     ch.innerHTML =
       '<div data-ring style="position:absolute;inset:0;border:2px solid #ff5252;border-radius:50%;box-shadow:0 0 6px #ff5252aa"></div>' +
@@ -811,6 +818,7 @@ function boot(combatStyle: CombatStyle): void {
     // Marken-Pool: feste Ringe für bereits getaggte Ziele (Mehrfach-Markierung).
     markPool = Array.from({ length: 6 }, () => {
       const m = document.createElement('div');
+      m.className = 'hud-c'; // UI-Scale: cursor-gebundene Marke, nur skalieren
       m.style.cssText =
         'position:fixed;width:30px;height:30px;margin:-15px 0 0 -15px;z-index:44;display:none;pointer-events:none;' +
         'border:2px solid #9be36b;border-radius:50%;box-shadow:0 0 6px #9be36baa;';
@@ -936,8 +944,9 @@ function boot(combatStyle: CombatStyle): void {
   });
   // "[I] Inspizieren"-Hinweis am anvisierten Gegner (lehrt die Taste).
   const inspectPrompt = document.createElement('div');
+  inspectPrompt.className = 'hud-bar'; // UI-Scale: projiziert über Gegner (translate(-50%,-100%) + scale via Klasse)
   inspectPrompt.style.cssText =
-    'position:fixed;z-index:18;transform:translate(-50%,-100%);pointer-events:none;display:none;' +
+    'position:fixed;z-index:18;pointer-events:none;display:none;' +
     'font:700 11px system-ui,sans-serif;color:#ffe08a;text-shadow:0 1px 3px #000;white-space:nowrap;';
   inspectPrompt.textContent = '[I] Inspizieren';
   document.body.appendChild(inspectPrompt);
@@ -957,8 +966,9 @@ function boot(combatStyle: CombatStyle): void {
 
   // Dash-HUD: einzelner Slot unten mittig — zeigt Bereitschaft bzw. CD-Countdown.
   const dashHud = document.createElement('div');
+  dashHud.className = 'hud-bc'; // UI-Scale: unten-zentrierter Slot-Stapel (Dash/Ult)
   dashHud.style.cssText =
-    'position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:19;display:flex;gap:8px;pointer-events:none;';
+    'position:fixed;left:50%;bottom:calc(12px * var(--ui-scale));z-index:19;display:flex;gap:8px;pointer-events:none;';
   document.body.appendChild(dashHud);
   const dashSlotEl = document.createElement('div');
   dashSlotEl.style.cssText =
@@ -980,14 +990,16 @@ function boot(combatStyle: CombatStyle): void {
     else { ultSlotEl.style.borderColor = '#2a343b'; ultSlotEl.innerHTML = `${u.icon} <span style="color:#cdd6dd">[${u.taste}]</span>`; }
   }
   const skillHint = document.createElement('div');
+  skillHint.className = 'hud-tc'; // UI-Scale: oben-zentriert unter dem Scope-Badge
   skillHint.style.cssText =
-    'position:fixed;left:50%;top:54px;transform:translateX(-50%);z-index:20;pointer-events:none;display:none;' +
+    'position:fixed;left:50%;top:calc(54px * var(--ui-scale));z-index:20;pointer-events:none;display:none;' +
     'font:700 13px system-ui,sans-serif;color:#ffe08a;text-shadow:0 1px 3px #000;';
   document.body.appendChild(skillHint);
   let skillOpen = false, skillPrevSpeed = 1;
   const skillPanel = document.createElement('div');
+  skillPanel.className = 'hud-cc'; // UI-Scale: bildschirmmittiges Modal (translate(-50%,-50%) + scale via Klasse)
   skillPanel.style.cssText =
-    'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:60;display:none;width:340px;' +
+    'position:fixed;left:50%;top:50%;z-index:60;display:none;width:340px;' +
     'background:#0e141bf2;border:1px solid #33485c;border-radius:10px;padding:14px 16px;font:600 12px system-ui,sans-serif;color:#cfe3ee;';
   document.body.appendChild(skillPanel);
   const skillRow = (act: string, title: string, sub: string, dim: boolean): string =>
@@ -1049,16 +1061,18 @@ function boot(combatStyle: CombatStyle): void {
   // Toast: kurze Einblendung (Level-Up etc.).
   const toast = document.createElement('div');
   toast.id = 'loot-toast';
+  toast.className = 'hud-bc'; // UI-Scale: unten-zentriert über dem Munitions-HUD
   toast.style.cssText =
-    'position:fixed;left:50%;bottom:64px;transform:translateX(-50%);z-index:22;pointer-events:none;' +
+    'position:fixed;left:50%;bottom:calc(64px * var(--ui-scale));z-index:22;pointer-events:none;' +
     'font:700 16px system-ui,sans-serif;color:#ffe08a;background:rgba(8,10,12,0.72);' +
     'padding:8px 16px;border-radius:8px;opacity:0;transition:opacity 0.2s;text-shadow:0 1px 3px #000;';
   document.body.appendChild(toast);
   // Munitions-/Nachlade-Anzeige (Garten): Punkte = Schüsse, sonst Nachlade-Countdown.
   const ammoHud = document.createElement('div');
   ammoHud.id = 'ammo-hud';
+  ammoHud.className = 'hud-bc'; // UI-Scale: unten-zentriert über Dash-Slot
   ammoHud.style.cssText =
-    'position:fixed;left:50%;bottom:40px;transform:translateX(-50%);z-index:20;pointer-events:none;' +
+    'position:fixed;left:50%;bottom:calc(40px * var(--ui-scale));z-index:20;pointer-events:none;' +
     'font:700 15px system-ui,sans-serif;color:#bfe3ff;text-shadow:0 1px 3px #000;letter-spacing:2px;';
   document.body.appendChild(ammoHud);
   function showToast(msg: string): void {

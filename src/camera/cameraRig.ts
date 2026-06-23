@@ -1,5 +1,6 @@
 import { UniversalCamera, Vector3 } from '@babylonjs/core';
 import type { Scene, TransformNode, Camera } from '@babylonjs/core';
+import { fovForAspect } from './cameraFov';
 
 // Höhe über und Distanz hinter dem Ziel + FOV bestimmen Winkel, Distanz und Zoom.
 // Höher = steiler (mehr Draufsicht), größerer Betrag von back = flacher/weiter.
@@ -23,7 +24,17 @@ export function createCameraRig(scene: Scene, target: TransformNode): Camera {
     target.position.add(new Vector3(0, off.height, -off.back)),
     scene,
   );
-  cam.fov = FOV;
+  // baseFov = gewünschte vertikale FOV bei 16:9; die effektive cam.fov wird daraus
+  // pro Aspect abgeleitet, damit breite/große Displays NICHT mehr Welt sehen.
+  let baseFov = FOV;
+  let lastAspect = -1;
+  const refreshFov = (): void => {
+    const aspect = scene.getEngine().getAspectRatio(cam);
+    if (Math.abs(aspect - lastAspect) < 1e-4) return; // nur bei echter Änderung (resize)
+    lastAspect = aspect;
+    cam.fov = fovForAspect(baseFov, aspect);
+  };
+  refreshFov();
   cam.minZ = 0.1;
   cam.maxZ = 2000;
   cam.setTarget(target.position.clone());
@@ -32,6 +43,7 @@ export function createCameraRig(scene: Scene, target: TransformNode): Camera {
     const t = target.position;
     cam.position.set(t.x + off.ox, t.y + off.height, t.z - off.back + off.oz);
     cam.setTarget(new Vector3(t.x + off.ox, t.y, t.z + off.oz));
+    refreshFov();
   });
 
   // Debug-Live-Regler: in der Konsole z. B. __cam.set(38, 22, 0.55) ausprobieren.
@@ -39,13 +51,14 @@ export function createCameraRig(scene: Scene, target: TransformNode): Camera {
     set(height: number, back: number, fov?: number): void {
       off.height = height;
       off.back = back;
-      if (fov !== undefined) cam.fov = fov;
+      if (fov !== undefined) { baseFov = fov; lastAspect = -1; refreshFov(); } // fov = Basis @16:9; Aspect-Anpassung bleibt aktiv
     },
     setOffset(ox: number, oz: number): void {
       off.ox = ox;
       off.oz = oz;
     },
-    get: () => ({ height: off.height, back: off.back, fov: cam.fov, ox: off.ox, oz: off.oz }),
+    // fov = Basis-FOV (NICHT die aspect-reduzierte cam.fov) — sonst würde ein erneutes set() doppelt reduzieren.
+    get: () => ({ height: off.height, back: off.back, fov: baseFov, ox: off.ox, oz: off.oz }),
   };
 
   return cam;

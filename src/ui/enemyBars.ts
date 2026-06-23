@@ -37,8 +37,9 @@ export function createEnemyBars(scene: Scene, camera: Camera, engine: Engine): E
 
   function makeBar(): Bar {
     const wrap = document.createElement('div');
+    wrap.className = 'hud-bar'; // UI-Scale: translate(-50%,-100%) + scale via Klasse; Position bleibt per Projektion
     wrap.style.cssText =
-      'position:fixed;z-index:17;transform:translate(-50%,-100%);pointer-events:none;display:none;' +
+      'position:fixed;z-index:17;pointer-events:none;display:none;' +
       'width:46px;text-align:center;';
     const label = document.createElement('div');
     label.style.cssText =

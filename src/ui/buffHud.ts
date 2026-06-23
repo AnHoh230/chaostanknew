@@ -14,8 +14,9 @@ interface Chip {
 export function createBuffHud(): BuffHud {
   const wrap = document.createElement('div');
   wrap.id = 'buff-hud';
+  wrap.className = 'hud-tl'; // UI-Scale: oben-links-Stapel; top mitskaliert, damit es nicht überlappt
   wrap.style.cssText =
-    'position:fixed;left:12px;top:48px;z-index:19;display:flex;gap:6px;pointer-events:none;';
+    'position:fixed;left:12px;top:calc(48px * var(--ui-scale));z-index:19;display:flex;gap:6px;pointer-events:none;';
   document.body.appendChild(wrap);
 
   const pool: Chip[] = [];
