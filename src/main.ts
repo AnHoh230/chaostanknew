@@ -37,6 +37,7 @@ import { nearestToPointer, type ScreenBlip } from './inspect/enemyPick';
 import { createBuffStack } from './combat/buffs';
 import { createBuffHud } from './ui/buffHud';
 import { createActionLog } from './debug/actionLog';
+import { enemyRelative } from './debug/enemyRel';
 import { createRunMetrics } from './debug/runMetrics';
 import { createTunables } from './ui/tunables';
 import { createTuningPanel } from './ui/tuningPanel';
@@ -1406,8 +1407,14 @@ function boot(combatStyle: CombatStyle): void {
         level: progression.level, mk: progression.unlockedMk(),
         px, pz, heat, mix: aliveByType,
       });
+      // Gegner-Lage relativ zum Spieler (macht Davonfahr-/Steh-Exploits sichtbar: back≫front bzw. inRange>0 ohne dpsIn).
+      const rel = enemyRelative(
+        px, pz, playerVelX, playerVelZ,
+        roster.filter((e) => e.combatant.alive).map((e) => ({ x: e.combatant.x, z: e.combatant.z })),
+        enemyShotRange,
+      );
       // idle = Sekunden ohne Input; ab ~2 s ist „Hände weg" → Analyse ignoriert diese Zeilen.
-      alog.log('snap', { ...(snap as unknown as Record<string, unknown>), idle: Math.round(idleFor), flow: flowState });
+      alog.log('snap', { ...(snap as unknown as Record<string, unknown>), idle: Math.round(idleFor), flow: flowState, rel });
     }
 
     // Gegner-Verhalten (R2): jeder Typ steuert nach seinem Muster auf einen Zielpunkt zu,

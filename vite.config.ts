@@ -13,8 +13,12 @@ function actionLogPlugin(): Plugin {
   let root = process.cwd();
   const nextRun = (dir: string): number => {
     try {
-      const files = fs.readdirSync(dir).filter((f) => /^run-\d+\.log$/.test(f));
-      return files.reduce((m, f) => Math.max(m, parseInt(f.slice(4), 10) || 0), 0) + 1;
+      let max = 0;
+      for (const f of fs.readdirSync(dir)) {
+        const m = /^run-(\d+)\./.exec(f); // matcht run-NNN.log UND run-NNN.<kat>.log
+        if (m) max = Math.max(max, parseInt(m[1]!, 10) || 0);
+      }
+      return max + 1;
     } catch {
       return 1;
     }
@@ -34,8 +38,10 @@ function actionLogPlugin(): Plugin {
           return;
         }
         if (req.method === 'POST') {
-          const run = new URL(req.url ?? '', 'http://x').searchParams.get('run') ?? '0';
-          const file = path.join(dir, `run-${String(run).padStart(3, '0')}.log`);
+          const q = new URL(req.url ?? '', 'http://x').searchParams;
+          const run = q.get('run') ?? '0';
+          const cat = (q.get('cat') ?? 'combat').replace(/[^a-z]/gi, '') || 'combat'; // nur a–z, sonst combat
+          const file = path.join(dir, `run-${String(run).padStart(3, '0')}.${cat}.log`);
           const chunks: Buffer[] = [];
           req.on('data', (c: Buffer) => chunks.push(c));
           req.on('end', () => {
