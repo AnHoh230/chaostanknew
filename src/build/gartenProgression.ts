@@ -41,10 +41,12 @@ export function gegnerWelle(t: number): GegnerWelle {
   else if (t < 360) { weights = { allrounder: 5, racer: 3, swarm: 2 }; level = 2; }
   else if (t < 540) { weights = { allrounder: 4, racer: 3, swarm: 3, bunker: 1 }; level = 3; }
   else { weights = { allrounder: 2, racer: 3, swarm: 4, bunker: 2 }; level = 4 + Math.floor((t - 540) / 180); }
-  // Spawn-Rate: Takt ~8s → schneller Früh-Abfall (tote Leere weg), aber Boden bei 2,5s statt 1,5s →
-  // die Spät-Eskalation bleibt deutlich sanfter. Batch wächst langsam (+1 alle ~3,3 min).
-  const interval = Math.max(2.5, 1.5 + 6.5 * Math.exp(-t / 100));
-  const batch = 1 + Math.floor(t / 200);
+  // Spawn-Rate: Takt ~8s → schneller Früh-Abfall (tote Leere weg), Boden bei 4s → der Dot-Build
+  // (Kills brauchen ~6,5s Reifezeit) bekommt Luft für eine sichere Tasche. Batch bleibt lang bei 1
+  // (Einzel-Spawns, lesbar — „erst einer, dann einer"), wächst erst spät (+1 alle 5 min). Die
+  // Letalität kommt übers Gegner-LEVEL (tankiger/härter), nicht über eine Body-Flut.
+  const interval = Math.max(4.0, 1.5 + 6.5 * Math.exp(-t / 100));
+  const batch = 1 + Math.floor(t / 300);
   return { interval, batch, weights, level, cap: 50 };
 }
 

@@ -166,7 +166,7 @@ function boot(combatStyle: CombatStyle): void {
 
   // Live einstellbar (Regler im Panel): Schussweite.
   let shotRange = 40; // Weltеinheiten, die ein SPIELER-Schuss fliegt (Scope erhöht NUR diese)
-  let enemyShotRange = 40; // Gegner-Feuerdistanz/Standoff/Projektilreichweite — UNABHÄNGIG vom Spieler-Scope
+  let enemyShotRange = 28; // Gegner-Feuerdistanz/Standoff/Projektilreichweite — KÜRZER als Spieler-Schussweite (40): sie müssen erst ranfahren, ehe sie (mit Vorhalt) feuern → kein Kreuzfeuer aus allen Richtungen quer übers Feld. UNABHÄNGIG vom Spieler-Scope
   let playerProjSpeed = 60; // Spieler-Projektiltempo (schneller als Gegner → bewegliche Ziele treffbar)
   // Dash (Shift+WASD): kurzer Burst in Tasten-Richtung (heading-relativ), CD sichtbar im HUD.
   let dashCd = 0, dashTimer = 0, dashDirX = 0, dashDirZ = 0;
@@ -282,8 +282,8 @@ function boot(combatStyle: CombatStyle): void {
   const escDmgGet = tunables.add({ label: 'Heat-Schaden ×/Stufe', category: 'Roster', value: DEFAULT_ESCALATION.damage, min: 1, max: 2.5, step: 0.05 });
   const spawner = createSpawner(scene, TANK_RADIUS, () => aiRng.next(), {
     interval: swarmIntervalGet,
-    radiusMin: 55, // größere, weiter gestreute Spawn-Area (kein Dauerfeuer auf der Stelle)
-    radiusMax: 130,
+    radiusMin: 80, // Spawns weit draußen (außerhalb Gegner-Schussweite 28) → Reaktionszeit, nie direkt neben dem Spieler
+    radiusMax: 150,
     maxLevel: 3,
     clumpSize: pulkGroesse, // Schwarm spawnt als Pulk auf einen Punkt (Garten); Rest einzeln
   });
