@@ -49,7 +49,7 @@ import { gegnerWelle, gartenTypStats, pulkGroesse, BUILD_STUFE_NAME } from './bu
 import { createHeatState, updateHeat, DEFAULT_HEAT_CFG, type HeatState } from './build/heatTracker';
 import { haescherSoll, haescherStats } from './build/haescher';
 import {
-  createBefehlState, markiere, trefferArt, registriereKill, verstaerkung, tickCombo, bruch,
+  createBefehlState, markiere, trefferArt, registriereKill, verstaerkung, bruch,
   MAX_MARKS, SIMULTAN_SCHWELLE, COMBO_TIME,
 } from './build/befehl';
 import {
@@ -709,6 +709,10 @@ function boot(combatStyle: CombatStyle): void {
     e.buffs.add({ id: 'markiert', icon: '🎯', label: 'markiert', speedMul: MARK_SLOW, duration: MARK_BUFF_DUR });
     return true;
   };
+  // Alle aktuellen Markierungen aufheben (Slow-Buff weg) — beim Bruch/Versagen verfallen sie sichtbar.
+  const entmarkiereAlle = (): void => {
+    for (const m of befehl.marks) roster.find((r) => r.id === m.id)?.buffs.remove('markiert');
+  };
   const schiessLaser = (e: Enemy): void => {
     const root = tank.view.root, turret = tank.view.turretNode;
     const origin = root.getAbsolutePosition();
@@ -741,7 +745,8 @@ function boot(combatStyle: CombatStyle): void {
       return;
     }
     if (stufe >= 2 && art === 'vorgriff') { // BB: höheres Ziel zuerst → Kaskade bricht, Ziele verfallen
-      bruch(befehl); alog.log('befehl.bruch', { t: +runClock.toFixed(1) });
+      entmarkiereAlle(); bruch(befehl); alog.log('befehl.bruch', { t: +runClock.toFixed(1) });
+      showToast('✗ REIHENFOLGE GEBROCHEN', '#ff6b6b');
       fireCd = BEFEHL_FIRE_BASE; return;
     }
     const verst = stufe >= 3 ? verstaerkung(befehl) : 0;
@@ -754,7 +759,9 @@ function boot(combatStyle: CombatStyle): void {
       schiessLaser(te); damageEnemyTick(te, dmg);
       if (!te.combatant.alive) {
         ammo = Math.min(AMMO_MAX, ammo + 1); // exekutiertes Ziel gibt die Markier-Munition zurück (sofort neu markierbar)
-        if (stufe >= 2 && !simultan) registriereKill(befehl, tid); // Kaskade in Reihenfolge
+        if (stufe >= 2 && !simultan) {
+          if (registriereKill(befehl, tid).reiheKomplett) showToast(`✓ REIHE EXEKUTIERT · Kette ${befehl.kette}`, '#9be36b'); // volle 3er-Reihe
+        }
         else if (stufe >= 2) { befehl.kette += 1; befehl.combo = COMBO_TIME; befehl.marks = befehl.marks.filter((m) => m.id !== tid); }
         else befehl.marks = befehl.marks.filter((m) => m.id !== tid); // B: einfach entfernen
       }
@@ -1245,8 +1252,9 @@ function boot(combatStyle: CombatStyle): void {
     'position:fixed;left:50%;bottom:calc(40px * var(--ui-scale));z-index:20;pointer-events:none;' +
     'font:700 15px system-ui,sans-serif;color:#bfe3ff;text-shadow:0 1px 3px #000;letter-spacing:2px;';
   document.body.appendChild(ammoHud);
-  function showToast(msg: string): void {
+  function showToast(msg: string, color = '#ffe08a'): void {
     toast.textContent = msg;
+    toast.style.color = color;
     toast.style.opacity = '1';
     setTimeout(() => (toast.style.opacity = '0'), 1600);
   }
@@ -1910,7 +1918,11 @@ function boot(combatStyle: CombatStyle): void {
     // Ringe = die getroffenen Ziele. Bei maxMarks=1 ist das der bisherige Einzel-Schuss.
     // Befehl: Combo-Timer (ab BB) läuft bei aktiver Kette runter — Ablauf bricht sie. Tote Marken putzen.
     if (!GIFT_BUILD) {
-      if (evo.unlockedStagesByChannel.sniper_core >= 2 && befehl.combo > 0) tickCombo(befehl, realDt);
+      // Combo-Timer (ab BB): läuft bei aktiver Kette runter; Ablauf bricht sie (Marken + Slow-Buff weg).
+      if (evo.unlockedStagesByChannel.sniper_core >= 2 && befehl.kette > 0 && befehl.combo > 0) {
+        befehl.combo -= realDt;
+        if (befehl.combo <= 0) { entmarkiereAlle(); bruch(befehl); showToast('✗ COMBO ABGELAUFEN', '#ff6b6b'); }
+      }
       if (befehl.marks.length && !befehl.marks.some((m) => roster.some((r) => r.id === m.id && r.combatant.alive))) {
         befehl.marks = []; befehl.nextOrder = 1; // keine lebenden Markierten mehr
       }

@@ -36,6 +36,7 @@ export interface ActiveBuff {
 
 export interface BuffStack {
   add(spec: BuffSpec): void;
+  remove(id: string): void;
   tick(dt: number): void;
   aggregate(): BuffMods;
   active(): ActiveBuff[];
@@ -64,6 +65,10 @@ export function createBuffStack(): BuffStack {
       } else {
         entries.push({ ...spec, remaining: spec.duration });
       }
+    },
+    remove(id) {
+      const i = entries.findIndex((e) => e.id === id);
+      if (i >= 0) entries.splice(i, 1);
     },
     tick(dt) {
       for (let i = entries.length - 1; i >= 0; i--) {
