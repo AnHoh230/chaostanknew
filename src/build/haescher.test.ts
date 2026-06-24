@@ -27,11 +27,8 @@ describe('haescherSoll', () => {
     expect(haescherSoll(TG, 1, 0).ring).toBe(Math.round((1 - C.heatSchwelle) * C.ringProHeat));
   });
 
-  it('Laufzeit hebt den Ring-Sockel (auch ohne Heat)', () => {
-    const early = haescherSoll(TG, 0, 0).ring; // 0 — vor dem ersten Sockel
-    const late = haescherSoll(C.sekProGrund * 3, 0, 0).ring;
-    expect(late).toBeGreaterThan(early);
-    expect(late).toBe(3);
+  it('OHNE Heat nie Häscher — auch nicht spät (kein Zeit-Sockel)', () => {
+    expect(haescherSoll(99999, 0, 0)).toEqual({ front: 0, ring: 0 });
   });
 
   it('respektiert die Deckel', () => {
@@ -41,9 +38,12 @@ describe('haescherSoll', () => {
 });
 
 describe('haescherStats', () => {
-  it('ist zäh und wird mit der Laufzeit zäher', () => {
+  it('ist zäher je heftiger der Exploit (mehr Heat → mehr HP)', () => {
     expect(haescherStats(0).hp).toBe(C.hpBasis);
-    expect(haescherStats(600).hp).toBe(C.hpBasis + C.hpProMin * 10); // +10 min
-    expect(haescherStats(600).hp).toBeGreaterThan(haescherStats(0).hp);
+    expect(haescherStats(1).hp).toBe(C.hpBasis + C.hpProHeat);
+    expect(haescherStats(1).hp).toBeGreaterThan(haescherStats(0.4).hp);
+  });
+  it('clampt den Heat auf 0..1', () => {
+    expect(haescherStats(5).hp).toBe(haescherStats(1).hp);
   });
 });

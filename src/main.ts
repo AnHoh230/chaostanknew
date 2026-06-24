@@ -583,7 +583,8 @@ function boot(combatStyle: CombatStyle): void {
       behavior: haescherType.behavior,
     };
     const e = createEnemyEntity(scene, spec, TANK_RADIUS, () => aiRng.next());
-    const hs = haescherStats(runClock);
+    const hs = haescherStats(Math.max(heatState.kessel, heatState.faehrte)); // zäher je heftiger der Exploit
+
     e.combatant.maxHp = hs.hp; e.combatant.hp = hs.hp;
     e.damage = hs.damage; e.speed = hs.speed;
     e.combatant.lootValue = 0; // keine XP
