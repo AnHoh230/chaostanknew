@@ -1963,13 +1963,15 @@ function boot(combatStyle: CombatStyle): void {
                 markPool[i]!.style.left = mb.sx + 'px';
                 markPool[i]!.style.top = mb.sy + 'px';
                 markPool[i]!.style.borderColor = '#ffd166';
-                markPool[i]!.textContent = String(mk!.order); // Reihenfolge-Zähler an der Zielscheibe
+                markPool[i]!.textContent = evo.unlockedStagesByChannel.sniper_core >= 2 ? String(mk!.order) : ''; // Nummern erst ab BB
               } else markPool[i]!.style.display = 'none';
             }
             if (scopeBadge) {
               const bs = evo.unlockedStagesByChannel.sniper_core;
               const nm = BEFEHL_STUFE_NAME[Math.min(bs, BEFEHL_STUFE_NAME.length - 1)];
-              scopeBadge.textContent = bs < 1 ? `🔭 St0 · ${nm}` : `🎯 St${bs} · ${nm} — Marken ${befehl.marks.length}/${MAX_MARKS}`;
+              scopeBadge.textContent = bs < 1 ? `🔭 St0 · ${nm}`
+                : bs < 2 ? `🎯 St1 · ${nm} — geschwächt: ${befehl.marks.length}` // B = reiner Debuff, kein Reihen-Counter
+                : `🎯 St${bs} · ${nm} — Marken ${befehl.marks.length}/${MAX_MARKS}`;
             }
           }
         } else {
@@ -2001,8 +2003,9 @@ function boot(combatStyle: CombatStyle): void {
             markPool[i]!.style.display = 'block';
             markPool[i]!.style.left = mb.sx + 'px';
             markPool[i]!.style.top = mb.sy + 'px';
-            markPool[i]!.style.borderColor = mk!.order === befehl.nextOrder ? '#9be36b' : '#ffd166';
-            markPool[i]!.textContent = String(mk!.order); // Reihenfolge-Zähler (aktuelles Ziel grün)
+            const bb = evo.unlockedStagesByChannel.sniper_core >= 2; // Reihenfolge/Nummern erst ab BB
+            markPool[i]!.style.borderColor = bb && mk!.order === befehl.nextOrder ? '#9be36b' : '#ffd166';
+            markPool[i]!.textContent = bb ? String(mk!.order) : ''; // bei B kein Counter — reine Debuff-Markierung
           } else markPool[i]!.style.display = 'none';
         }
       } else {
