@@ -5,6 +5,8 @@ export interface EnemyBarInfo {
   x: number;
   z: number;
   hpFrac: number;
+  hp?: number; // aktuelle HP als ZAHL (auf dem Balken) — nicht nur der Balken
+  hpMax?: number; // maximale HP (für "hp/max")
   name: string; // "Panzer N" — wird IMMER angezeigt
   marks?: string; // aktive Debuff-Marken (🎯 markiert / 💨 vernebelt)
   level?: number; // eigenes Level (sichtbar machen: „was für ein Panzer")
@@ -26,6 +28,7 @@ interface Bar {
   wrap: HTMLElement;
   fill: HTMLElement;
   label: HTMLElement;
+  hpNum: HTMLElement; // HP als Zahl, mittig auf dem Balken
 }
 
 /**
@@ -47,14 +50,19 @@ export function createEnemyBars(scene: Scene, camera: Camera, engine: Engine): E
       'margin-bottom:2px;white-space:nowrap;';
     const track = document.createElement('div');
     track.style.cssText =
-      'width:100%;height:5px;background:rgba(0,0,0,0.6);border:1px solid #0008;border-radius:3px;overflow:hidden;';
+      'position:relative;width:100%;height:9px;background:rgba(0,0,0,0.6);border:1px solid #0008;border-radius:3px;overflow:hidden;';
     const fill = document.createElement('div');
     fill.style.cssText = 'height:100%;width:100%;';
+    const hpNum = document.createElement('div');
+    hpNum.style.cssText =
+      'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;' +
+      'font:800 8px/1 system-ui,sans-serif;color:#fff;text-shadow:0 1px 2px #000,0 0 2px #000;letter-spacing:0.3px;';
     track.appendChild(fill);
+    track.appendChild(hpNum);
     wrap.appendChild(label);
     wrap.appendChild(track);
     document.body.appendChild(wrap);
-    return { wrap, fill, label };
+    return { wrap, fill, label, hpNum };
   }
 
   function project(x: number, z: number): { sx: number; sy: number; visible: boolean } {
@@ -86,6 +94,9 @@ export function createEnemyBars(scene: Scene, camera: Camera, engine: Engine): E
       b.wrap.style.top = p.sy + 'px';
       b.fill.style.width = Math.max(0, Math.min(1, e.hpFrac) * 100) + '%';
       b.fill.style.background = hpColor(e.hpFrac);
+      b.hpNum.textContent = e.hp != null
+        ? (e.hpMax != null ? `${Math.ceil(e.hp)}/${Math.round(e.hpMax)}` : `${Math.ceil(e.hp)}`)
+        : '';
       const tankTag = e.level != null && e.mk != null
         ? ` <span style="color:#ffcf6b;font-weight:800">L${e.level}·MK${e.mk}</span>`
         : '';

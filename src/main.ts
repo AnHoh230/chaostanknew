@@ -28,6 +28,7 @@ import { createPlayerBar } from './ui/playerBar';
 import { installUiScale } from './ui/uiScale';
 import { createMinimap } from './ui/minimap';
 import { createEnemyBars } from './ui/enemyBars';
+import { createFloatingNumbers } from './ui/floatingNumbers';
 import { createSwarmHud } from './ui/swarmHud';
 import { createHeatHud } from './ui/heatHud';
 import { createOverviewMap, type MapBlip } from './ui/overviewMap';
@@ -597,10 +598,11 @@ function boot(combatStyle: CombatStyle): void {
   }
 
   // Tick-Schaden (DoT/AoE) direkt auf HP, Rüstung ignoriert; tötet bei <=0.
-  function damageEnemyTick(e: Enemy, dmg: number): void {
+  function damageEnemyTick(e: Enemy, dmg: number, kind: 'schuss' | 'gift' | 'sonst' = 'schuss'): void {
     if (!e.combatant.alive) return;
     e.combatant.hp -= dmg;
     metrics.onHitDealt(dmg);
+    floatNums.spawn(e.combatant.x, e.combatant.z, dmg, kind === 'gift' ? '#9be36b' : kind === 'sonst' ? '#cdd6dd' : '#ffe08a');
     if (e.combatant.hp <= 0) {
       e.combatant.hp = 0;
       e.combatant.alive = false;
@@ -1086,6 +1088,7 @@ function boot(combatStyle: CombatStyle): void {
   const playerBar = createPlayerBar(scene, camera, engine); // HP+EP über dem eigenen Panzer
   const minimap = createMinimap(168, 150); // Reichweite 150 (Spawn-Ring reicht bis 130 — sonst fallen Gegner von der Karte)
   const enemyBars = createEnemyBars(scene, camera, engine); // HP-Balken über den Gegnern
+  const floatNums = createFloatingNumbers(scene, camera, engine); // schwebende Schadenszahlen
   const swarmHud = createSwarmHud(); // Schwarm-Lage: Anzahl je Typ + Zieldichte
   const heatHud = ARENA_MODE ? null : createHeatHud(); // Garten: Heat-Lage ist interne Mechanik, NICHT angezeigt // Heat je Stil-Richtung (warum dieser Mix)
   // Spielernahe Namen der Richtungen (was den Heat treibt). Bunker entfernt (s. doctrineConfig).
@@ -1755,7 +1758,7 @@ function boot(combatStyle: CombatStyle): void {
         if (stufe < 2) {
           // St 1 (Z): reiner Köchel-DoT — kein Reifen, kein Reif-Status, keine Ansteckung. Tötet langsam.
           e.gift.tickCd -= simDt;
-          if (e.gift.tickCd <= 0) { e.gift.tickCd += gartenCfg.tickEvery; damageEnemyTick(e, giftDotEff); }
+          if (e.gift.tickCd <= 0) { e.gift.tickCd += gartenCfg.tickEvery; damageEnemyTick(e, giftDotEff, 'gift'); }
           if (e.combatant.alive) setGiftGlow(e, 1); // konstant giftgrün (reift nicht)
           continue;
         }
@@ -1766,6 +1769,8 @@ function boot(combatStyle: CombatStyle): void {
         if (r.dmg > 0) {
           e.combatant.hp -= r.dmg;
           metrics.onHitDealt(r.dmg);
+          floatNums.spawn(e.combatant.x, e.combatant.z, r.dmg, warReif ? '#ff7043' : '#9be36b'); // reif = tödlich-orange, köchel = grün
+
           if (e.combatant.hp <= 0) {
             e.combatant.hp = 0; e.combatant.alive = false;
             if (warReif && stufe >= 3 && !e.haescher) {
@@ -1913,6 +1918,8 @@ function boot(combatStyle: CombatStyle): void {
           x: e.combatant.x,
           z: e.combatant.z,
           hpFrac: e.combatant.hp / e.combatant.maxHp,
+          hp: e.combatant.hp,
+          hpMax: e.combatant.maxHp,
           name: e.displayName,
           level: e.level,
           mk: enemyMk(e.level),
@@ -1924,6 +1931,8 @@ function boot(combatStyle: CombatStyle): void {
           ),
         })),
     );
+
+    floatNums.update(realDt); // schwebende Schadenszahlen weiterbewegen + ausblenden (Echtzeit)
 
     // Schwarm-Lage anzeigen: Anzahl je Typ (lebend) + Zieldichte + aktuelles Mix-Gewicht.
     {
