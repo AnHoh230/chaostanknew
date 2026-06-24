@@ -355,7 +355,7 @@ function boot(combatStyle: CombatStyle): void {
   compassBox.innerHTML =
     '<svg width="160" height="140" style="overflow:visible">' +
     `<polygon points="${KERN.x},${KERN.y} ${RAUMP.x},${RAUMP.y} ${ZUSTP.x},${ZUSTP.y}" fill="#10151cdd" stroke="#3a4a5a" stroke-width="1.5"/>` +
-    `<text x="${KERN.x}" y="${KERN.y - 6}" fill="#4dabf7" font-size="11" font-family="system-ui" text-anchor="middle" font-weight="700">Kern</text>` +
+    `<text x="${KERN.x}" y="${KERN.y - 6}" fill="#4dabf7" font-size="11" font-family="system-ui" text-anchor="middle" font-weight="700">Befehl</text>` +
     `<text x="${RAUMP.x - 4}" y="${RAUMP.y + 15}" fill="#c77dff" font-size="11" font-family="system-ui" text-anchor="middle">Raum</text>` +
     `<text x="${ZUSTP.x + 4}" y="${ZUSTP.y + 15}" fill="#69db7c" font-size="11" font-family="system-ui" text-anchor="middle">Zustand</text>` +
     `<circle data-dot cx="${KERN.x}" cy="${KERN.y}" r="8" fill="#fff" stroke="#10151c" stroke-width="2"/>` +
@@ -402,7 +402,7 @@ function boot(combatStyle: CombatStyle): void {
       `<div style="margin-top:3px;font-size:13px;color:#9be36b">${CHANNEL_DISPLAY[ch].displayName}</div>` +
       `<div style="margin-top:2px;opacity:.85">Stufe ${stage}/${maxStage(currentTuningProfile)}` +
       (thrNext != null ? ` &nbsp;${bar} ${Math.round(pct * 100)}%` : ' &nbsp;max') + '</div>' +
-      `<div style="margin-top:5px;opacity:.65;font-size:10px">Kern ${Math.round(w.sniper * 100)} · Raum ${Math.round(w.aoe * 100)} · Zustand ${Math.round(w.dot * 100)}</div>`;
+      `<div style="margin-top:5px;opacity:.65;font-size:10px">Befehl ${Math.round(w.sniper * 100)} · Raum ${Math.round(w.aoe * 100)} · Zustand ${Math.round(w.dot * 100)}</div>`;
     renderCompassDot();
   };
 
