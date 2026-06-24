@@ -764,7 +764,20 @@ function boot(combatStyle: CombatStyle): void {
     if (combatStyle === 'sniper') {
       if (fireCd > 0) return; // nach einem Schuss kurz nachladen
       if (!GIFT_BUILD) {
-        // Befehl: im Scope MARKIEREN (Munition pro Marke), im Fahrmodus manuell SCHIESSEN (Reihenfolge ab BB).
+        // Befehl wächst von St0 (Grundschuss) zu St1 (B = Markieren) — Stufen schalten über sniper_core frei.
+        if (evo.unlockedStagesByChannel.sniper_core < 1) {
+          // St0 — Grundschuss: im Scope direkter Treffer aufs Cursor-Ziel, B noch nicht ausgebildet.
+          if (scopeActive && ammo > 0 && sniperTargets.length) {
+            const e0 = roster.find((r) => r.id === sniperTargets[0] && r.combatant.alive);
+            if (e0) {
+              schiessLaser(e0); damageEnemyTick(e0, Math.round(playerStats().damage * sniperDmgMul));
+              ammo = Math.max(0, ammo - 1);
+              fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
+            }
+          }
+          return;
+        }
+        // St1+ (B): im Scope MARKIEREN (Munition pro Marke), im Fahrmodus manuell SCHIESSEN (Reihenfolge ab BB).
         if (scopeActive) {
           if (ammo > 0 && befehl.marks.length < MAX_MARKS && sniperTargets.length && markiereZiel(sniperTargets[0]!)) {
             ammo = Math.max(0, ammo - 1);
@@ -1918,7 +1931,7 @@ function boot(combatStyle: CombatStyle): void {
             if (scopeBadge) {
               const bs = evo.unlockedStagesByChannel.sniper_core;
               const nm = BEFEHL_STUFE_NAME[Math.min(bs, BEFEHL_STUFE_NAME.length - 1)];
-              scopeBadge.textContent = `🎯 St${bs} · ${nm} — Marken ${befehl.marks.length}/${MAX_MARKS}`;
+              scopeBadge.textContent = bs < 1 ? `🔭 St0 · ${nm}` : `🎯 St${bs} · ${nm} — Marken ${befehl.marks.length}/${MAX_MARKS}`;
             }
           }
         } else {
