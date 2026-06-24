@@ -723,13 +723,17 @@ function boot(combatStyle: CombatStyle): void {
   };
   // Auto-Markierer (ab BB): markiert GENAU EIN nächstes freies Ziel in Sniper-Reichweite (das nächstgelegene),
   // mit fortlaufender Aufbau-Nummer (4·5·6…). Kein Ziel in Reichweite → nichts; der Loop wartet, bis eines reinfährt.
-  const autoMarkEins = (): void => {
+  const autoMarkEins = (sichtbar: ScreenBlip[]): void => {
+    // NUR SICHTBARE Gegner (auf den Bildschirm projiziert) — sonst springt die Marke auf Ziele HINTER der
+    // Kamera, die man gar nicht sieht (der Panzer sitzt nicht bildmittig). Davon den NÄCHSTEN zum Panzer in
+    // Schussreichweite. Keiner sichtbar/in Reichweite → nichts; der Loop wartet, bis einer reinfährt.
     let best: string | null = null, bestD = sniperRange * sniperRange;
-    for (const r of roster) {
-      if (!r.combatant.alive || befehl.marks.some((m) => m.id === r.id)) continue;
+    for (const b of sichtbar) {
+      const r = roster.find((x) => x.id === b.id);
+      if (!r || !r.combatant.alive || befehl.marks.some((m) => m.id === b.id)) continue;
       const dx = r.combatant.x - playerCombatant.x, dz = r.combatant.z - playerCombatant.z;
       const d = dx * dx + dz * dz;
-      if (d <= bestD) { bestD = d; best = r.id; }
+      if (d <= bestD) { bestD = d; best = b.id; }
     }
     if (best) markiereZiel(best);
   };
@@ -1964,7 +1968,7 @@ function boot(combatStyle: CombatStyle): void {
         befehl.marks = []; befehl.nextOrder = 1; // keine lebenden Markierten mehr
       }
       // Auto-Markierer (ab BB): einzeln das nächste Ziel in Reichweite nachziehen (4·5·6…), wenn die vorige Marke weg ist.
-      if (evo.unlockedStagesByChannel.sniper_core >= 2 && autoMarkBereit(befehl, evo.unlockedStagesByChannel.sniper_core >= 3)) autoMarkEins();
+      if (evo.unlockedStagesByChannel.sniper_core >= 2 && autoMarkBereit(befehl, evo.unlockedStagesByChannel.sniper_core >= 3)) autoMarkEins(screenBlips);
     }
 
     if (sniperCrosshair) {
