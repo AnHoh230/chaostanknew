@@ -60,9 +60,9 @@ import {
   type TalentId, type UltId,
 } from './build/skilltree';
 import {
-  befehlUltDef, SEUCHE_LIFESTEAL, createBefehlSkillState, spendBefehlTalent,
-  BEFEHL_TALENTS, BEFEHL_TALENT_MAX, DAUER_PRO_RANG, CD_PRO_RANG, BEUTE_PRO_RANG, SCHUTZ_NACHLADE_KETTE,
-  POL_UEBERMACHT_PRO_RANG, POL_ADERLASS_PRO_RANG, POL_KLAMMER_PRO_RANG,
+  befehlUltDef, SEUCHE_LIFESTEAL, createBefehlSkillState, chooseBefehlUlt, spendBefehlTalent,
+  BEFEHL_ULTS, BEFEHL_TALENTS, BEFEHL_TALENT_MAX, DAUER_PRO_RANG, CD_PRO_RANG, BEUTE_PRO_RANG, SCHUTZ_NACHLADE_KETTE,
+  POL_UEBERMACHT_PRO_RANG, POL_ADERLASS_PRO_RANG, POL_KLAMMER_PRO_RANG, type BefehlUltId, type BefehlTalentId,
 } from './build/befehlSkill';
 import { thresholdForStage, maxStage, type TuningProfile } from './evolution/profiles';
 import { CHANNEL_DISPLAY, type BaseMode, type EvolutionChannelId } from './evolution/channels';
@@ -270,8 +270,7 @@ function boot(combatStyle: CombatStyle): void {
   const skill = createSkillState();
   let skillProgress = 0; // gesammelter Impuls-Überschuss Richtung nächstem Skillpunkt
   let ultActive = 0, ultCd = 0; // Ult-Timer: s noch aktiv / s noch Cooldown
-  const befehlSkill = createBefehlSkillState();
-  befehlSkill.ult = 'kommando'; // Test-Default (bis der Skillbaum die Wahl trifft)
+  const befehlSkill = createBefehlSkillState(); // Ult/Talente werden im Skill-Panel (T) gewählt
   let ultSchaden = 0; // Seuche-Ult: Summe des ausgeteilten Schadens (für Lifesteal am Ende)
   let schutzLadungen = 0; // Eiserne Disziplin: aktuelle Ketten-Schutz-Ladungen
   let prevKette = 0; // für die Kette-≥15-Nachlade-Erkennung
@@ -1123,23 +1122,6 @@ function boot(combatStyle: CombatStyle): void {
       alog.log('ult', { id: u.id, t: +runClock.toFixed(1) });
     }
   });
-  // Test-Bedienung, bis das Skill-Panel da ist: 1/2/3 = Ult wählen, 4 = +5 Skillpunkte, 5-9 = Talente skillen.
-  window.addEventListener('keydown', (ev) => {
-    if (GIFT_BUILD) return;
-    if (ev.key === '1' || ev.key === '2' || ev.key === '3') {
-      befehlSkill.ult = ({ '1': 'kommando', '2': 'streuung', '3': 'seuche' } as const)[ev.key];
-      const u = befehlUltDef(befehlSkill.ult);
-      showToast(`Ult: ${u.icon} ${u.name}`, '#bfe3ff');
-    } else if (ev.key === '4') {
-      befehlSkill.punkte += 5; showToast(`✦ +5 Skillpunkte (Test) — ${befehlSkill.punkte} frei`, '#9be36b');
-    } else if (ev.key >= '5' && ev.key <= '9') {
-      const tid = (['disziplin', 'dauer', 'beute', 'cooldown', 'pol'] as const)[Number(ev.key) - 5]!;
-      if (spendBefehlTalent(befehlSkill, tid)) {
-        if (tid === 'disziplin') schutzLadungen = befehlSkill.ranks.disziplin; // neue Schutz-Ladung sofort
-        showToast(`${BEFEHL_TALENTS.find((t) => t.id === tid)!.name} ${befehlSkill.ranks[tid]}/${BEFEHL_TALENT_MAX}`, '#bfe3ff');
-      }
-    }
-  });
 
   // OS-Mauszeiger über dem Canvas ausblenden — das Spiel zeichnet sein eigenes
   // Fadenkreuz, das frame-synchron mit dem Turm läuft (kein Render-Weg-Versatz).
@@ -1248,7 +1230,7 @@ function boot(combatStyle: CombatStyle): void {
     'border-radius:7px;padding:5px 8px;font:600 11px system-ui,sans-serif;display:none;';
   dashHud.appendChild(ultSlotEl);
   function updateUltHud(): void {
-    const u = GIFT_BUILD ? activeUltDef(skill) : befehlUltDef(befehlSkill.ult);
+    const u = GIFT_BUILD ? activeUltDef(skill) : (befehlSkill.ult ? befehlUltDef(befehlSkill.ult) : null);
     if (!u) { ultSlotEl.style.display = 'none'; return; }
     ultSlotEl.style.display = 'block';
     if (ultActive > 0) { ultSlotEl.style.borderColor = '#69db7c'; ultSlotEl.innerHTML = `${u.icon} <b style="color:#9be36b">AKTIV ${ultActive.toFixed(1)}s</b>`; }
@@ -1273,6 +1255,7 @@ function boot(combatStyle: CombatStyle): void {
     `border-radius:6px;cursor:${dim ? 'default' : 'pointer'};opacity:${dim ? 0.5 : 1}">` +
     `<div>${title}</div><div style="opacity:.65;font-size:10px;margin-top:1px">${sub}</div></div>`;
   function renderSkillPanel(): void {
+    if (!GIFT_BUILD) { renderBefehlSkillPanel(); return; }
     let html = `<div style="font-size:14px;color:#9be36b">✦ Skillpunkte: ${skill.punkte}</div>`;
     if (!skill.ult) {
       html += `<div style="opacity:.7;margin:7px 0 1px">Wähle deine Pol-Ult (kostet 1 Punkt):</div>`;
@@ -1289,10 +1272,39 @@ function boot(combatStyle: CombatStyle): void {
     html += `<div style="opacity:.5;margin-top:11px;font-size:10px">[T] / [Esc] schließen</div>`;
     skillPanel.innerHTML = html;
   }
+  function renderBefehlSkillPanel(): void {
+    let html = `<div style="font-size:14px;color:#9be36b">✦ Skillpunkte: ${befehlSkill.punkte}</div>`;
+    if (!befehlSkill.ult) {
+      html += `<div style="opacity:.7;margin:7px 0 1px">Wähle deine Pol-Ult (kostet 1 Punkt):</div>`;
+      for (const u of BEFEHL_ULTS) html += skillRow(`ult:${u.id}`, `${u.icon} ${u.name} · ${u.pol}`, `${u.text} (Taste ${u.taste}, ${u.dauer}s / CD ${u.cd}s)`, befehlSkill.punkte <= 0);
+    } else {
+      const u = befehlUltDef(befehlSkill.ult);
+      html += `<div style="margin:7px 0 1px">Ult: <b>${u.icon} ${u.name}</b> · Taste [${u.taste}]</div>`;
+      html += `<div style="opacity:.7;margin:5px 0 1px">Talente (Rang/${BEFEHL_TALENT_MAX}):</div>`;
+      for (const t of BEFEHL_TALENTS) {
+        const rk = befehlSkill.ranks[t.id]; const max = rk >= BEFEHL_TALENT_MAX;
+        let name = t.name, text = t.text;
+        if (t.id === 'pol') { // Stufe 5 ist an die gewählte Ult gekoppelt
+          if (befehlSkill.ult === 'kommando') { name = 'Übermacht'; text = '+1 gleichzeitiges Auto-Ziel je Rang'; }
+          else if (befehlSkill.ult === 'seuche') { name = 'Aderlass'; text = '+1 % Verfall-Lifesteal je Rang'; }
+          else if (befehlSkill.ult === 'streuung') { name = 'Klammergriff'; text = '+2 % Slow auf Markierte je Rang'; }
+        }
+        html += skillRow(`tal:${t.id}`, `${name} &nbsp; ${'●'.repeat(rk)}${'○'.repeat(BEFEHL_TALENT_MAX - rk)}`, text, befehlSkill.punkte <= 0 || max);
+      }
+    }
+    html += `<div style="opacity:.5;margin-top:11px;font-size:10px">[T] / [Esc] schließen</div>`;
+    skillPanel.innerHTML = html;
+  }
   skillPanel.addEventListener('click', (ev) => {
     const el = (ev.target as HTMLElement).closest('[data-act]') as HTMLElement | null;
     if (!el) return;
     const act = el.getAttribute('data-act') ?? '';
+    if (!GIFT_BUILD) {
+      if (act.startsWith('ult:')) chooseBefehlUlt(befehlSkill, act.slice(4) as BefehlUltId);
+      else if (act.startsWith('tal:')) { const id = act.slice(4) as BefehlTalentId; if (spendBefehlTalent(befehlSkill, id) && id === 'disziplin') schutzLadungen = befehlSkill.ranks.disziplin; }
+      renderSkillPanel();
+      return;
+    }
     if (act.startsWith('ult:')) chooseUlt(skill, act.slice(4) as UltId);
     else if (act.startsWith('tal:')) spendTalent(skill, act.slice(4) as TalentId);
     recomputeSkills(); renderSkillPanel();
@@ -1609,10 +1621,11 @@ function boot(combatStyle: CombatStyle): void {
       const d = Math.hypot(dx, dz) || 1;
       if (d < 1.8) {
         gainProgress(evo, o.channel, o.points, currentTuningProfile);
-        // ZZZ fertig (dot_core St3) → Impuls-Überschuss wird zu Skillpunkten.
-        if (evo.unlockedStagesByChannel.dot_core >= 3) {
+        // 3. Build-Stufe erreicht (Garten ZZZ / Befehl BBB) → Impuls-Überschuss wird zu Skillpunkten.
+        const stufe3 = GIFT_BUILD ? evo.unlockedStagesByChannel.dot_core >= 3 : evo.unlockedStagesByChannel.sniper_core >= 3;
+        if (stufe3) {
           skillProgress += o.points;
-          while (skillProgress >= PUNKT_KOSTEN) { skillProgress -= PUNKT_KOSTEN; skill.punkte += 1; showToast('✦ Skillpunkt frei — [T]'); }
+          while (skillProgress >= PUNKT_KOSTEN) { skillProgress -= PUNKT_KOSTEN; (GIFT_BUILD ? skill : befehlSkill).punkte += 1; showToast('✦ Skillpunkt frei — [T]'); }
         }
         o.mesh.dispose(); orbs.splice(i, 1); continue;
       }
@@ -1980,9 +1993,10 @@ function boot(combatStyle: CombatStyle): void {
       } else if (befehlHud.style.display !== 'none') befehlHud.style.display = 'none';
     }
     updateUltHud();
-    if (ARENA_MODE && skill.punkte > 0 && !skillOpen) {
+    const skillPunkte = GIFT_BUILD ? skill.punkte : befehlSkill.punkte;
+    if (ARENA_MODE && skillPunkte > 0 && !skillOpen) {
       skillHint.style.display = 'block';
-      skillHint.textContent = `✦ ${skill.punkte} Skillpunkt${skill.punkte > 1 ? 'e' : ''} frei — [T]`;
+      skillHint.textContent = `✦ ${skillPunkte} Skillpunkt${skillPunkte > 1 ? 'e' : ''} frei — [T]`;
     } else skillHint.style.display = 'none';
     // HP-Balken schweben über den Gegnern.
     enemyBars.update(
