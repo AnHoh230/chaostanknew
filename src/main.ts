@@ -724,11 +724,13 @@ function boot(combatStyle: CombatStyle): void {
   // Auto-Markierer (ab BB): markiert GENAU EIN nächstes freies Ziel in Sniper-Reichweite (das nächstgelegene),
   // mit fortlaufender Aufbau-Nummer (4·5·6…). Kein Ziel in Reichweite → nichts; der Loop wartet, bis eines reinfährt.
   const autoMarkEins = (sichtbar: ScreenBlip[]): void => {
-    // NUR SICHTBARE Gegner (auf den Bildschirm projiziert) — sonst springt die Marke auf Ziele HINTER der
-    // Kamera, die man gar nicht sieht (der Panzer sitzt nicht bildmittig). Davon den NÄCHSTEN zum Panzer in
-    // Schussreichweite. Keiner sichtbar/in Reichweite → nichts; der Loop wartet, bis einer reinfährt.
+    // NUR Gegner, die WIRKLICH IM BILD sind — sonst springt die Marke auf Ziele hinter/neben der Kamera, die
+    // man nicht sieht (der Panzer sitzt nicht bildmittig). `sichtbar` ist schon tiefen-gefiltert (vor der
+    // Kamera); hier zusätzlich gegen den Bildrand (sx/sy) prüfen. Davon den NÄCHSTEN zum Panzer in Reichweite.
+    const w = engine.getRenderWidth(), h = engine.getRenderHeight();
     let best: string | null = null, bestD = sniperRange * sniperRange;
     for (const b of sichtbar) {
+      if (b.sx < 0 || b.sx > w || b.sy < 0 || b.sy > h) continue; // seitlich/oben/unten außerhalb des Bildes
       const r = roster.find((x) => x.id === b.id);
       if (!r || !r.combatant.alive || befehl.marks.some((m) => m.id === b.id)) continue;
       const dx = r.combatant.x - playerCombatant.x, dz = r.combatant.z - playerCombatant.z;
