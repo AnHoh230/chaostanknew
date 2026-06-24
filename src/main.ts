@@ -1657,6 +1657,8 @@ function boot(combatStyle: CombatStyle): void {
 
     // Gegner-Verhalten (R2): jeder Typ steuert nach seinem Muster auf einen Zielpunkt zu,
     // hält bei seinem Standoff und feuert in Schussweite. Konter = Verhalten, nicht Stats.
+    // Rubberband gegen den Wegfahr-Exploit: zurückgefallene Gegner holen schneller auf (nah = normal).
+    const RUBBER_AB = 70, RUBBER_SPANNE = 90, RUBBER_MAX = 2.5; // ab 70 Distanz wächst der Catch-up bis ×2.5 (~160+) — Stellschrauben
     for (const e of roster) {
       if (!e.combatant.alive) continue;
       const er = e.view.root;
@@ -1674,7 +1676,9 @@ function boot(combatStyle: CombatStyle): void {
         const tdx = out.tx - er.position.x, tdz = out.tz - er.position.z;
         const tl = Math.hypot(tdx, tdz) || 1;
         const slowFactor = e.gift ? 1 - giftSlow(e.gift, gartenCfg) : 1; // Seuche: reifendes Gift drosselt; reif → 0 (steht)
-        const step = e.speed * mods.speedMul * slowFactor * simDt; // Tempo type-/stufen-getrieben (out.speedMul = Muster, nicht Tempo)
+        const rubber = 1 + Math.min(1, Math.max(0, (distToPlayer - RUBBER_AB) / RUBBER_SPANNE)) * (RUBBER_MAX - 1); // Catch-up je weiter zurückgefallen
+        const step = e.speed * mods.speedMul * slowFactor * rubber * simDt; // Tempo type-/stufen-getrieben + Rubberband
+
         er.position.x += (tdx / tl) * step;
         er.position.z += (tdz / tl) * step;
         er.rotation.y = Math.atan2(tdx, tdz);
