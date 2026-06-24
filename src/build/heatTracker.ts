@@ -32,14 +32,16 @@ export interface HeatCfg {
 }
 
 // Zeitkonstanten: ~25 s reines Stehen/Geradeausfahren → voller Druck (und ebenso lang zum Abbau).
+// straightThresh 0.8 + langes Glättungsfenster (tau 5 s): nur KLAR geradliniges, ANHALTENDES Fahren
+// treibt die Fährte — moderates Vorrücken mit Zickzack mittelt sich weg (Netto-Drift « Tempo → niedrig).
 export const DEFAULT_HEAT_CFG: HeatCfg = {
   movingSpeed: 4,
   stillSpeed: 2,
   riseKessel: 1 / 25,
   riseFaehrte: 1 / 25,
   fall: 1 / 25,
-  straightThresh: 0.6,
-  tau: 2.5,
+  straightThresh: 0.8,
+  tau: 5,
   max: 1,
 };
 
