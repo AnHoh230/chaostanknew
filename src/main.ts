@@ -177,7 +177,7 @@ function boot(combatStyle: CombatStyle): void {
 
   // Live einstellbar (Regler im Panel): Schussweite.
   let shotRange = 40; // Weltеinheiten, die ein SPIELER-Schuss fliegt (Scope erhöht NUR diese)
-  let enemyShotRange = 28; // Gegner-Feuerdistanz/Standoff/Projektilreichweite — KÜRZER als Spieler-Schussweite (40): sie müssen erst ranfahren, ehe sie (mit Vorhalt) feuern → kein Kreuzfeuer aus allen Richtungen quer übers Feld. UNABHÄNGIG vom Spieler-Scope
+  let enemyShotRange = 30; // Gegner-Feuerdistanz/Standoff/Projektilreichweite — KÜRZER als Spieler-Schussweite (40): sie müssen erst ranfahren, ehe sie (mit Vorhalt) feuern → kein Kreuzfeuer aus allen Richtungen quer übers Feld. UNABHÄNGIG vom Spieler-Scope
   let playerProjSpeed = 60; // Spieler-Projektiltempo (schneller als Gegner → bewegliche Ziele treffbar)
   // Dash (Shift+WASD): kurzer Burst in Tasten-Richtung (heading-relativ), CD sichtbar im HUD.
   let dashCd = 0, dashTimer = 0, dashDirX = 0, dashDirZ = 0;
@@ -1658,7 +1658,7 @@ function boot(combatStyle: CombatStyle): void {
     // Gegner-Verhalten (R2): jeder Typ steuert nach seinem Muster auf einen Zielpunkt zu,
     // hält bei seinem Standoff und feuert in Schussweite. Konter = Verhalten, nicht Stats.
     // Rubberband gegen den Wegfahr-Exploit: zurückgefallene Gegner holen schneller auf (nah = normal).
-    const RUBBER_AB = 40, RUBBER_SPANNE = 90, RUBBER_MAX = 2.5; // ab 40 Distanz wächst der Catch-up bis ×2.5 (~160+) — Stellschrauben
+    const RUBBER_AB = 30, RUBBER_SPANNE = 120, RUBBER_MAX = 2; // ab 40 Distanz wächst der Catch-up bis ×2.5 (~160+) — Stellschrauben
     for (const e of roster) {
       if (!e.combatant.alive) continue;
       const er = e.view.root;
