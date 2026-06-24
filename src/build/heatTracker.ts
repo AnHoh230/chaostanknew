@@ -38,9 +38,9 @@ export const DEFAULT_HEAT_CFG: HeatCfg = {
   movingSpeed: 4,
   stillSpeed: 2,
   riseKessel: 1 / 25,
-  riseFaehrte: 1 / 25,
+  riseFaehrte: 1 / 40, // langsamer als Kessel — Fährte baut nur bei ANHALTENDEM Geradeausfahren auf (~16 s bis Schwelle)
   fall: 1 / 25,
-  straightThresh: 0.8,
+  straightThresh: 0.85,
   tau: 5,
   max: 1,
 };

@@ -248,6 +248,7 @@ function boot(combatStyle: CombatStyle): void {
   // — B-Build (Befehl): im Scope MARKIEREN (kostet Munition), nach dem Scope munitionsfrei exekutieren.
   //   Markierte sind verwundbar (mehr Schaden) + langsam (Buff). befehl.ts trägt ab BB Reihenfolge/Kaskade.
   const befehl = createBefehlState();
+  let salveOffen = false; // läuft gerade ein Markier-Vorgang? Neue Salve nur bei leeren Marken + voller Munition.
   const MARK_VERWUNDBAR = 1.6; // Schadensfaktor auf markierte Ziele (verwundbar)
   const MARK_SLOW = 0.45; // speedMul-Buff auf Markierte (langsam, wie Gift-Slow)
   const MARK_BUFF_DUR = 30; // s Markier-Buff (lang — hält bis Exekution)
@@ -749,6 +750,7 @@ function boot(combatStyle: CombatStyle): void {
       if (!te) continue;
       schiessLaser(te); damageEnemyTick(te, dmg);
       if (!te.combatant.alive) {
+        ammo = Math.min(AMMO_MAX, ammo + 1); // exekutiertes Ziel gibt die Markier-Munition zurück (sofort neu markierbar)
         if (stufe >= 2 && !simultan) registriereKill(befehl, tid); // Kaskade in Reihenfolge
         else if (stufe >= 2) { befehl.kette += 1; befehl.combo = COMBO_TIME; befehl.marks = befehl.marks.filter((m) => m.id !== tid); }
         else befehl.marks = befehl.marks.filter((m) => m.id !== tid); // B: einfach entfernen
@@ -777,9 +779,9 @@ function boot(combatStyle: CombatStyle): void {
           }
           return;
         }
-        // St1+ (B): im Scope MARKIEREN (Munition pro Marke), im Fahrmodus manuell SCHIESSEN (Reihenfolge ab BB).
+        // St1+ (B): im Scope MARKIEREN (Munition pro Marke, nur bei offener Salve), Fahrmodus = SCHIESSEN.
         if (scopeActive) {
-          if (ammo > 0 && befehl.marks.length < MAX_MARKS && sniperTargets.length && markiereZiel(sniperTargets[0]!)) {
+          if (salveOffen && ammo > 0 && befehl.marks.length < MAX_MARKS && sniperTargets.length && markiereZiel(sniperTargets[0]!)) {
             ammo = Math.max(0, ammo - 1);
             fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
           }
@@ -990,8 +992,13 @@ function boot(combatStyle: CombatStyle): void {
       if (scopeActive === on) return;
       scopeActive = on;
       badge.style.display = on ? 'block' : 'none';
-      if (!on) {
-        // Scope aus → Ziel-Ringe weg; Kern-Stufe 3 „Rückkehrfenster": kurzer Tempo-Schub.
+      if (on) {
+        // Befehl: neue Markier-Salve startet nur, wenn alle alten Marken weg sind UND Munition voll
+        // (sonst erst nachladen). Kein Sofort-Nachmarkieren, solange noch Marken aktiv sind.
+        salveOffen = !GIFT_BUILD && befehl.marks.length === 0 && ammo >= AMMO_MAX;
+      } else {
+        // Scope aus → Salve abgeschlossen (Exekutionsphase); Ziel-Ringe weg; St3 „Rückkehrfenster".
+        salveOffen = false;
         sniperTargets = [];
         ch.style.display = 'none'; for (const m of markPool) m.style.display = 'none';
         if (evo.unlockedStagesByChannel.sniper_core >= 3) returnBoostCd = 1.5;
