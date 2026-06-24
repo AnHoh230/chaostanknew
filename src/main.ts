@@ -737,6 +737,7 @@ function boot(combatStyle: CombatStyle): void {
     const e = roster.find((r) => r.id === id && r.combatant.alive);
     if (!e) return;
     const art = trefferArt(befehl, id);
+    alog.log('befehl', { art, ammo, m: befehl.marks.length, k: befehl.kette, st: evo.unlockedStagesByChannel.sniper_core });
     if (art === 'fremd') {
       if (ammo <= 0) return; // unmarkiertes Ziel → normaler Schuss, kostet Munition
       schiessLaser(e); damageEnemyTick(e, Math.round(playerStats().damage * sniperDmgMul));
@@ -794,6 +795,7 @@ function boot(combatStyle: CombatStyle): void {
           if (salveOffen && ammo > 0 && befehl.marks.length < MAX_MARKS && sniperTargets.length && markiereZiel(sniperTargets[0]!)) {
             ammo = Math.max(0, ammo - 1);
             fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
+            alog.log('mark', { m: befehl.marks.length, ammo });
           }
         } else {
           befehlSchuss(hoveredId);
@@ -1014,6 +1016,7 @@ function boot(combatStyle: CombatStyle): void {
         if (evo.unlockedStagesByChannel.sniper_core >= 3) returnBoostCd = 1.5;
       }
       log.info('scope', { on });
+      if (!GIFT_BUILD) alog.log('scope', { on: on ? 1 : 0, m: befehl.marks.length, ammo, salve: salveOffen ? 1 : 0 });
     };
     // Rechtsklick HALTEN = Scope+Slomo (zielen/infizieren), loslassen = Fahrmodus (ausweichen).
     // POINTER-Events (nicht mouse-): Babylon preventDefault't den Pointer am Canvas und unterdrückt
