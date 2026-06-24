@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   createBefehlState, markiere, markVoll, aktuellesZiel, trefferArt, bruch,
-  registriereKill, aufbauStufe, schadenStufe, tickBefehl,
+  registriereKill, aufbauStufe, schadenStufe, tickBefehl, autoMarkBereit,
   MAX_MARKS, COMBO_TIME, BUFF_TIME, BB_CAP,
 } from './befehl';
 
@@ -119,6 +119,40 @@ describe('Aufbau-Stufe', () => {
     const s = createBefehlState();
     s.buffStufe = 3; s.buffRest = 0; // ausgelaufen
     expect(schadenStufe(s)).toBe(0);
+  });
+});
+
+describe('Anzeige-Nummer (nr) — fortlaufend', () => {
+  it('Reihe = 1·2·3, Auto-Aufbau zählt einzeln weiter = 4·5·6', () => {
+    const s = createBefehlState();
+    markiere(s, 'a'); markiere(s, 'b'); markiere(s, 'c');
+    expect(s.marks.map((m) => m.nr)).toEqual([1, 2, 3]);
+    registriereKill(s, 'a', false); registriereKill(s, 'b', false); registriereKill(s, 'c', false);
+    markiere(s, 'd'); expect(s.marks[0]!.nr).toBe(4); // Auto-Marke bei kette 3
+    registriereKill(s, 'd', false);
+    markiere(s, 'e'); expect(s.marks[0]!.nr).toBe(5);
+    registriereKill(s, 'e', false);
+    markiere(s, 'f'); expect(s.marks[0]!.nr).toBe(6);
+  });
+});
+
+describe('autoMarkBereit', () => {
+  it('erst nach der manuellen Reihe (kette≥3) und nur ohne lebende Marke', () => {
+    const s = createBefehlState();
+    expect(autoMarkBereit(s, false)).toBe(false); // kette 0 → noch nicht
+    markiere(s, 'a'); markiere(s, 'b'); markiere(s, 'c');
+    registriereKill(s, 'a', false); registriereKill(s, 'b', false); registriereKill(s, 'c', false);
+    expect(autoMarkBereit(s, false)).toBe(true); // Reihe fertig, marks leer
+    markiere(s, 'd');
+    expect(autoMarkBereit(s, false)).toBe(false); // eine Auto-Marke lebt schon
+  });
+
+  it('BB stoppt am Cap (kette = MAX_MARKS+BB_CAP), BBB läuft grenzenlos', () => {
+    const s = createBefehlState();
+    baueKette(s, MAX_MARKS + BB_CAP, true); // kette 6, marks leer
+    expect(s.kette).toBe(MAX_MARKS + BB_CAP);
+    expect(autoMarkBereit(s, false)).toBe(false); // BB: Cap erreicht → kein Nachziehen
+    expect(autoMarkBereit(s, true)).toBe(true); // BBB: kein Deckel
   });
 });
 

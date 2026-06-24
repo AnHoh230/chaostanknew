@@ -25,7 +25,8 @@ export const BB_CAP = 3; // BB: Aufbau- und Buff-Deckel (Stufen)
 
 export interface Mark {
   id: string;
-  order: number; // 1..MAX_MARKS, in Markier-Reihenfolge
+  order: number; // abzuarbeitende Reihenfolge: 1..MAX_MARKS in der Reihe, 1 für eine einzelne Auto-Marke
+  nr: number; // fortlaufende Anzeige-Nummer der Sequenz: Reihe 1·2·3, dann Auto-Aufbau 4·5·6 …
 }
 
 export interface BefehlState {
@@ -48,7 +49,18 @@ export function markVoll(s: BefehlState): boolean {
 /** Markiert ein Ziel mit der nächsten freien Order. false, wenn voll oder schon markiert. */
 export function markiere(s: BefehlState, id: string): boolean {
   if (markVoll(s) || s.marks.some((m) => m.id === id)) return false;
-  s.marks.push({ id, order: s.marks.length + 1 });
+  // nr = fortlaufende Sequenz-Position: Reihe (kette 0) → 1·2·3; Auto-Aufbau (kette≥3) → kette+1 = 4·5·6…
+  s.marks.push({ id, order: s.marks.length + 1, nr: s.kette + s.marks.length + 1 });
+  return true;
+}
+
+/**
+ * Soll der Auto-Markierer (BB+) gerade EIN nächstes Ziel setzen? Erst NACH der manuellen Reihe (kette≥3),
+ * immer nur eine Auto-Marke zur Zeit (die vorige muss tot sein); BB nur bis zum Cap (kette < MAX_MARKS+BB_CAP).
+ */
+export function autoMarkBereit(s: BefehlState, bbb: boolean): boolean {
+  if (s.kette < MAX_MARKS || s.marks.length > 0) return false;
+  if (!bbb && s.kette >= MAX_MARKS + BB_CAP) return false;
   return true;
 }
 

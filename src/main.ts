@@ -50,7 +50,7 @@ import { createHeatState, updateHeat, DEFAULT_HEAT_CFG, type HeatState } from '.
 import { haescherSoll, haescherStats } from './build/haescher';
 import {
   createBefehlState, markiere, trefferArt, registriereKill, bruch,
-  aufbauStufe, schadenStufe, tickBefehl,
+  aufbauStufe, schadenStufe, tickBefehl, autoMarkBereit,
   MAX_MARKS, BB_CAP, BUFF_TIME,
 } from './build/befehl';
 import {
@@ -721,14 +721,26 @@ function boot(combatStyle: CombatStyle): void {
     spawnLaser(origin.x, origin.z, e.combatant.x, e.combatant.z);
     metrics.onShot(); lastFireClock = runClock;
   };
-  // Auto-Nachziele (ab BB): die nächsten freien Gegner markieren, bis wieder MAX_MARKS gesetzt sind.
-  const autoNachziele = (): void => {
-    const cands = roster
-      .filter((r) => r.combatant.alive && !befehl.marks.some((m) => m.id === r.id))
-      .sort((a, b) =>
-        Math.hypot(a.combatant.x - playerCombatant.x, a.combatant.z - playerCombatant.z) -
-        Math.hypot(b.combatant.x - playerCombatant.x, b.combatant.z - playerCombatant.z));
-    for (const c of cands) { if (befehl.marks.length >= MAX_MARKS) break; markiereZiel(c.id); }
+  // Auto-Markierer (ab BB): markiert GENAU EIN nächstes freies Ziel in Sniper-Reichweite (das nächstgelegene),
+  // mit fortlaufender Aufbau-Nummer (4·5·6…). Kein Ziel in Reichweite → nichts; der Loop wartet, bis eines reinfährt.
+  const autoMarkEins = (): void => {
+    let best: string | null = null, bestD = sniperRange * sniperRange;
+    for (const r of roster) {
+      if (!r.combatant.alive || befehl.marks.some((m) => m.id === r.id)) continue;
+      const dx = r.combatant.x - playerCombatant.x, dz = r.combatant.z - playerCombatant.z;
+      const d = dx * dx + dz * dz;
+      if (d <= bestD) { bestD = d; best = r.id; }
+    }
+    if (best) markiereZiel(best);
+  };
+  // Kurzer grüner Vollbild-Flash, wenn der Verstärkungs-Buff (BB) bei +3 einrastet.
+  const buffFlashEl = document.createElement('div');
+  buffFlashEl.style.cssText = 'position:fixed;inset:0;z-index:30;pointer-events:none;opacity:0;' +
+    'background:radial-gradient(circle,rgba(155,227,107,0) 45%,rgba(155,227,107,0.4) 100%);transition:opacity 0.45s;';
+  document.body.appendChild(buffFlashEl);
+  const buffFlash = (): void => {
+    buffFlashEl.style.transition = 'none'; buffFlashEl.style.opacity = '1';
+    requestAnimationFrame(() => { buffFlashEl.style.transition = 'opacity 0.45s'; buffFlashEl.style.opacity = '0'; });
   };
   // Manueller Befehl-Schuss aufs Cursor-Ziel. B: jedes Markierte ok. BB/BBB: nur das aktuelle, Vorgriff
   // bricht die Kette. Schaden = Grundschuss + additiver Aufbau-Bonus (schadenStufe × BEFEHL_DMG_PRO_STUFE).
@@ -759,9 +771,8 @@ function boot(combatStyle: CombatStyle): void {
     if (!e.combatant.alive) {
       ammo = Math.min(AMMO_MAX, ammo + 1); // exekutiertes Ziel gibt die Markier-Munition zurück
       if (stufe >= 2) {
-        const folge = registriereKill(befehl, id, bbb);
-        if (folge.capErreicht) { entmarkiereAlle(); showToast(`🔥 VERSTÄRKUNG +${BB_CAP} · ${BUFF_TIME}s`, '#ffb347'); } // BB: Buff B eingerastet, Auto-Stop
-        else if (folge.reiheKomplett) autoNachziele(); // volle Reihe → nachsetzen (BB bis Cap, BBB grenzenlos)
+        if (registriereKill(befehl, id, bbb).capErreicht) { entmarkiereAlle(); buffFlash(); showToast(`🔥 VERSTÄRKUNG +${BB_CAP} · ${BUFF_TIME}s`, '#9be36b'); } // BB: Buff B eingerastet, Auto-Stop
+        // sonst: der Auto-Markierer (Loop) zieht einzeln das nächste Ziel nach (4·5·6…)
       } else befehl.marks = befehl.marks.filter((m) => m.id !== id); // B: einfach entfernen
     }
     if (befehl.marks.length === 0) befehl.nextOrder = 1; // Salve leer (auch unvollständig) → Zeiger zurück
@@ -1867,10 +1878,10 @@ function boot(combatStyle: CombatStyle): void {
           const aufTxt = auf > 0 ? ` <span style="color:#ffd166">▸ +${auf}</span>` : '';
           teile.push(`<span style="color:#bfe3ff">⛓ ${reihe}${befehl.kette > MAX_MARKS ? '' : '/' + MAX_MARKS}</span>${aufTxt} <span style="color:#7fa8c9;font-size:0.82em">⏱${Math.max(0, befehl.combo).toFixed(1)}s</span>`);
         }
-        if (befehl.buffStufe > 0) { // B: gehaltener Buff — BB Countdown, BBB permanent (∞)
+        if (befehl.buffStufe > 0) { // B: gehaltener Buff — grün; BB Countdown, BBB permanent (∞)
           teile.push(befehl.buffRest < 0
-            ? `<span style="color:#ff9f43">🔥 +${befehl.buffStufe} ∞</span>`
-            : `<span style="color:#ffb347">🔥 +${befehl.buffStufe} · ${Math.max(0, befehl.buffRest).toFixed(1)}s</span>`);
+            ? `<span style="color:#7bdc5a">🔥 +${befehl.buffStufe} ∞</span>`
+            : `<span style="color:#9be36b">🔥 +${befehl.buffStufe} · ${Math.max(0, befehl.buffRest).toFixed(1)}s</span>`);
         }
         if (teile.length) { befehlHud.style.display = 'block'; befehlHud.innerHTML = teile.join('<span style="opacity:0.35">&nbsp;&nbsp;|&nbsp;&nbsp;</span>'); }
         else befehlHud.style.display = 'none';
@@ -1945,6 +1956,8 @@ function boot(combatStyle: CombatStyle): void {
       if (befehl.marks.length && !befehl.marks.some((m) => roster.some((r) => r.id === m.id && r.combatant.alive))) {
         befehl.marks = []; befehl.nextOrder = 1; // keine lebenden Markierten mehr
       }
+      // Auto-Markierer (ab BB): einzeln das nächste Ziel in Reichweite nachziehen (4·5·6…), wenn die vorige Marke weg ist.
+      if (evo.unlockedStagesByChannel.sniper_core >= 2 && autoMarkBereit(befehl, evo.unlockedStagesByChannel.sniper_core >= 3)) autoMarkEins();
     }
 
     if (sniperCrosshair) {
@@ -1982,7 +1995,7 @@ function boot(combatStyle: CombatStyle): void {
                 markPool[i]!.style.left = mb.sx + 'px';
                 markPool[i]!.style.top = mb.sy + 'px';
                 markPool[i]!.style.borderColor = '#ffd166';
-                markPool[i]!.textContent = evo.unlockedStagesByChannel.sniper_core >= 2 ? String(mk!.order) : ''; // Nummern erst ab BB
+                markPool[i]!.textContent = evo.unlockedStagesByChannel.sniper_core >= 2 ? String(mk!.nr) : ''; // fortlaufende Nummer (1·2·3 → 4·5·6…) ab BB
               } else markPool[i]!.style.display = 'none';
             }
             if (scopeBadge) {
@@ -2024,7 +2037,7 @@ function boot(combatStyle: CombatStyle): void {
             markPool[i]!.style.top = mb.sy + 'px';
             const bb = evo.unlockedStagesByChannel.sniper_core >= 2; // Reihenfolge/Nummern erst ab BB
             markPool[i]!.style.borderColor = bb && mk!.order === befehl.nextOrder ? '#9be36b' : '#ffd166';
-            markPool[i]!.textContent = bb ? String(mk!.order) : ''; // bei B kein Counter — reine Debuff-Markierung
+            markPool[i]!.textContent = bb ? String(mk!.nr) : ''; // fortlaufende Nummer (1·2·3 → 4·5·6…); bei B kein Counter
           } else markPool[i]!.style.display = 'none';
         }
       } else {
