@@ -48,7 +48,10 @@ import { saeGift, tickGift, istReif, reifeStufe, giftSlow, DEFAULT_GARTEN } from
 import { gegnerWelle, gartenTypStats, pulkGroesse, BUILD_STUFE_NAME } from './build/gartenProgression';
 import { createHeatState, updateHeat, DEFAULT_HEAT_CFG, type HeatState } from './build/heatTracker';
 import { haescherSoll, haescherStats } from './build/haescher';
-import { createBefehlState, markiere, MAX_MARKS } from './build/befehl';
+import {
+  createBefehlState, markiere, trefferArt, registriereKill, verstaerkung, tickCombo, bruch,
+  MAX_MARKS, SIMULTAN_SCHWELLE, COMBO_TIME,
+} from './build/befehl';
 import {
   createSkillState, applySkills, chooseUlt, spendTalent, activeUltDef, ULTS, TALENTS,
   HEAL_PRO_ERNTE, EXECUTE_FRAC, AUSBRUCH_RADIUS, AUSBRUCH_FIEBER, PUNKT_KOSTEN, TALENT_MAX,
@@ -248,8 +251,11 @@ function boot(combatStyle: CombatStyle): void {
   const MARK_VERWUNDBAR = 1.6; // Schadensfaktor auf markierte Ziele (verwundbar)
   const MARK_SLOW = 0.45; // speedMul-Buff auf Markierte (langsam, wie Gift-Slow)
   const MARK_BUFF_DUR = 30; // s Markier-Buff (lang — hält bis Exekution)
-  const BEFEHL_FIRE_BASE = 0.14; // Markier-/Exekutions-Takt
+  const BEFEHL_FIRE_BASE = 0.14; // Markier-/Schuss-Takt
   const BEFEHL_STUFE_NAME = ['Grundschuss', 'B · Markieren', 'BB · Reihenfolge', 'BBB · Verstärkung', 'Meisterschaft'];
+  const VERSTAERK_PRO_STUFE = 0.25; // BBB: +25 % Schaden je Verstärkungs-Stufe (analog Erntefieber)
+  const KASKADE_SPEED_PRO_KETTE = 0.06; // BB: +6 % Tempo je Ketten-Stufe
+  const KASKADE_SPEED_MAX = 0.6; // Deckel des Kaskaden-Tempos (+60 %)
   // Skill-System: ab St3 (ZZZ) werden Impuls-Überschüsse zu Skillpunkten. Eine aktivierte Pol-Ult
   // (Taste/Dauer/CD) + passive Wert-Talente. Talente mutieren gartenCfg + giftDotEff (recomputeSkills).
   const skill = createSkillState();
@@ -699,25 +705,80 @@ function boot(combatStyle: CombatStyle): void {
     e.buffs.add({ id: 'markiert', icon: '🎯', label: 'markiert', speedMul: MARK_SLOW, duration: MARK_BUFF_DUR });
     return true;
   };
+  const schiessLaser = (e: Enemy): void => {
+    const root = tank.view.root, turret = tank.view.turretNode;
+    const origin = root.getAbsolutePosition();
+    turret.rotation.y = yawTo(origin.x, origin.z, e.combatant.x, e.combatant.z) - root.rotation.y;
+    spawnLaser(origin.x, origin.z, e.combatant.x, e.combatant.z);
+    metrics.onShot(); lastFireClock = runClock;
+  };
+  // Auto-Nachziele (ab BB): die nächsten freien Gegner markieren, bis wieder MAX_MARKS gesetzt sind.
+  const autoNachziele = (): void => {
+    const cands = roster
+      .filter((r) => r.combatant.alive && !befehl.marks.some((m) => m.id === r.id))
+      .sort((a, b) =>
+        Math.hypot(a.combatant.x - playerCombatant.x, a.combatant.z - playerCombatant.z) -
+        Math.hypot(b.combatant.x - playerCombatant.x, b.combatant.z - playerCombatant.z));
+    for (const c of cands) { if (befehl.marks.length >= MAX_MARKS) break; markiereZiel(c.id); }
+  };
+  // Manueller Befehl-Schuss aufs Cursor-Ziel. B: jedes Markierte ok. BB: nur das aktuelle, Vorgriff bricht
+  // die Kette. BBB: Verstärkungs-Schaden + ab Kette 6 Simultan (ein Markierter anvisiert → alle sterben).
+  const befehlSchuss = (id: string | null): void => {
+    if (!id || fireCd > 0) return;
+    const stufe = evo.unlockedStagesByChannel.sniper_core;
+    const e = roster.find((r) => r.id === id && r.combatant.alive);
+    if (!e) return;
+    const art = trefferArt(befehl, id);
+    if (art === 'fremd') {
+      if (ammo <= 0) return; // unmarkiertes Ziel → normaler Schuss, kostet Munition
+      schiessLaser(e); damageEnemyTick(e, Math.round(playerStats().damage * sniperDmgMul));
+      ammo = Math.max(0, ammo - 1);
+      fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
+      return;
+    }
+    if (stufe >= 2 && art === 'vorgriff') { // BB: höheres Ziel zuerst → Kaskade bricht, Ziele verfallen
+      bruch(befehl); alog.log('befehl.bruch', { t: +runClock.toFixed(1) });
+      fireCd = BEFEHL_FIRE_BASE; return;
+    }
+    const verst = stufe >= 3 ? verstaerkung(befehl) : 0;
+    const dmg = Math.round(playerStats().damage * sniperDmgMul * MARK_VERWUNDBAR * (1 + verst * VERSTAERK_PRO_STUFE));
+    const simultan = stufe >= 3 && befehl.kette >= SIMULTAN_SCHWELLE;
+    const ids = simultan ? befehl.marks.map((m) => m.id) : [id];
+    for (const tid of ids) {
+      const te = roster.find((r) => r.id === tid && r.combatant.alive);
+      if (!te) continue;
+      schiessLaser(te); damageEnemyTick(te, dmg);
+      if (!te.combatant.alive) {
+        if (stufe >= 2 && !simultan) registriereKill(befehl, tid); // Kaskade in Reihenfolge
+        else if (stufe >= 2) { befehl.kette += 1; befehl.combo = COMBO_TIME; befehl.marks = befehl.marks.filter((m) => m.id !== tid); }
+        else befehl.marks = befehl.marks.filter((m) => m.id !== tid); // B: einfach entfernen
+      }
+    }
+    if (stufe >= 2 && befehl.marks.length === 0) autoNachziele(); // volle Reihe / Simultan → nachsetzen
+    fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
+  };
 
   function fire(): void {
-    if (combatStyle === 'sniper' && !scopeActive) return; // Kommandant feuert NUR im Übersichtsmodus
-    // Kommandant: ein Klick snappt sofort auf die besten Ziele in Reichweite (Auto-Targeting,
-    // 1..maxMarks je nach Kern-Stufe) und trifft sie alle garantiert. Keine manuelle Auswahl.
+    // Befehl schießt auch im Fahrmodus; nur der Garten-Kommandant feuert ausschließlich im Scope.
+    if (GIFT_BUILD && combatStyle === 'sniper' && !scopeActive) return;
     if (combatStyle === 'sniper') {
-      if (fireCd > 0) return; // nach einer Salve kurz nachladen
-      if (!sniperTargets.length) return; // kein Ziel in Reichweite → kein Schuss (kein Cooldown verbraten)
-      if (ARENA_MODE && ammo <= 0) return; // leer → erst auf R nachladen
+      if (fireCd > 0) return; // nach einem Schuss kurz nachladen
       if (!GIFT_BUILD) {
-        // Befehl: im Scope MARKIEREN (Munition pro Marke, max MAX_MARKS). Exekution läuft danach automatisch.
-        if (befehl.marks.length < MAX_MARKS && markiereZiel(sniperTargets[0]!)) {
-          ammo = Math.max(0, ammo - 1);
-          fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
+        // Befehl: im Scope MARKIEREN (Munition pro Marke), im Fahrmodus manuell SCHIESSEN (Reihenfolge ab BB).
+        if (scopeActive) {
+          if (ammo > 0 && befehl.marks.length < MAX_MARKS && sniperTargets.length && markiereZiel(sniperTargets[0]!)) {
+            ammo = Math.max(0, ammo - 1);
+            fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
+          }
+        } else {
+          befehlSchuss(hoveredId);
         }
         return;
       }
+      if (!sniperTargets.length) return; // Garten: kein Ziel in Reichweite
+      if (ammo <= 0) return; // leer → erst auf R nachladen
       fireVolley(sniperTargets);
-      if (ARENA_MODE) ammo = Math.max(0, ammo - 1); // ein Infektions-Schuss verbraucht
+      ammo = Math.max(0, ammo - 1); // ein Infektions-Schuss verbraucht
       return;
     }
     if (fireCd > 0) return; // Feuer-Cooldown (Kühlmittel senkt ihn)
@@ -906,7 +967,8 @@ function boot(combatStyle: CombatStyle): void {
       m.className = 'hud-c'; // UI-Scale: cursor-gebundene Marke, nur skalieren
       m.style.cssText =
         'position:fixed;width:30px;height:30px;margin:-15px 0 0 -15px;z-index:44;display:none;pointer-events:none;' +
-        'border:2px solid #9be36b;border-radius:50%;box-shadow:0 0 6px #9be36baa;';
+        'border:2px solid #9be36b;border-radius:50%;box-shadow:0 0 6px #9be36baa;' +
+        'color:#fff;font:800 15px system-ui;text-align:center;line-height:28px;text-shadow:0 1px 2px #000;';
       document.body.appendChild(m);
       return m;
     });
@@ -1352,7 +1414,10 @@ function boot(combatStyle: CombatStyle): void {
     // Kern-Stufe 3 „Rückkehrfenster": kurzer Tempo-Schub direkt nach dem Auspacken.
     if (returnBoostCd > 0) returnBoostCd = Math.max(0, returnBoostCd - simDt);
     const returnBoost = returnBoostCd > 0 ? 1.5 : 1;
-    playerSpeed = pst.speed * pmods.speedMul * playerSpeedMul * returnBoost * (reloadCd > 0 ? RELOAD_SPEED : 1);
+    // Befehl-Kaskade (ab BB): jeder in-Reihe-Kill staffelt das Tempo (aus befehl.kette), gedeckelt.
+    const kaskade = !GIFT_BUILD && evo.unlockedStagesByChannel.sniper_core >= 2
+      ? 1 + Math.min(KASKADE_SPEED_MAX, befehl.kette * KASKADE_SPEED_PRO_KETTE) : 1;
+    playerSpeed = pst.speed * pmods.speedMul * playerSpeedMul * returnBoost * kaskade * (reloadCd > 0 ? RELOAD_SPEED : 1);
     playerCombatant.armor = pst.armor + pmods.armorAdd;
     playerCombatant.dodge = pst.dodge + pmods.dodgeAdd; // Ausweichen aus Buffs (Basis 0)
     playerCombatant.incomingMul = pmods.incomingMul; // Verwundbarkeit (falls Gegner später markieren)
@@ -1730,11 +1795,20 @@ function boot(combatStyle: CombatStyle): void {
     ]);
     if (ARENA_MODE) {
       const mag = `${'●'.repeat(ammo)}${'○'.repeat(AMMO_MAX - ammo)}`;
-      ammoHud.textContent = reloadCd > 0
+      let txt = reloadCd > 0
         ? `⟳ Nachladen ${reloadCd.toFixed(1)}s`
         : (ammo <= 0 || slomoTime <= 0.05)
           ? `Munition ${mag} · Slomo ${slomoTime.toFixed(1)}s — R nachladen`
           : `Munition ${mag} · Slomo ${slomoTime.toFixed(1)}s`;
+      // Befehl ab BB: Kette + Combo-Timer; ab BBB Verstärkung bzw. Simultan-Bereitschaft.
+      if (!GIFT_BUILD && befehl.kette > 0) {
+        txt += `  ·  Kette ${befehl.kette} ⏱${Math.max(0, befehl.combo).toFixed(1)}s`;
+        if (evo.unlockedStagesByChannel.sniper_core >= 3) {
+          const v = verstaerkung(befehl);
+          txt += befehl.kette >= SIMULTAN_SCHWELLE ? ` · ☄ SIMULTAN` : v > 0 ? ` · ⚡×${(1 + v * VERSTAERK_PRO_STUFE).toFixed(1)}` : '';
+        }
+      }
+      ammoHud.textContent = txt;
     }
     updateUltHud();
     if (ARENA_MODE && skill.punkte > 0 && !skillOpen) {
@@ -1795,20 +1869,11 @@ function boot(combatStyle: CombatStyle): void {
     // Kommandant: Auto-Targeting. Jeden Frame die Ziele bestimmen, die der nächste Schuss trifft
     // (1..maxMarks je Kern-Stufe, Prio dumm→schlau). Cursor-Fadenkreuz = Feuerbereitschaft,
     // Ringe = die getroffenen Ziele. Bei maxMarks=1 ist das der bisherige Einzel-Schuss.
-    // Befehl: nach dem Scope die markierten Ziele munitionsfrei exekutieren (Auto-Fire, Verwundbar-Bonus).
-    if (!GIFT_BUILD && !scopeActive && fireCd <= 0 && befehl.marks.length) {
-      const mk = befehl.marks.find((m) => roster.some((r) => r.id === m.id && r.combatant.alive));
-      const e = mk ? roster.find((r) => r.id === mk.id && r.combatant.alive) ?? null : null;
-      if (e) {
-        const root = tank.view.root, turret = tank.view.turretNode;
-        const origin = root.getAbsolutePosition();
-        turret.rotation.y = yawTo(origin.x, origin.z, e.combatant.x, e.combatant.z) - root.rotation.y;
-        spawnLaser(origin.x, origin.z, e.combatant.x, e.combatant.z);
-        damageEnemyTick(e, Math.round(playerStats().damage * sniperDmgMul * MARK_VERWUNDBAR)); // verwundbar = mehr Schaden
-        metrics.onShot(); lastFireClock = runClock;
-        fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
-      } else if (!mk) {
-        befehl.marks = []; befehl.nextOrder = 1; // keine lebenden Markierten mehr → Runde leeren
+    // Befehl: Combo-Timer (ab BB) läuft bei aktiver Kette runter — Ablauf bricht sie. Tote Marken putzen.
+    if (!GIFT_BUILD) {
+      if (evo.unlockedStagesByChannel.sniper_core >= 2 && befehl.combo > 0) tickCombo(befehl, realDt);
+      if (befehl.marks.length && !befehl.marks.some((m) => roster.some((r) => r.id === m.id && r.combatant.alive))) {
+        befehl.marks = []; befehl.nextOrder = 1; // keine lebenden Markierten mehr
       }
     }
 
@@ -1847,6 +1912,7 @@ function boot(combatStyle: CombatStyle): void {
                 markPool[i]!.style.left = mb.sx + 'px';
                 markPool[i]!.style.top = mb.sy + 'px';
                 markPool[i]!.style.borderColor = '#ffd166';
+                markPool[i]!.textContent = String(mk!.order); // Reihenfolge-Zähler an der Zielscheibe
               } else markPool[i]!.style.display = 'none';
             }
             if (scopeBadge) {
@@ -1873,6 +1939,20 @@ function boot(combatStyle: CombatStyle): void {
             const cnt = maxMarks();
             scopeBadge.textContent = `🔭 SCOPE · Ziel: ${tgt}${cnt > 1 ? ` ×${cnt}` : ''}`;
           }
+        }
+      } else if (!GIFT_BUILD && combatStyle === 'sniper' && befehl.marks.length) {
+        // Befehl im Fahrmodus: Marken-Ringe bleiben sichtbar (man schießt ohne Scope). Aktuelles Ziel grün.
+        sniperCrosshair.style.display = 'none';
+        for (let i = 0; i < markPool.length; i++) {
+          const mk = befehl.marks[i];
+          const mb = mk ? screenBlips.find((b) => b.id === mk.id) : null;
+          if (mb) {
+            markPool[i]!.style.display = 'block';
+            markPool[i]!.style.left = mb.sx + 'px';
+            markPool[i]!.style.top = mb.sy + 'px';
+            markPool[i]!.style.borderColor = mk!.order === befehl.nextOrder ? '#9be36b' : '#ffd166';
+            markPool[i]!.textContent = String(mk!.order); // Reihenfolge-Zähler (aktuelles Ziel grün)
+          } else markPool[i]!.style.display = 'none';
         }
       } else {
         if (sniperCrosshair.style.display !== 'none') sniperCrosshair.style.display = 'none';
