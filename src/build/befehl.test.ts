@@ -70,6 +70,15 @@ describe('registriereKill — Kaskade & Reihe', () => {
     expect(s.nextOrder).toBe(1);
     expect(s.marks).toHaveLength(0);
   });
+
+  it('unvollständige Salve (nur 2 markiert) → NICHT komplett, aber Zeiger zurück auf 1', () => {
+    const s = createBefehlState(); markiere(s, 'a'); markiere(s, 'b');
+    expect(registriereKill(s, 'a').reiheKomplett).toBe(false);
+    const r = registriereKill(s, 'b');
+    expect(r.reiheKomplett).toBe(false); // nur 2 abgearbeitet = keine volle Reihe → kein Auto-Nachsetzen
+    expect(s.marks).toHaveLength(0);
+    expect(s.nextOrder).toBe(1); // Bugfix: nächste Salve beginnt wieder bei Order 1 (sonst Vorgriff-Brüche)
+  });
 });
 
 describe('Bruch bei Vorgriff', () => {

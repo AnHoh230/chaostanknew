@@ -86,12 +86,9 @@ export function registriereKill(s: BefehlState, id: string): KillFolge {
   s.combo = COMBO_TIME;
   s.marks = s.marks.filter((x) => x.id !== id);
   s.nextOrder += 1;
-  let reiheKomplett = false;
-  if (s.nextOrder > MAX_MARKS) {
-    s.nextOrder = 1;
-    s.marks = [];
-    reiheKomplett = true;
-  }
+  const reiheKomplett = s.nextOrder > MAX_MARKS; // nur eine VOLLE MAX_MARKS-Reihe gilt als komplett
+  // Salve abgearbeitet (auch unvollständig, z. B. nur 2 markiert) → Zeiger zurück für die nächste Salve.
+  if (s.marks.length === 0) { s.nextOrder = 1; s.marks = []; }
   return { reiheKomplett, simultan: s.kette >= SIMULTAN_SCHWELLE };
 }
 

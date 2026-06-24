@@ -761,13 +761,14 @@ function boot(combatStyle: CombatStyle): void {
       if (!te.combatant.alive) {
         ammo = Math.min(AMMO_MAX, ammo + 1); // exekutiertes Ziel gibt die Markier-Munition zurück (sofort neu markierbar)
         if (stufe >= 2 && !simultan) {
-          if (registriereKill(befehl, tid).reiheKomplett) showToast(`✓ REIHE EXEKUTIERT · Kette ${befehl.kette}`, '#9be36b'); // volle 3er-Reihe
+          if (registriereKill(befehl, tid).reiheKomplett) { showToast(`✓ REIHE EXEKUTIERT · Kette ${befehl.kette}`, '#9be36b'); autoNachziele(); } // NUR volle 3er-Reihe → nachsetzen
         }
         else if (stufe >= 2) { befehl.kette += 1; befehl.combo = COMBO_TIME; befehl.marks = befehl.marks.filter((m) => m.id !== tid); }
         else befehl.marks = befehl.marks.filter((m) => m.id !== tid); // B: einfach entfernen
       }
     }
-    if (stufe >= 2 && befehl.marks.length === 0) autoNachziele(); // volle Reihe / Simultan → nachsetzen
+    if (befehl.marks.length === 0) befehl.nextOrder = 1; // Salve leer (auch unvollständig) → Zeiger zurück
+    if (simultan && stufe >= 3 && befehl.marks.length === 0) autoNachziele(); // Simultan-Finale → nachsetzen
     fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
   };
 
