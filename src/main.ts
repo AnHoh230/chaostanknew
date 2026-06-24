@@ -753,7 +753,14 @@ function boot(combatStyle: CombatStyle): void {
     const art = trefferArt(befehl, id);
     alog.log('befehl', { art, ammo, m: befehl.marks.length, k: befehl.kette, b: befehl.buffStufe, st: stufe });
     if (art === 'fremd') {
-      if (ammo <= 0) return; // unmarkiertes Ziel → normaler Schuss, kostet Munition
+      // BB+: ein Treffer auf ein UNMARKIERTES Ziel bei laufender Kette/Markierung bricht ebenfalls ab
+      // (Disziplin — nicht nur der Vorgriff auf eine höhere Marke). Gehaltener Buff B bleibt.
+      if (stufe >= 2 && (befehl.marks.length > 0 || befehl.kette > 0)) {
+        entmarkiereAlle(); bruch(befehl); alog.log('befehl.bruch', { t: +runClock.toFixed(1), grund: 'fremd' });
+        showToast('✗ FALSCHES ZIEL', '#ff6b6b');
+        fireCd = BEFEHL_FIRE_BASE; return;
+      }
+      if (ammo <= 0) return; // ohne aktive Kette: unmarkiertes Ziel → normaler Schuss, kostet Munition
       schiessLaser(e); damageEnemyTick(e, Math.round(playerStats().damage * sniperDmgMul));
       ammo = Math.max(0, ammo - 1);
       fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
