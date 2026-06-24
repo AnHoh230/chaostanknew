@@ -247,6 +247,7 @@ function boot(combatStyle: CombatStyle): void {
   const SLOMO_SCALE = 0.2; // Welt-Zeit im Slomo (Bullet-Time beim Infizieren); Spieler-Feuertakt bleibt real
   let slomoTime = 3; // Slomo-Zeit-Budget pro Magazin (s) — sonst klebt man ewig im Slomo
   const SLOMO_TIME = 3;
+  const SLOMO_REGEN = 0.5; // außerhalb des Scopes füllt sich das Slomo-Budget mit diesem Faktor (×Echtzeit) wieder auf
   // — B-Build (Befehl): im Scope MARKIEREN (kostet Munition), nach dem Scope munitionsfrei exekutieren.
   //   Markierte sind verwundbar (mehr Schaden) + langsam (Buff). befehl.ts trägt ab BB Reihenfolge/Kaskade.
   const befehl = createBefehlState();
@@ -982,7 +983,7 @@ function boot(combatStyle: CombatStyle): void {
   const input = createInput(
     scene, camera, tank, () => playerSpeed, fire,
     () => BASE_TURRET_SLEW * playerBuffs.aggregate().turretSlewMul,
-    () => !scopeActive, // Sniper-Scope hält den Panzer an
+    () => !scopeActive || !GIFT_BUILD, // nur der Garten-Scope hält an; Befehl fährt im Scope weiter (nur Slomo)
     () => combatStyle !== 'sniper', // Sniper: kein Auto-Vorwärts, manuell per W/S fahren
   );
 
@@ -1067,6 +1068,7 @@ function boot(combatStyle: CombatStyle): void {
     if (!ARENA_MODE || reloadCd > 0 || !playerCombatant.alive) return;
     if (ammo >= AMMO_MAX && slomoTime >= SLOMO_TIME) return; // schon randvoll
     reloadCd = RELOAD_TIME;
+    if (!GIFT_BUILD) { entmarkiereAlle(); bruch(befehl); } // Nachladen verwirft die gesetzten Markierungen (+ laufende Kette; gehaltener Buff bleibt)
     alog.log('reload', { t: +runClock.toFixed(1) });
   });
 
@@ -1467,6 +1469,7 @@ function boot(combatStyle: CombatStyle): void {
     // Endet, sobald Munition ODER Slomo-Zeit leer ist — was zuerst kommt.
     const slomoOn = ARENA_MODE && scopeActive && ammo > 0 && slomoTime > 0;
     if (slomoOn) { simDt = realDt * SLOMO_SCALE; slomoTime = Math.max(0, slomoTime - realDt); }
+    else if (ARENA_MODE && !scopeActive && slomoTime < SLOMO_TIME) slomoTime = Math.min(SLOMO_TIME, slomoTime + realDt * SLOMO_REGEN); // außerhalb des Scopes regeneriert das Budget
     // Nachladen (R) läuft in Echtzeit + Tempo-Schub (mobile Ausweich-Phase); füllt Munition UND Slomo-Zeit.
     if (reloadCd > 0) { reloadCd -= realDt; if (reloadCd <= 0) { ammo = AMMO_MAX; slomoTime = SLOMO_TIME; } }
     // Ult-Timer (Echtzeit): aktiv runter → bei 0 in den Cooldown; danach Cooldown runter.
