@@ -48,6 +48,7 @@ import { saeGift, tickGift, istReif, reifeStufe, giftSlow, DEFAULT_GARTEN } from
 import { gegnerWelle, gartenTypStats, pulkGroesse, BUILD_STUFE_NAME } from './build/gartenProgression';
 import { createHeatState, updateHeat, DEFAULT_HEAT_CFG, type HeatState } from './build/heatTracker';
 import { haescherSoll, haescherStats } from './build/haescher';
+import { createBefehlState, markiere, MAX_MARKS } from './build/befehl';
 import {
   createSkillState, applySkills, chooseUlt, spendTalent, activeUltDef, ULTS, TALENTS,
   HEAL_PRO_ERNTE, EXECUTE_FRAC, AUSBRUCH_RADIUS, AUSBRUCH_FIEBER, PUNKT_KOSTEN, TALENT_MAX,
@@ -241,6 +242,14 @@ function boot(combatStyle: CombatStyle): void {
   const SLOMO_SCALE = 0.2; // Welt-Zeit im Slomo (Bullet-Time beim Infizieren); Spieler-Feuertakt bleibt real
   let slomoTime = 3; // Slomo-Zeit-Budget pro Magazin (s) — sonst klebt man ewig im Slomo
   const SLOMO_TIME = 3;
+  // — B-Build (Befehl): im Scope MARKIEREN (kostet Munition), nach dem Scope munitionsfrei exekutieren.
+  //   Markierte sind verwundbar (mehr Schaden) + langsam (Buff). befehl.ts trägt ab BB Reihenfolge/Kaskade.
+  const befehl = createBefehlState();
+  const MARK_VERWUNDBAR = 1.6; // Schadensfaktor auf markierte Ziele (verwundbar)
+  const MARK_SLOW = 0.45; // speedMul-Buff auf Markierte (langsam, wie Gift-Slow)
+  const MARK_BUFF_DUR = 30; // s Markier-Buff (lang — hält bis Exekution)
+  const BEFEHL_FIRE_BASE = 0.14; // Markier-/Exekutions-Takt
+  const BEFEHL_STUFE_NAME = ['Grundschuss', 'B · Markieren', 'BB · Reihenfolge', 'BBB · Verstärkung', 'Meisterschaft'];
   // Skill-System: ab St3 (ZZZ) werden Impuls-Überschüsse zu Skillpunkten. Eine aktivierte Pol-Ult
   // (Taste/Dauer/CD) + passive Wert-Talente. Talente mutieren gartenCfg + giftDotEff (recomputeSkills).
   const skill = createSkillState();
@@ -683,6 +692,14 @@ function boot(combatStyle: CombatStyle): void {
     return cands.slice(0, Math.max(1, n)).map((c) => c.id);
   }
 
+  // Befehl: ein Cursor-Ziel markieren (Order via befehl.ts) + Slow-Buff (verwundbar = Bonus beim Schuss).
+  const markiereZiel = (id: string): boolean => {
+    const e = roster.find((r) => r.id === id && r.combatant.alive);
+    if (!e || !markiere(befehl, id)) return false; // tot, voll oder schon markiert
+    e.buffs.add({ id: 'markiert', icon: '🎯', label: 'markiert', speedMul: MARK_SLOW, duration: MARK_BUFF_DUR });
+    return true;
+  };
+
   function fire(): void {
     if (combatStyle === 'sniper' && !scopeActive) return; // Kommandant feuert NUR im Übersichtsmodus
     // Kommandant: ein Klick snappt sofort auf die besten Ziele in Reichweite (Auto-Targeting,
@@ -691,6 +708,14 @@ function boot(combatStyle: CombatStyle): void {
       if (fireCd > 0) return; // nach einer Salve kurz nachladen
       if (!sniperTargets.length) return; // kein Ziel in Reichweite → kein Schuss (kein Cooldown verbraten)
       if (ARENA_MODE && ammo <= 0) return; // leer → erst auf R nachladen
+      if (!GIFT_BUILD) {
+        // Befehl: im Scope MARKIEREN (Munition pro Marke, max MAX_MARKS). Exekution läuft danach automatisch.
+        if (befehl.marks.length < MAX_MARKS && markiereZiel(sniperTargets[0]!)) {
+          ammo = Math.max(0, ammo - 1);
+          fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
+        }
+        return;
+      }
       fireVolley(sniperTargets);
       if (ARENA_MODE) ammo = Math.max(0, ammo - 1); // ein Infektions-Schuss verbraucht
       return;
@@ -1770,6 +1795,23 @@ function boot(combatStyle: CombatStyle): void {
     // Kommandant: Auto-Targeting. Jeden Frame die Ziele bestimmen, die der nächste Schuss trifft
     // (1..maxMarks je Kern-Stufe, Prio dumm→schlau). Cursor-Fadenkreuz = Feuerbereitschaft,
     // Ringe = die getroffenen Ziele. Bei maxMarks=1 ist das der bisherige Einzel-Schuss.
+    // Befehl: nach dem Scope die markierten Ziele munitionsfrei exekutieren (Auto-Fire, Verwundbar-Bonus).
+    if (!GIFT_BUILD && !scopeActive && fireCd <= 0 && befehl.marks.length) {
+      const mk = befehl.marks.find((m) => roster.some((r) => r.id === m.id && r.combatant.alive));
+      const e = mk ? roster.find((r) => r.id === mk.id && r.combatant.alive) ?? null : null;
+      if (e) {
+        const root = tank.view.root, turret = tank.view.turretNode;
+        const origin = root.getAbsolutePosition();
+        turret.rotation.y = yawTo(origin.x, origin.z, e.combatant.x, e.combatant.z) - root.rotation.y;
+        spawnLaser(origin.x, origin.z, e.combatant.x, e.combatant.z);
+        damageEnemyTick(e, Math.round(playerStats().damage * sniperDmgMul * MARK_VERWUNDBAR)); // verwundbar = mehr Schaden
+        metrics.onShot(); lastFireClock = runClock;
+        fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
+      } else if (!mk) {
+        befehl.marks = []; befehl.nextOrder = 1; // keine lebenden Markierten mehr → Runde leeren
+      }
+    }
+
     if (sniperCrosshair) {
       if (combatStyle === 'sniper' && scopeActive) {
         const col = fireCd <= 0 ? '#9be36b' : '#ffa94d'; // grün = feuerbereit, orange = nachladen
@@ -1788,11 +1830,30 @@ function boot(combatStyle: CombatStyle): void {
               if (el.hasAttribute('data-ring')) el.style.borderColor = col; else el.style.background = col;
             });
           } else sniperCrosshair.style.display = 'none';
-          for (const m of markPool) m.style.display = 'none'; // keine Auto-Ziel-Ringe im Garten
-          if (scopeBadge) {
-            const bs = evo.unlockedStagesByChannel.dot_core;
-            const nm = BUILD_STUFE_NAME[Math.min(bs, BUILD_STUFE_NAME.length - 1)];
-            scopeBadge.textContent = bs >= 3 ? `🦠 St${bs} · ${nm} — Erntefieber +${erntefieber}` : `🦠 St${bs} · ${nm}`;
+          if (GIFT_BUILD) {
+            for (const m of markPool) m.style.display = 'none'; // Garten: keine Marken-Ringe
+            if (scopeBadge) {
+              const bs = evo.unlockedStagesByChannel.dot_core;
+              const nm = BUILD_STUFE_NAME[Math.min(bs, BUILD_STUFE_NAME.length - 1)];
+              scopeBadge.textContent = bs >= 3 ? `🦠 St${bs} · ${nm} — Erntefieber +${erntefieber}` : `🦠 St${bs} · ${nm}`;
+            }
+          } else {
+            // Befehl: markPool zeigt die bereits markierten Ziele (gelbe Ringe über ihnen).
+            for (let i = 0; i < markPool.length; i++) {
+              const mk = befehl.marks[i];
+              const mb = mk ? screenBlips.find((b) => b.id === mk.id) : null;
+              if (mb) {
+                markPool[i]!.style.display = 'block';
+                markPool[i]!.style.left = mb.sx + 'px';
+                markPool[i]!.style.top = mb.sy + 'px';
+                markPool[i]!.style.borderColor = '#ffd166';
+              } else markPool[i]!.style.display = 'none';
+            }
+            if (scopeBadge) {
+              const bs = evo.unlockedStagesByChannel.sniper_core;
+              const nm = BEFEHL_STUFE_NAME[Math.min(bs, BEFEHL_STUFE_NAME.length - 1)];
+              scopeBadge.textContent = `🎯 St${bs} · ${nm} — Marken ${befehl.marks.length}/${MAX_MARKS}`;
+            }
           }
         } else {
           const coreStage = evo.unlockedStagesByChannel.sniper_core;
