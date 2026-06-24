@@ -11,8 +11,10 @@
  * Reine Funktionen (TDD); Sekunden/Stückzahlen/HP sind Drehregler.
  */
 export interface HaescherCfg {
-  frontProHeat: number; // Soll-Häscher voraus pro Fährte-Punkt (faehrte 0..1)
-  ringProHeat: number; // Soll-Häscher rundum pro Kessel-Punkt (kessel 0..1)
+  grace: number; // s Schonfrist am Run-Anfang: davor GAR KEINE Häscher (erst etablieren)
+  heatSchwelle: number; // Heat muss diese Schwelle (0..1) überschreiten, ehe es Häscher treibt
+  frontProHeat: number; // Soll-Häscher voraus pro Fährte-Punkt ÜBER der Schwelle
+  ringProHeat: number; // Soll-Häscher rundum pro Kessel-Punkt ÜBER der Schwelle
   sekProGrund: number; // s Laufzeit je Grund-Häscher (zeitlicher Sockel, kommt rundum dazu)
   maxFront: number; // Deckel voraus
   maxRing: number; // Deckel rundum
@@ -23,6 +25,8 @@ export interface HaescherCfg {
 }
 
 export const DEFAULT_HAESCHER_CFG: HaescherCfg = {
+  grace: 45,
+  heatSchwelle: 0.4,
   frontProHeat: 5,
   ringProHeat: 5,
   sekProGrund: 90,
@@ -41,9 +45,13 @@ export interface HaescherSoll {
 
 /** Soll-Zahl lebender Häscher (voraus/rundum) aus Laufzeit + Heat. */
 export function haescherSoll(t: number, kessel: number, faehrte: number, cfg: HaescherCfg = DEFAULT_HAESCHER_CFG): HaescherSoll {
+  if (Math.max(0, t) < cfg.grace) return { front: 0, ring: 0 }; // Schonfrist: am Anfang gar keine Häscher
   const grund = Math.floor(Math.max(0, t) / cfg.sekProGrund); // zeitlicher Sockel (rundum)
-  const front = Math.min(cfg.maxFront, Math.round(Math.max(0, faehrte) * cfg.frontProHeat));
-  const ring = Math.min(cfg.maxRing, grund + Math.round(Math.max(0, kessel) * cfg.ringProHeat));
+  // Erst Heat ÜBER der Schwelle treibt Häscher — kurzes Stehen/Geradeausfahren zählt nicht.
+  const k = Math.max(0, kessel - cfg.heatSchwelle);
+  const f = Math.max(0, faehrte - cfg.heatSchwelle);
+  const front = Math.min(cfg.maxFront, Math.round(f * cfg.frontProHeat));
+  const ring = Math.min(cfg.maxRing, grund + Math.round(k * cfg.ringProHeat));
   return { front, ring };
 }
 
