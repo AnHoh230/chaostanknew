@@ -274,6 +274,7 @@ function boot(combatStyle: CombatStyle): void {
   let ultSchaden = 0; // Seuche-Ult: Summe des ausgeteilten Schadens (für Lifesteal am Ende)
   let schutzLadungen = 0; // Eiserne Disziplin: aktuelle Ketten-Schutz-Ladungen
   let prevKette = 0; // für die Kette-≥15-Nachlade-Erkennung
+  let prevWelleLevel = 1; // letztes Gegner-Stärke-Level (steigt → bestehende Gegner mit-skalieren)
   let giftDotEff = GIFT_DOT_ST1; // effektiver St1-Köchel (Köchel-Talent hebt ihn)
   const recomputeSkills = (): void => {
     const a = applySkills(DEFAULT_GARTEN, skill);
@@ -1656,6 +1657,18 @@ function boot(combatStyle: CombatStyle): void {
     const aliveCount = roster.reduce((n, e) => n + (e.combatant.alive ? 1 : 0), 0);
     // BROKEN: keine neuen Spawns (Druck raus, Loop erholt sich). Sonst normaler gedeckelter Nachschub.
     const welle = ARENA_MODE ? gegnerWelle(runClock) : null; // Garten: Timer+Batch-Eskalation (kein Auffüllen)
+    if (welle && welle.level > prevWelleLevel) {
+      // Stärke-Level gestiegen → ALLE lebenden Board-Gegner auf die neue Stufe heben (HP-Anteil bleibt, kein Heilen).
+      for (const e of roster) {
+        if (!e.combatant.alive || e.haescher) continue;
+        const ts = gartenTypStats(e.typeId, welle.level);
+        if (ts.hp <= e.combatant.maxHp) continue; // nur hochskalieren
+        const frac = e.combatant.hp / e.combatant.maxHp;
+        e.combatant.maxHp = ts.hp; e.combatant.hp = Math.max(1, Math.round(ts.hp * frac));
+        e.damage = ts.damage; e.speed = ts.speed;
+      }
+      prevWelleLevel = welle.level;
+    }
     const spawnPlan = welle
       ? { targetCount: welle.cap, weights: welle.weights, interval: welle.interval, batch: welle.batch }
       : currentSwarmPlan();

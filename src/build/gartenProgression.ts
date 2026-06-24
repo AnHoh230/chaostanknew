@@ -14,6 +14,13 @@
 export const BUILD_STUFE_AB = [0, 25, 70, 130, 210];
 export const BUILD_STUFE_NAME = ['Grundschuss', 'Z · Gift', 'ZZ · Seuche', 'ZZZ · Ernte', 'Verstärkung'];
 
+// — Gegner-Eskalation (Stärke je Level). HP STEIL (zieht dem Spieler-Schaden davon), Schaden/Tempo
+//   moderat (sonst zu tödlich). Level steigt schnell + zeit-getrieben. Alles Drehregler. —
+export const LEVEL_ALLE_SEK = 60; // Stärke-Level +1 alle X s
+export const HP_PRO_LEVEL = 1.4; // HP-Faktor je Level über 1 (steil)
+export const DMG_PRO_LEVEL = 1.12; // Schaden-Faktor je Level (moderat)
+export const SPEED_PRO_LEVEL = 1.03; // Tempo-Faktor je Level (kaum)
+
 /** Zeit (s) → ausgebildete Build-Stufe. 0 = Grundschuss … 3 = ZZZ, 4+ = Verstärkung. */
 export function buildStufe(t: number): number {
   if (t < 25) return 0;
@@ -33,14 +40,16 @@ export interface GegnerWelle {
 
 /** Zeit (s) → Spawn-Eskalation: Mix + Level schalten gestaffelt frei; Takt schrumpft, Batch wächst. */
 export function gegnerWelle(t: number): GegnerWelle {
-  // Typ-Mix + Stärke schalten langsam frei (Schwarm, dann Brocken).
+  // Typ-Mix schaltet gestaffelt frei (Schwarm, dann Brocken).
   let weights: Record<string, number>;
-  let level: number;
-  if (t < 90) { weights = { allrounder: 1 }; level = 1; }
-  else if (t < 210) { weights = { allrounder: 7, racer: 3 }; level = 1; }
-  else if (t < 360) { weights = { allrounder: 5, racer: 3, swarm: 2 }; level = 2; }
-  else if (t < 540) { weights = { allrounder: 4, racer: 3, swarm: 3, bunker: 1 }; level = 3; }
-  else { weights = { allrounder: 2, racer: 3, swarm: 4, bunker: 2 }; level = 4 + Math.floor((t - 540) / 180); }
+  if (t < 90) weights = { allrounder: 1 };
+  else if (t < 210) weights = { allrounder: 7, racer: 3 };
+  else if (t < 360) weights = { allrounder: 5, racer: 3, swarm: 2 };
+  else if (t < 540) weights = { allrounder: 4, racer: 3, swarm: 3, bunker: 1 };
+  else weights = { allrounder: 2, racer: 3, swarm: 4, bunker: 2 };
+  // Stärke-LEVEL steigt SCHNELL + entkoppelt vom Mix: +1 alle LEVEL_ALLE_SEK. So zieht die Gegner-HP der
+  // Spieler-Schadenskurve davon — der reine Grundschuss reicht früh nicht mehr (man braucht den Aufbau).
+  const level = 1 + Math.floor(t / LEVEL_ALLE_SEK);
   // Spawn-Rate: Takt ~8s → schneller Früh-Abfall (tote Leere weg), Boden bei 4s → der Dot-Build
   // (Kills brauchen ~6,5s Reifezeit) bekommt Luft für eine sichere Tasche. Batch bleibt lang bei 1
   // (Einzel-Spawns, lesbar — „erst einer, dann einer"), wächst erst spät (+1 alle 5 min). Die
@@ -64,14 +73,14 @@ export const GARTEN_BASIS: Record<string, GartenTypStats> = {
   bunker: { hp: 220, damage: 40, speed: 5 },
 };
 
-/** Typ-Basis auf ein Level hochskalieren: HP ×1.15, Schaden ×1.18, Tempo ×1.04 je Level über 1. */
+/** Typ-Basis auf ein Level hochskalieren: HP ×HP_PRO_LEVEL (steil), Schaden/Tempo moderat je Level über 1. */
 export function gartenTypStats(typ: string, level: number): GartenTypStats {
   const b = GARTEN_BASIS[typ] ?? GARTEN_BASIS.allrounder!;
   const n = Math.max(0, level - 1);
   return {
-    hp: Math.round(b.hp * Math.pow(1.15, n)),
-    damage: Math.round(b.damage * Math.pow(1.18, n)),
-    speed: +(b.speed * Math.pow(1.04, n)).toFixed(2),
+    hp: Math.round(b.hp * Math.pow(HP_PRO_LEVEL, n)),
+    damage: Math.round(b.damage * Math.pow(DMG_PRO_LEVEL, n)),
+    speed: +(b.speed * Math.pow(SPEED_PRO_LEVEL, n)).toFixed(2),
   };
 }
 
