@@ -49,8 +49,9 @@ import { gegnerWelle, gartenTypStats, pulkGroesse, BUILD_STUFE_NAME } from './bu
 import { createHeatState, updateHeat, DEFAULT_HEAT_CFG, type HeatState } from './build/heatTracker';
 import { haescherSoll, haescherStats } from './build/haescher';
 import {
-  createBefehlState, markiere, trefferArt, registriereKill, verstaerkung, bruch,
-  MAX_MARKS, SIMULTAN_SCHWELLE, COMBO_TIME,
+  createBefehlState, markiere, trefferArt, registriereKill, bruch,
+  aufbauStufe, schadenStufe, tickBefehl,
+  MAX_MARKS, BB_CAP, BUFF_TIME,
 } from './build/befehl';
 import {
   createSkillState, applySkills, chooseUlt, spendTalent, activeUltDef, ULTS, TALENTS,
@@ -253,8 +254,8 @@ function boot(combatStyle: CombatStyle): void {
   const MARK_SLOW = 0.45; // speedMul-Buff auf Markierte (langsam, wie Gift-Slow)
   const MARK_BUFF_DUR = 30; // s Markier-Buff (lang — hält bis Exekution)
   const BEFEHL_FIRE_BASE = 0.14; // Markier-/Schuss-Takt
-  const BEFEHL_STUFE_NAME = ['Grundschuss', 'B · Markieren', 'BB · Reihenfolge', 'BBB · Verstärkung', 'Meisterschaft'];
-  const VERSTAERK_PRO_STUFE = 0.25; // BBB: +25 % Schaden je Verstärkungs-Stufe (analog Erntefieber)
+  const BEFEHL_STUFE_NAME = ['Grundschuss', 'B · Markieren', 'BB · Aufbau', 'BBB · Grenzenlos', 'Meisterschaft'];
+  const BEFEHL_DMG_PRO_STUFE = 10; // additiver Schaden je Aufbau-Stufe (Gift-Größenordnung, KEIN Loadout-Multiplikator) — Balance-Stellschraube
   const KASKADE_SPEED_PRO_KETTE = 0.06; // BB: +6 % Tempo je Ketten-Stufe
   const KASKADE_SPEED_MAX = 0.6; // Deckel des Kaskaden-Tempos (+60 %)
   // Skill-System: ab St3 (ZZZ) werden Impuls-Überschüsse zu Skillpunkten. Eine aktivierte Pol-Ult
@@ -729,15 +730,16 @@ function boot(combatStyle: CombatStyle): void {
         Math.hypot(b.combatant.x - playerCombatant.x, b.combatant.z - playerCombatant.z));
     for (const c of cands) { if (befehl.marks.length >= MAX_MARKS) break; markiereZiel(c.id); }
   };
-  // Manueller Befehl-Schuss aufs Cursor-Ziel. B: jedes Markierte ok. BB: nur das aktuelle, Vorgriff bricht
-  // die Kette. BBB: Verstärkungs-Schaden + ab Kette 6 Simultan (ein Markierter anvisiert → alle sterben).
+  // Manueller Befehl-Schuss aufs Cursor-Ziel. B: jedes Markierte ok. BB/BBB: nur das aktuelle, Vorgriff
+  // bricht die Kette. Schaden = Grundschuss + additiver Aufbau-Bonus (schadenStufe × BEFEHL_DMG_PRO_STUFE).
   const befehlSchuss = (id: string | null): void => {
     if (!id || fireCd > 0) return;
     const stufe = evo.unlockedStagesByChannel.sniper_core;
+    const bbb = stufe >= 3; // BBB: Aufbau grenzenlos + permanent; BB: bei BB_CAP gedeckelt → Buff B
     const e = roster.find((r) => r.id === id && r.combatant.alive);
     if (!e) return;
     const art = trefferArt(befehl, id);
-    alog.log('befehl', { art, ammo, m: befehl.marks.length, k: befehl.kette, st: evo.unlockedStagesByChannel.sniper_core });
+    alog.log('befehl', { art, ammo, m: befehl.marks.length, k: befehl.kette, b: befehl.buffStufe, st: stufe });
     if (art === 'fremd') {
       if (ammo <= 0) return; // unmarkiertes Ziel → normaler Schuss, kostet Munition
       schiessLaser(e); damageEnemyTick(e, Math.round(playerStats().damage * sniperDmgMul));
@@ -745,30 +747,24 @@ function boot(combatStyle: CombatStyle): void {
       fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
       return;
     }
-    if (stufe >= 2 && art === 'vorgriff') { // BB: höheres Ziel zuerst → Kaskade bricht, Ziele verfallen
+    if (stufe >= 2 && art === 'vorgriff') { // BB+: höheres Ziel zuerst → Kette bricht (gehaltener Bonus bleibt)
       entmarkiereAlle(); bruch(befehl); alog.log('befehl.bruch', { t: +runClock.toFixed(1) });
       showToast('✗ REIHENFOLGE GEBROCHEN', '#ff6b6b');
       fireCd = BEFEHL_FIRE_BASE; return;
     }
-    const verst = stufe >= 3 ? verstaerkung(befehl) : 0;
-    const dmg = Math.round(playerStats().damage * sniperDmgMul * MARK_VERWUNDBAR * (1 + verst * VERSTAERK_PRO_STUFE));
-    const simultan = stufe >= 3 && befehl.kette >= SIMULTAN_SCHWELLE;
-    const ids = simultan ? befehl.marks.map((m) => m.id) : [id];
-    for (const tid of ids) {
-      const te = roster.find((r) => r.id === tid && r.combatant.alive);
-      if (!te) continue;
-      schiessLaser(te); damageEnemyTick(te, dmg);
-      if (!te.combatant.alive) {
-        ammo = Math.min(AMMO_MAX, ammo + 1); // exekutiertes Ziel gibt die Markier-Munition zurück (sofort neu markierbar)
-        if (stufe >= 2 && !simultan) {
-          if (registriereKill(befehl, tid).reiheKomplett) { showToast(`✓ REIHE EXEKUTIERT · Kette ${befehl.kette}`, '#9be36b'); autoNachziele(); } // NUR volle 3er-Reihe → nachsetzen
-        }
-        else if (stufe >= 2) { befehl.kette += 1; befehl.combo = COMBO_TIME; befehl.marks = befehl.marks.filter((m) => m.id !== tid); }
-        else befehl.marks = befehl.marks.filter((m) => m.id !== tid); // B: einfach entfernen
-      }
+    // Aufbau-Bonus: additiv je Schadens-Stufe (laufender Aufbau bzw. gehaltener Buff), Gift-Größenordnung.
+    const bonus = stufe >= 2 ? schadenStufe(befehl) * BEFEHL_DMG_PRO_STUFE : 0;
+    const dmg = Math.round(playerStats().damage * sniperDmgMul * MARK_VERWUNDBAR + bonus);
+    schiessLaser(e); damageEnemyTick(e, dmg);
+    if (!e.combatant.alive) {
+      ammo = Math.min(AMMO_MAX, ammo + 1); // exekutiertes Ziel gibt die Markier-Munition zurück
+      if (stufe >= 2) {
+        const folge = registriereKill(befehl, id, bbb);
+        if (folge.capErreicht) { entmarkiereAlle(); showToast(`🔥 VERSTÄRKUNG +${BB_CAP} · ${BUFF_TIME}s`, '#ffb347'); } // BB: Buff B eingerastet, Auto-Stop
+        else if (folge.reiheKomplett) autoNachziele(); // volle Reihe → nachsetzen (BB bis Cap, BBB grenzenlos)
+      } else befehl.marks = befehl.marks.filter((m) => m.id !== id); // B: einfach entfernen
     }
     if (befehl.marks.length === 0) befehl.nextOrder = 1; // Salve leer (auch unvollständig) → Zeiger zurück
-    if (simultan && stufe >= 3 && befehl.marks.length === 0) autoNachziele(); // Simultan-Finale → nachsetzen
     fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
   };
 
@@ -1256,6 +1252,15 @@ function boot(combatStyle: CombatStyle): void {
     'position:fixed;left:50%;bottom:calc(40px * var(--ui-scale));z-index:20;pointer-events:none;' +
     'font:700 15px system-ui,sans-serif;color:#bfe3ff;text-shadow:0 1px 3px #000;letter-spacing:2px;';
   document.body.appendChild(ammoHud);
+  // Befehl-Macht-Anzeige (BB+): A = laufender Schadens-Aufbau (gelb), B = gehaltener Buff (orange) —
+  // bewusst zwei klar getrennte, farbcodierte Blöcke, damit sofort lesbar ist, was wofür steht.
+  const befehlHud = document.createElement('div');
+  befehlHud.id = 'befehl-hud';
+  befehlHud.className = 'hud-bc'; // UI-Scale: unten-zentriert über dem Munitions-HUD
+  befehlHud.style.cssText =
+    'position:fixed;left:50%;bottom:calc(92px * var(--ui-scale));z-index:21;pointer-events:none;' +
+    'font:800 17px system-ui,sans-serif;text-shadow:0 1px 4px #000;letter-spacing:0.5px;white-space:nowrap;display:none;';
+  document.body.appendChild(befehlHud);
   function showToast(msg: string, color = '#ffe08a'): void {
     toast.textContent = msg;
     toast.style.color = color;
@@ -1851,15 +1856,25 @@ function boot(combatStyle: CombatStyle): void {
         : (ammo <= 0 || slomoTime <= 0.05)
           ? `Munition ${mag} · Slomo ${slomoTime.toFixed(1)}s — R nachladen`
           : `Munition ${mag} · Slomo ${slomoTime.toFixed(1)}s`;
-      // Befehl ab BB: Kette + Combo-Timer; ab BBB Verstärkung bzw. Simultan-Bereitschaft.
-      if (!GIFT_BUILD && befehl.kette > 0) {
-        txt += `  ·  Kette ${befehl.kette} ⏱${Math.max(0, befehl.combo).toFixed(1)}s`;
-        if (evo.unlockedStagesByChannel.sniper_core >= 3) {
-          const v = verstaerkung(befehl);
-          txt += befehl.kette >= SIMULTAN_SCHWELLE ? ` · ☄ SIMULTAN` : v > 0 ? ` · ⚡×${(1 + v * VERSTAERK_PRO_STUFE).toFixed(1)}` : '';
-        }
-      }
       ammoHud.textContent = txt;
+      // Befehl-Macht (BB+): A = laufender Aufbau (gelb, an der Kette) | B = gehaltener Buff (orange,
+      // BB-Countdown bzw. BBB-permanent ∞) — zwei getrennte Blöcke, sofort unterscheidbar.
+      if (!GIFT_BUILD && evo.unlockedStagesByChannel.sniper_core >= 2) {
+        const teile: string[] = [];
+        const auf = aufbauStufe(befehl);
+        if (befehl.kette > 0) { // A: nur sichtbar, solange eine Kette läuft
+          const reihe = Math.min(MAX_MARKS, befehl.kette);
+          const aufTxt = auf > 0 ? ` <span style="color:#ffd166">▸ +${auf}</span>` : '';
+          teile.push(`<span style="color:#bfe3ff">⛓ ${reihe}${befehl.kette > MAX_MARKS ? '' : '/' + MAX_MARKS}</span>${aufTxt} <span style="color:#7fa8c9;font-size:0.82em">⏱${Math.max(0, befehl.combo).toFixed(1)}s</span>`);
+        }
+        if (befehl.buffStufe > 0) { // B: gehaltener Buff — BB Countdown, BBB permanent (∞)
+          teile.push(befehl.buffRest < 0
+            ? `<span style="color:#ff9f43">🔥 +${befehl.buffStufe} ∞</span>`
+            : `<span style="color:#ffb347">🔥 +${befehl.buffStufe} · ${Math.max(0, befehl.buffRest).toFixed(1)}s</span>`);
+        }
+        if (teile.length) { befehlHud.style.display = 'block'; befehlHud.innerHTML = teile.join('<span style="opacity:0.35">&nbsp;&nbsp;|&nbsp;&nbsp;</span>'); }
+        else befehlHud.style.display = 'none';
+      } else if (befehlHud.style.display !== 'none') befehlHud.style.display = 'none';
     }
     updateUltHud();
     if (ARENA_MODE && skill.punkte > 0 && !skillOpen) {
@@ -1922,10 +1937,10 @@ function boot(combatStyle: CombatStyle): void {
     // Ringe = die getroffenen Ziele. Bei maxMarks=1 ist das der bisherige Einzel-Schuss.
     // Befehl: Combo-Timer (ab BB) läuft bei aktiver Kette runter — Ablauf bricht sie. Tote Marken putzen.
     if (!GIFT_BUILD) {
-      // Combo-Timer (ab BB): läuft bei aktiver Kette runter; Ablauf bricht sie (Marken + Slow-Buff weg).
-      if (evo.unlockedStagesByChannel.sniper_core >= 2 && befehl.kette > 0 && befehl.combo > 0) {
-        befehl.combo -= realDt;
-        if (befehl.combo <= 0) { entmarkiereAlle(); bruch(befehl); showToast('✗ COMBO ABGELAUFEN', '#ff6b6b'); }
+      // Ketten-Timer + Buff-B-Countdown (ab BB). Der Abriss reißt nur die LAUFENDE Kette — der gehaltene
+      // Bonus (Buff B / perma-Sockel bei BBB) bleibt; main räumt nur die Slow-Marken auf.
+      if (evo.unlockedStagesByChannel.sniper_core >= 2) {
+        if (tickBefehl(befehl, realDt).abriss) { entmarkiereAlle(); bruch(befehl); showToast('✗ KETTE GERISSEN', '#ff6b6b'); }
       }
       if (befehl.marks.length && !befehl.marks.some((m) => roster.some((r) => r.id === m.id && r.combatant.alive))) {
         befehl.marks = []; befehl.nextOrder = 1; // keine lebenden Markierten mehr

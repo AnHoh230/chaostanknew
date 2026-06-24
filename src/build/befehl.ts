@@ -1,5 +1,5 @@
 /**
- * B-Build („Befehl", Kern/sniper-Pol) — die reine Reihenfolge-/Kaskaden-/Combo-Zustandsmaschine.
+ * B-Build („Befehl", Kern/sniper-Pol) — Reihenfolge + Schadens-Aufbau als reine Zustandsmaschine.
  * Gegenstück zum Z-Garten: statt Seuche säen markiert man Ziele und exekutiert sie IN REIHENFOLGE.
  *
  * Markieren (im Scope, ab BB auch automatisch) vergibt Order-Nummern 1..3 in Markier-Reihenfolge.
@@ -7,18 +7,21 @@
  * oft beschossen werden (1·1·1 bis tot), aber ein Treffer auf ein HÖHERES markiertes Ziel (Vorgriff,
  * z. B. 2 vor 1) bricht die Kaskade → alle Ziele verfallen, neu setzen.
  *
- * Stufen:
- *  - B   : markieren → verwundbar (mehr Schaden) + langsam; munitionsfrei abschießen (Wirkung in main).
- *  - BB  : Reihenfolge zählt → kaskadierender Movement-Speed (aus `kette`); volle 3er-Reihe → neue
- *          Ziele setzen sich automatisch; Combo-Timer (10 s) hält die Kette, refresht bei jedem Kill.
- *  - BBB : Verstärkungsbuff (mehr Schaden, stapelt mit `kette`); ab 6 in-Reihe-Kills Simultan-Schuss.
+ * Schadens-Aufbau (ab BB): nach der ersten vollen Reihe (3 in Folge) zählt jeder weitere in-Reihe-Kill
+ * eine AUFBAU-STUFE hoch (Kette 4 = +1, 5 = +2, 6 = +3 …). Jede Stufe gibt additiven Schaden (Aufrufer).
+ *  - BB : Aufbau gedeckelt bei BB_CAP (+3). Ist er voll, RASTET der Bonus als Buff B ein (BUFF_TIME-
+ *         Countdown, der auch ohne Markierung weiterwirkt), die Kette ist abgeschlossen (Auto-Stop).
+ *         Erneut volle 6 abknallen erneuert den Countdown — gestapelt wird NICHT über +3.
+ *  - BBB: kein Deckel. Der gehaltene Bonus wächst grenzenlos mit der Kette und VERFÄLLT NIE (perma).
+ *         Reißt die Kette ab (COMBO_TIME ohne Kill, keine Ziele), bleibt der erspielte Schaden stehen —
+ *         man wirft nur die 1·2·3 neu an und stapelt weiter (Gift-Prinzip: praktisch immer stärker).
  *
  * Markierte sterben NIE instant — immer über (erhöhten) Schaden. Reine Funktionen (TDD), kein Engine-Bezug.
  */
 export const MAX_MARKS = 3;
-export const COMBO_TIME = 10; // s bis die Kette ohne Kill bricht (HUD-Countdown)
-export const SIMULTAN_SCHWELLE = 6; // in-Reihe-Kills bis zum Simultan-Schuss
-export const VERSTAERK_AB = 3; // ab so vielen in-Reihe-Kills beginnt der Verstärkungsbuff (erste volle Reihe = Stufe 1)
+export const COMBO_TIME = 10; // s bis die laufende Kette ohne Kill abreißt (HUD-Countdown)
+export const BUFF_TIME = 10; // s Laufzeit des eingerasteten Buff B (BB); erneuerbar
+export const BB_CAP = 3; // BB: Aufbau- und Buff-Deckel (Stufen)
 
 export interface Mark {
   id: string;
@@ -28,12 +31,14 @@ export interface Mark {
 export interface BefehlState {
   marks: Mark[]; // aktuelle Markierungen (max MAX_MARKS)
   nextOrder: number; // nächste abzuarbeitende Order (1..MAX_MARKS)
-  kette: number; // aufeinanderfolgende in-Reihe-Kills (Kaskaden-Speed + Verstärkung)
-  combo: number; // s Restzeit der Kette (refresh bei Kill); 0 = inaktiv
+  kette: number; // aufeinanderfolgende in-Reihe-Kills (treibt die Aufbau-Stufe + Kaskaden-Speed)
+  combo: number; // s Restzeit der laufenden Kette (refresh bei Kill); 0 = inaktiv
+  buffStufe: number; // gehaltene Schadens-Stufe: BB = eingerasteter Buff B (≤BB_CAP), BBB = perma-Sockel
+  buffRest: number; // s Restzeit des gehaltenen Bonus: >0 = Countdown (BB), <0 = permanent (BBB), 0 = aus
 }
 
 export function createBefehlState(): BefehlState {
-  return { marks: [], nextOrder: 1, kette: 0, combo: 0 };
+  return { marks: [], nextOrder: 1, kette: 0, combo: 0, buffStufe: 0, buffRest: 0 };
 }
 
 export function markVoll(s: BefehlState): boolean {
@@ -61,7 +66,21 @@ export function trefferArt(s: BefehlState, id: string): TrefferArt {
   return m.order === s.nextOrder ? 'aktuell' : 'vorgriff';
 }
 
-/** Reihenfolge gebrochen: alle Ziele verfallen, Kaskade + Combo zurück auf 0. */
+/** Laufende Aufbau-Stufe aus der lebenden Kette: 0 bis zur ersten vollen Reihe, dann +1 je weiterem Kill. */
+export function aufbauStufe(s: BefehlState): number {
+  return Math.max(0, s.kette - MAX_MARKS);
+}
+
+/** Effektive Schadens-Stufe = größerer Wert aus laufendem Aufbau und gehaltenem Buff (B/perma). */
+export function schadenStufe(s: BefehlState): number {
+  const gehalten = s.buffRest !== 0 ? s.buffStufe : 0; // buffRest<0 = permanent (BBB), >0 = Countdown (BB)
+  return Math.max(aufbauStufe(s), gehalten);
+}
+
+/**
+ * Reihenfolge gebrochen (Vorgriff): die laufende Kette verfällt, aber der bereits GEHALTENE Bonus
+ * (Buff B / perma-Sockel) überlebt einen Reihenfolge-Fehler — den verliert man nur durch Auslaufen.
+ */
 export function bruch(s: BefehlState): void {
   s.marks = [];
   s.nextOrder = 1;
@@ -70,18 +89,19 @@ export function bruch(s: BefehlState): void {
 }
 
 export interface KillFolge {
-  reiheKomplett: boolean; // alle MAX_MARKS der Runde erledigt → main setzt neue Ziele
-  simultan: boolean; // ab SIMULTAN_SCHWELLE in-Reihe-Kills: Simultan-Schuss bereit
+  reiheKomplett: boolean; // volle MAX_MARKS-Reihe in Folge erledigt → main setzt neue Ziele (Auto-Nachziel)
+  capErreicht: boolean; // BB: Aufbau hat BB_CAP erreicht → Buff B eingerastet, Kette abgeschlossen (Auto-Stop)
 }
 
 /**
- * Das aktuelle markierte Ziel `id` ist (korrekt in Reihenfolge) gestorben: Kaskade hoch, Combo-Timer
- * refresht, Zeiger rückt weiter. Ist die Runde voll → Reihe komplett (main setzt neue Ziele).
- * Ein Kill, der NICHT das aktuelle Ziel ist, ändert die Kette nicht (Kollateral/Edge).
+ * Das aktuelle markierte Ziel `id` ist (korrekt in Reihenfolge) gestorben: Kette hoch, Combo-Timer
+ * refresht, Zeiger rückt weiter. `bbb` steuert den Aufbau: BB deckelt bei BB_CAP und rastet den Buff
+ * ein; BBB lässt den gehaltenen Bonus grenzenlos und permanent mitwachsen.
+ * Ein Kill, der NICHT das aktuelle Ziel ist, ändert nichts (Kollateral/Edge).
  */
-export function registriereKill(s: BefehlState, id: string): KillFolge {
+export function registriereKill(s: BefehlState, id: string, bbb: boolean): KillFolge {
   const m = s.marks.find((x) => x.id === id);
-  if (!m || m.order !== s.nextOrder) return { reiheKomplett: false, simultan: s.kette >= SIMULTAN_SCHWELLE };
+  if (!m || m.order !== s.nextOrder) return { reiheKomplett: false, capErreicht: false };
   s.kette += 1;
   s.combo = COMBO_TIME;
   s.marks = s.marks.filter((x) => x.id !== id);
@@ -89,17 +109,36 @@ export function registriereKill(s: BefehlState, id: string): KillFolge {
   const reiheKomplett = s.nextOrder > MAX_MARKS; // nur eine VOLLE MAX_MARKS-Reihe gilt als komplett
   // Salve abgearbeitet (auch unvollständig, z. B. nur 2 markiert) → Zeiger zurück für die nächste Salve.
   if (s.marks.length === 0) { s.nextOrder = 1; s.marks = []; }
-  return { reiheKomplett, simultan: s.kette >= SIMULTAN_SCHWELLE };
+  const stufe = aufbauStufe(s);
+  if (bbb) {
+    // BBB: gehaltener Bonus wächst grenzenlos mit der Kette, verfällt nie (permanent).
+    if (stufe > s.buffStufe) s.buffStufe = stufe;
+    if (s.buffStufe > 0) s.buffRest = -1;
+    return { reiheKomplett, capErreicht: false };
+  }
+  // BB: Aufbau gedeckelt — ist BB_CAP erreicht, rastet Buff B (erneut) ein und die Kette ist fertig.
+  if (stufe >= BB_CAP) {
+    s.buffStufe = BB_CAP;
+    s.buffRest = BUFF_TIME;
+    s.kette = 0; s.combo = 0; s.marks = []; s.nextOrder = 1;
+    return { reiheKomplett: false, capErreicht: true };
+  }
+  return { reiheKomplett, capErreicht: false };
 }
 
-/** Verstärkungsbuff-Stufen (BBB): erste volle Reihe (kette==3) = 1, danach +1 je weiterem Kill. */
-export function verstaerkung(s: BefehlState): number {
-  return Math.max(0, s.kette - (VERSTAERK_AB - 1));
-}
-
-/** Combo-Timer (BB+): tickt nur bei aktiver Kette; läuft er ab → Bruch (Kette verfällt). */
-export function tickCombo(s: BefehlState, dt: number): void {
-  if (s.kette <= 0) return;
-  s.combo -= dt;
-  if (s.combo <= 0) bruch(s);
+/**
+ * Pro Frame (BB+): der Ketten-Timer reißt die laufende Kette ab (gehaltener Bonus bleibt), und ein
+ * laufender Buff B (BB) tickt aus. Liefert `abriss`, damit der Aufrufer die Slow-Marken aufräumt.
+ */
+export function tickBefehl(s: BefehlState, dt: number): { abriss: boolean } {
+  let abriss = false;
+  if (s.kette > 0 && s.combo > 0) {
+    s.combo -= dt;
+    if (s.combo <= 0) abriss = true; // Aufrufer macht bruch() + entmarkiereAlle() (Bonus überlebt)
+  }
+  if (s.buffRest > 0) {
+    s.buffRest -= dt;
+    if (s.buffRest <= 0) { s.buffRest = 0; s.buffStufe = 0; } // Buff B ausgelaufen
+  }
+  return { abriss };
 }
