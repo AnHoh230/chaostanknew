@@ -1471,7 +1471,7 @@ function boot(combatStyle: CombatStyle): void {
     if (slomoOn) { simDt = realDt * SLOMO_SCALE; slomoTime = Math.max(0, slomoTime - realDt); }
     else if (ARENA_MODE && !scopeActive && slomoTime < SLOMO_TIME) slomoTime = Math.min(SLOMO_TIME, slomoTime + realDt * SLOMO_REGEN); // außerhalb des Scopes regeneriert das Budget
     // Nachladen (R) läuft in Echtzeit + Tempo-Schub (mobile Ausweich-Phase); füllt Munition UND Slomo-Zeit.
-    if (reloadCd > 0) { reloadCd -= realDt; if (reloadCd <= 0) { ammo = AMMO_MAX; slomoTime = SLOMO_TIME; } }
+    if (reloadCd > 0) { reloadCd -= realDt; if (reloadCd <= 0) { ammo = AMMO_MAX; slomoTime = SLOMO_TIME; if (!GIFT_BUILD && befehl.marks.length === 0) salveOffen = true; } } // nach dem Nachladen wieder markierbar (Salve offen)
     // Ult-Timer (Echtzeit): aktiv runter → bei 0 in den Cooldown; danach Cooldown runter.
     if (ultActive > 0) { ultActive -= realDt; if (ultActive <= 0) { const u = activeUltDef(skill); ultCd = u ? u.cd : 0; } }
     else if (ultCd > 0) ultCd -= realDt;
