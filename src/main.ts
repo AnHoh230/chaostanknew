@@ -1671,6 +1671,12 @@ function boot(combatStyle: CombatStyle): void {
       }
       // Kamera-Rückkehr aus dem Scope sanft interpolieren (statt hartem Sprung).
       if (camReturn > 0) {
+        // Marken weggeschossen → das langsame Ziel-Fenster ist erfüllt, ab jetzt zügig fertig zoomen.
+        if (!GIFT_BUILD && befehl.marks.length === 0 && camReturnDur > CAM_RETURN_FAST) {
+          const done = 1 - camReturn / camReturnDur; // bisheriger Fortschritt beibehalten
+          camReturnDur = CAM_RETURN_FAST;
+          camReturn = camReturnDur * (1 - done);
+        }
         camReturn = Math.max(0, camReturn - realDt);
         const p = 1 - camReturn / camReturnDur; // 0 → 1
         camApi?.set(sniperCamHeight + (camH - sniperCamHeight) * p, sniperCamBack + (camB - sniperCamBack) * p);
