@@ -63,8 +63,9 @@ export function createSpawner(
       for (let b = 0; b < plan.batch; b++) {
         const typeId = pickWeighted(plan.weights, rng());
         if (!typeId) break;
-        const e = spawnOne(typeId, px, pz);
-        if (e) out.push(e);
+        // Pulk-Typen (Schwarm) kommen als Haufen auf EINEN Punkt — sonst einzeln.
+        const n = Math.max(1, opts.clumpSize ? opts.clumpSize(typeId) : 1);
+        for (let k = 0; k < n; k++) { const e = spawnOne(typeId, px, pz, n > 1 ? 5 : 0); if (e) out.push(e); }
       }
       return out;
     }
