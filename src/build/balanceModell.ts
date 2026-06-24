@@ -1,44 +1,69 @@
 /**
- * Balance-Taschenrechner — grobe Progressions-Tabelle über die Laufzeit. Beantwortet die Kern-Frage:
- * wie laufen Spieler-Schaden und Gegner-HP über die Zeit GEGENEINANDER (merkt man die Eskalation)?
+ * Balance-Taschenrechner — Progressions-Hochrechnung auf Basis ECHTER Run-Messpunkte. Beantwortet die
+ * Kern-Frage: wie laufen Spieler-Schaden und Gegner-HP über die Zeit GEGENEINANDER?
  *
- * KEINE sekundengenaue Simulation — eine Approximation mit offen dokumentierten ANNAHMEN. Nutzt die
- * ECHTEN Gegner-Formeln (gegnerWelle / gartenTypStats / buildStufe + DEFAULT_GARTEN), damit die Tabelle
- * automatisch mitzieht, sobald sich die Kurven ändern. Die SPIELER-Seite kommt aus verstreuten main.ts-
- * Werten — die sind hier als ANNAHMEN gespiegelt.
+ * Datengrundlage: die MESSPUNKTE unten sind aus echten Run-Logs abgelesen (run-111, Befehl-Build) —
+ * je Zeit der gemessene Schaden/Schuss (= dpsOut/sps, also INKL. Aufbau) und kpm. Dazwischen wird
+ * linear interpoliert, darüber hinaus linear extrapoliert (klar markiert). Die Gegner-Seite kommt aus
+ * den echten Formeln (gegnerWelle/gartenTypStats), zieht also automatisch mit, wenn die Kurven sich ändern.
  *
- * AKTUALISIEREN: Wenn neue Messzahlen vorliegen (z. B. andere kpm aus einem Log) oder ich Spieler-Werte
- * in main.ts ändere, hier die ANNAHMEN anpassen. Der Test balanceModell.test.ts gibt die Tabelle aus.
+ * AKTUALISIEREN: nach einem längeren/neueren Run die MESSPUNKTE ersetzen (Schaden/Schuss = dpsOut/sps,
+ * kpm direkt aus dem snap). Der Test balanceModell.test.ts gibt die Tabelle aus.
  */
-import { gegnerWelle, gartenTypStats, buildStufe } from './gartenProgression';
+import { gegnerWelle, gartenTypStats } from './gartenProgression';
 import { DEFAULT_GARTEN } from './garten';
 
-// — ANNAHMEN (HIER anpassen bei neuen Messzahlen) —
+// — ECHTE MESSPUNKTE (run-111, Befehl-Build) — t[s] → gemessen —
+export interface Messpunkt { t: number; kpm: number; dmgProSchuss: number; }
+export const MESSPUNKTE: Messpunkt[] = [
+  { t: 30, kpm: 8.0, dmgProSchuss: 72 }, // St0 Grundschuss
+  { t: 60, kpm: 9.0, dmgProSchuss: 115 }, // markiert, noch kein Aufbau
+  { t: 120, kpm: 12.0, dmgProSchuss: 115 },
+  { t: 210, kpm: 13.1, dmgProSchuss: 125 }, // Aufbau setzt ein
+  { t: 270, kpm: 15.5, dmgProSchuss: 240 },
+  { t: 300, kpm: 16.4, dmgProSchuss: 360 },
+  { t: 360, kpm: 22.6, dmgProSchuss: 879 },
+  { t: 390, kpm: 24.9, dmgProSchuss: 1144 }, // ~6,5 min, Aufbau explodiert
+];
+
+// — ANNAHMEN für das, was (noch) NICHT im Log steht —
 export const ANNAHMEN = {
-  kpm: 17, // gemessene Kills/Minute (run-112). Treibt Erntefieber, Kommander-Aufbau und Skillpunkte.
-  grundschaden: 36, // = TANK_CLASSES[0].damage
-  sniperMul: 2, // = sniperDmgMul (main.ts)
-  markMul: 1.6, // = MARK_VERWUNDBAR (markiertes Ziel)
-  befehlDmgProStufe: 10, // = BEFEHL_DMG_PRO_STUFE (additiver Schaden je Aufbau-Stufe)
-  aufbauEffizienz: 0.5, // grob: Anteil der Kills, der den Kommander-perma-Sockel hebt (BBB, ungedeckelt)
   killsProSkillpunkt: 8, // grob: so viele Kills bis ein Skillpunkt (Impuls-Überschuss)
 };
 
+/** Linear interpolieren zwischen Messpunkten; über den letzten hinaus mit der letzten Rate extrapolieren. */
+function ausMessung(t: number, key: 'kpm' | 'dmgProSchuss'): number {
+  const m = MESSPUNKTE;
+  if (t <= m[0]!.t) return m[0]![key];
+  for (let i = 1; i < m.length; i++) {
+    if (t <= m[i]!.t) {
+      const a = m[i - 1]!, b = m[i]!;
+      return a[key] + (b[key] - a[key]) * ((t - a.t) / (b.t - a.t));
+    }
+  }
+  const a = m[m.length - 2]!, b = m[m.length - 1]!;
+  return b[key] + ((b[key] - a[key]) / (b.t - a.t)) * (t - b.t); // Extrapolation
+}
+
+/** Ab dieser Laufzeit ist die Hochrechnung Extrapolation (jenseits der Messpunkte). */
+export const MESS_ENDE = MESSPUNKTE[MESSPUNKTE.length - 1]!.t;
+
 export interface BalanceZeile {
   min: number;
-  gegnerStufe: number; // welle.level
+  extrapoliert: boolean; // jenseits der echten Messpunkte?
+  gegnerStufe: number;
   hpAllrounder: number;
   hpBunker: number;
+  kpm: number;
   kills: number;
-  buildStufeGift: number; // zeit-getriebene Gift-Build-Stufe (0=Grund … 3=ZZZ, 4+=Verstärkung)
-  // Gift (DoT):
+  // Kommander (gemessen):
+  schussSchaden: number; // echter Schaden/Schuss inkl. Aufbau
+  schuesseBisKill: number; // gegen einen Allrounder
+  overkillFaktor: number; // Schaden / HP — wie viel verpufft (>1 = Overkill)
+  // Gift (Formel — kein langer Gift-Run vorhanden):
   erntefieber: number;
   giftReifProTick: number;
-  giftTicksBisKill: number; // reif-Ticks bis ein Allrounder tot ist (Reifezeit kommt obendrauf)
-  // Kommander (Direktschuss):
-  permaStufe: number;
-  schussMarkiert: number;
-  schuesseBisKill: number; // markierte Schüsse bis ein Allrounder tot ist
+  giftTicksBisKill: number;
   // Talente:
   skillpunkte: number;
 }
@@ -48,27 +73,30 @@ export function balanceZeile(min: number, a = ANNAHMEN): BalanceZeile {
   const welle = gegnerWelle(t);
   const hpAllrounder = gartenTypStats('allrounder', welle.level).hp;
   const hpBunker = gartenTypStats('bunker', welle.level).hp;
-  const kills = Math.round(a.kpm * min);
+  const kpm = ausMessung(t, 'kpm');
+  const kills = Math.round(kpm * min);
+  const schussSchaden = Math.round(ausMessung(t, 'dmgProSchuss'));
 
-  // Gift: Erntefieber ≈ kumulierte Ernten ≈ Kills; reifes Gift = reifDmg + Fieber × dmgProFieber.
-  const erntefieber = kills;
+  const erntefieber = kills; // Gift: jede Ernte +1
   const giftReifProTick = DEFAULT_GARTEN.reifDmg + erntefieber * DEFAULT_GARTEN.dmgProFieber;
-  const giftTicksBisKill = Math.max(1, Math.ceil(hpAllrounder / giftReifProTick));
-
-  // Kommander: perma-Sockel ≈ Kills × Effizienz; markierter Schuss = Basis×Sniper×Verwundbar + Stufe×Bonus.
-  const permaStufe = Math.round(kills * a.aufbauEffizienz);
-  const schussMarkiert = Math.round(a.grundschaden * a.sniperMul * a.markMul + permaStufe * a.befehlDmgProStufe);
-  const schuesseBisKill = Math.max(1, Math.ceil(hpAllrounder / schussMarkiert));
 
   return {
-    min, gegnerStufe: welle.level, hpAllrounder, hpBunker, kills,
-    buildStufeGift: buildStufe(t), erntefieber, giftReifProTick, giftTicksBisKill,
-    permaStufe, schussMarkiert, schuesseBisKill,
+    min,
+    extrapoliert: t > MESS_ENDE,
+    gegnerStufe: welle.level,
+    hpAllrounder, hpBunker,
+    kpm: +kpm.toFixed(1), kills,
+    schussSchaden,
+    schuesseBisKill: Math.max(1, Math.ceil(hpAllrounder / schussSchaden)),
+    overkillFaktor: +(schussSchaden / hpAllrounder).toFixed(1),
+    erntefieber,
+    giftReifProTick: Math.round(giftReifProTick),
+    giftTicksBisKill: Math.max(1, Math.ceil(hpAllrounder / giftReifProTick)),
     skillpunkte: Math.floor(kills / a.killsProSkillpunkt),
   };
 }
 
 /** Tabelle über mehrere Zeitpunkte (Minuten). Default deckt Früh- bis Endgame ab. */
-export function balanceTabelle(minuten = [1, 2, 3, 5, 10, 15, 20, 30], a = ANNAHMEN): BalanceZeile[] {
+export function balanceTabelle(minuten = [1, 2, 3, 5, 6.5, 10, 15, 20, 30], a = ANNAHMEN): BalanceZeile[] {
   return minuten.map((m) => balanceZeile(m, a));
 }
