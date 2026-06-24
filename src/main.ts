@@ -59,7 +59,11 @@ import {
   HEAL_PRO_ERNTE, EXECUTE_FRAC, AUSBRUCH_RADIUS, AUSBRUCH_FIEBER, PUNKT_KOSTEN, TALENT_MAX,
   type TalentId, type UltId,
 } from './build/skilltree';
-import { befehlUltDef, SEUCHE_LIFESTEAL, type BefehlUltId } from './build/befehlSkill';
+import {
+  befehlUltDef, SEUCHE_LIFESTEAL, createBefehlSkillState, spendBefehlTalent,
+  BEFEHL_TALENTS, BEFEHL_TALENT_MAX, DAUER_PRO_RANG, CD_PRO_RANG, BEUTE_PRO_RANG, SCHUTZ_NACHLADE_KETTE,
+  POL_UEBERMACHT_PRO_RANG, POL_ADERLASS_PRO_RANG, POL_KLAMMER_PRO_RANG,
+} from './build/befehlSkill';
 import { thresholdForStage, maxStage, type TuningProfile } from './evolution/profiles';
 import { CHANNEL_DISPLAY, type BaseMode, type EvolutionChannelId } from './evolution/channels';
 import { createEvolutionState, gainProgress, tryTriggerEvolution } from './evolution/evolution';
@@ -266,8 +270,11 @@ function boot(combatStyle: CombatStyle): void {
   const skill = createSkillState();
   let skillProgress = 0; // gesammelter Impuls-Überschuss Richtung nächstem Skillpunkt
   let ultActive = 0, ultCd = 0; // Ult-Timer: s noch aktiv / s noch Cooldown
-  let befehlUltId: BefehlUltId = 'kommando'; // gewählte Befehl-Ult (später per Talentbaum; Tasten 1/2/3 zum Testen)
+  const befehlSkill = createBefehlSkillState();
+  befehlSkill.ult = 'kommando'; // Test-Default (bis der Skillbaum die Wahl trifft)
   let ultSchaden = 0; // Seuche-Ult: Summe des ausgeteilten Schadens (für Lifesteal am Ende)
+  let schutzLadungen = 0; // Eiserne Disziplin: aktuelle Ketten-Schutz-Ladungen
+  let prevKette = 0; // für die Kette-≥15-Nachlade-Erkennung
   let giftDotEff = GIFT_DOT_ST1; // effektiver St1-Köchel (Köchel-Talent hebt ihn)
   const recomputeSkills = (): void => {
     const a = applySkills(DEFAULT_GARTEN, skill);
@@ -605,7 +612,7 @@ function boot(combatStyle: CombatStyle): void {
   function damageEnemyTick(e: Enemy, dmg: number, kind: 'schuss' | 'gift' | 'sonst' = 'schuss'): void {
     if (!e.combatant.alive) return;
     e.combatant.hp -= dmg;
-    if (!GIFT_BUILD && ultActive > 0 && befehlUltId === 'seuche') ultSchaden += dmg; // Verfall-Ult: für den Lifesteal am Ende
+    if (!GIFT_BUILD && ultActive > 0 && befehlSkill.ult === 'seuche') ultSchaden += dmg; // Verfall-Ult: für den Lifesteal am Ende
     metrics.onHitDealt(dmg);
     floatNums.spawn(e.combatant.x, e.combatant.z, dmg, kind === 'gift' ? '#9be36b' : kind === 'sonst' ? '#cdd6dd' : '#ffe08a');
     if (e.combatant.hp <= 0) {
@@ -764,8 +771,8 @@ function boot(combatStyle: CombatStyle): void {
     const e = roster.find((r) => r.id === id && r.combatant.alive);
     if (!e) return;
     // Sperrfeuer-Ult: alles ist markiert (Flächen-Buff) → frei abknallen mit Markier-Schaden, kein Counter/Bruch, keine Munition.
-    if (ultActive > 0 && befehlUltId === 'streuung') {
-      const bonus = schadenStufe(befehl) * BEFEHL_DMG_PRO_STUFE;
+    if (ultActive > 0 && befehlSkill.ult === 'streuung') {
+      const bonus = Math.round(schadenStufe(befehl) * (1 + befehlSkill.ranks.beute * BEUTE_PRO_RANG)) * BEFEHL_DMG_PRO_STUFE; // Kriegsbeute-Talent
       schiessLaser(e); damageEnemyTick(e, Math.round(playerStats().damage * sniperDmgMul * MARK_VERWUNDBAR + bonus));
       fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
       return;
@@ -776,6 +783,7 @@ function boot(combatStyle: CombatStyle): void {
       // BB+: ein Treffer auf ein UNMARKIERTES Ziel bei laufender Kette/Markierung bricht ebenfalls ab
       // (Disziplin — nicht nur der Vorgriff auf eine höhere Marke). Gehaltener Buff B bleibt.
       if (stufe >= 2 && (befehl.marks.length > 0 || befehl.kette > 0)) {
+        if (schutzLadungen > 0) { schutzLadungen -= 1; showToast(`🛡 DISZIPLIN — ${schutzLadungen} Schutz übrig`, '#bfe3ff'); fireCd = BEFEHL_FIRE_BASE; return; } // Eiserne Disziplin fängt den Bruch ab
         entmarkiereAlle(); bruch(befehl); alog.log('befehl.bruch', { t: +runClock.toFixed(1), grund: 'fremd' });
         showToast('✗ FALSCHES ZIEL', '#ff6b6b');
         fireCd = BEFEHL_FIRE_BASE; return;
@@ -787,12 +795,13 @@ function boot(combatStyle: CombatStyle): void {
       return;
     }
     if (stufe >= 2 && art === 'vorgriff') { // BB+: höheres Ziel zuerst → Kette bricht (gehaltener Bonus bleibt)
+      if (schutzLadungen > 0) { schutzLadungen -= 1; showToast(`🛡 DISZIPLIN — ${schutzLadungen} Schutz übrig`, '#bfe3ff'); fireCd = BEFEHL_FIRE_BASE; return; } // Eiserne Disziplin fängt den Bruch ab
       entmarkiereAlle(); bruch(befehl); alog.log('befehl.bruch', { t: +runClock.toFixed(1) });
       showToast('✗ REIHENFOLGE GEBROCHEN', '#ff6b6b');
       fireCd = BEFEHL_FIRE_BASE; return;
     }
     // Aufbau-Bonus: additiv je Schadens-Stufe (laufender Aufbau bzw. gehaltener Buff), Gift-Größenordnung.
-    const bonus = stufe >= 2 ? schadenStufe(befehl) * BEFEHL_DMG_PRO_STUFE : 0;
+    const bonus = stufe >= 2 ? Math.round(schadenStufe(befehl) * (1 + befehlSkill.ranks.beute * BEUTE_PRO_RANG)) * BEFEHL_DMG_PRO_STUFE : 0; // Kriegsbeute-Talent
     const dmg = Math.round(playerStats().damage * sniperDmgMul * MARK_VERWUNDBAR + bonus);
     schiessLaser(e); damageEnemyTick(e, dmg);
     if (!e.combatant.alive) {
@@ -815,7 +824,8 @@ function boot(combatStyle: CombatStyle): void {
       const burst = Math.round(e.combatant.maxHp * 0.6 + schadenStufe(befehl) * BEFEHL_DMG_PRO_STUFE); // tödlicher Schlussschlag
       damageEnemyTick(e, burst, 'sonst');
     }
-    const heal = Math.round(ultSchaden * SEUCHE_LIFESTEAL);
+    const lifesteal = SEUCHE_LIFESTEAL + befehlSkill.ranks.pol * POL_ADERLASS_PRO_RANG; // Aderlass-Talent
+    const heal = Math.round(ultSchaden * lifesteal);
     if (heal > 0) { playerCombatant.hp = Math.min(playerCombatant.maxHp, playerCombatant.hp + heal); showToast(`☣ VERFALL — +${heal} HP`, '#9be36b'); }
   };
 
@@ -840,7 +850,7 @@ function boot(combatStyle: CombatStyle): void {
         }
         // St1+ (B): im Scope MARKIEREN (Munition pro Marke, nur bei offener Salve), Fahrmodus = SCHIESSEN.
         if (scopeActive) {
-          if (ultActive > 0 && befehlUltId === 'streuung') befehlSchuss(sniperTargets[0] ?? hoveredId); // Sperrfeuer: frei schießen statt markieren
+          if (ultActive > 0 && befehlSkill.ult === 'streuung') befehlSchuss(sniperTargets[0] ?? hoveredId); // Sperrfeuer: frei schießen statt markieren
           else if (salveOffen && ammo > 0 && befehl.marks.length < MAX_MARKS && sniperTargets.length && markiereZiel(sniperTargets[0]!)) {
             ammo = Math.max(0, ammo - 1);
             fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
@@ -1102,8 +1112,9 @@ function boot(combatStyle: CombatStyle): void {
     if (ev.key !== 'q' && ev.key !== 'Q') return;
     if (ultActive > 0 || ultCd > 0 || !playerCombatant.alive) return;
     if (!GIFT_BUILD) { // Befehl: eine der drei Pol-Ults
-      const u = befehlUltDef(befehlUltId);
-      ultActive = u.dauer; ultSchaden = 0;
+      if (!befehlSkill.ult) return;
+      const u = befehlUltDef(befehlSkill.ult);
+      ultActive = u.dauer + befehlSkill.ranks.dauer * DAUER_PRO_RANG; ultSchaden = 0; // Dauerbefehl-Talent
       alog.log('ult', { id: u.id, t: +runClock.toFixed(1) });
     } else {
       const u = activeUltDef(skill);
@@ -1112,15 +1123,22 @@ function boot(combatStyle: CombatStyle): void {
       alog.log('ult', { id: u.id, t: +runClock.toFixed(1) });
     }
   });
-  // Test-Wahl der Befehl-Ult, bis der Talentbaum da ist: Tasten 1 (Generalstab) / 2 (Sperrfeuer) / 3 (Verfall).
+  // Test-Bedienung, bis das Skill-Panel da ist: 1/2/3 = Ult wählen, 4 = +5 Skillpunkte, 5-9 = Talente skillen.
   window.addEventListener('keydown', (ev) => {
     if (GIFT_BUILD) return;
-    if (ev.key === '1') befehlUltId = 'kommando';
-    else if (ev.key === '2') befehlUltId = 'streuung';
-    else if (ev.key === '3') befehlUltId = 'seuche';
-    else return;
-    const u = befehlUltDef(befehlUltId);
-    showToast(`Ult: ${u.icon} ${u.name}`, '#bfe3ff');
+    if (ev.key === '1' || ev.key === '2' || ev.key === '3') {
+      befehlSkill.ult = ({ '1': 'kommando', '2': 'streuung', '3': 'seuche' } as const)[ev.key];
+      const u = befehlUltDef(befehlSkill.ult);
+      showToast(`Ult: ${u.icon} ${u.name}`, '#bfe3ff');
+    } else if (ev.key === '4') {
+      befehlSkill.punkte += 5; showToast(`✦ +5 Skillpunkte (Test) — ${befehlSkill.punkte} frei`, '#9be36b');
+    } else if (ev.key >= '5' && ev.key <= '9') {
+      const tid = (['disziplin', 'dauer', 'beute', 'cooldown', 'pol'] as const)[Number(ev.key) - 5]!;
+      if (spendBefehlTalent(befehlSkill, tid)) {
+        if (tid === 'disziplin') schutzLadungen = befehlSkill.ranks.disziplin; // neue Schutz-Ladung sofort
+        showToast(`${BEFEHL_TALENTS.find((t) => t.id === tid)!.name} ${befehlSkill.ranks[tid]}/${BEFEHL_TALENT_MAX}`, '#bfe3ff');
+      }
+    }
   });
 
   // OS-Mauszeiger über dem Canvas ausblenden — das Spiel zeichnet sein eigenes
@@ -1230,7 +1248,7 @@ function boot(combatStyle: CombatStyle): void {
     'border-radius:7px;padding:5px 8px;font:600 11px system-ui,sans-serif;display:none;';
   dashHud.appendChild(ultSlotEl);
   function updateUltHud(): void {
-    const u = GIFT_BUILD ? activeUltDef(skill) : befehlUltDef(befehlUltId);
+    const u = GIFT_BUILD ? activeUltDef(skill) : befehlUltDef(befehlSkill.ult);
     if (!u) { ultSlotEl.style.display = 'none'; return; }
     ultSlotEl.style.display = 'block';
     if (ultActive > 0) { ultSlotEl.style.borderColor = '#69db7c'; ultSlotEl.innerHTML = `${u.icon} <b style="color:#9be36b">AKTIV ${ultActive.toFixed(1)}s</b>`; }
@@ -1509,7 +1527,7 @@ function boot(combatStyle: CombatStyle): void {
     // SLOMO: im Scope kriecht die WELT (Bullet-Time), Feuertakt bleibt real → 3 Dots zügig setzen.
     // Begrenzt durch ein ZEIT-Budget (sonst klebt man ewig im Slomo, indem man den letzten Schuss hält).
     // Endet, sobald Munition ODER Slomo-Zeit leer ist — was zuerst kommt.
-    const seucheSlomo = !GIFT_BUILD && ultActive > 0 && befehlUltId === 'seuche'; // Verfall-Ult: Dauer-Slomo, kein Budget-Verbrauch
+    const seucheSlomo = !GIFT_BUILD && ultActive > 0 && befehlSkill.ult === 'seuche'; // Verfall-Ult: Dauer-Slomo, kein Budget-Verbrauch
     const slomoOn = (ARENA_MODE && scopeActive && ammo > 0 && slomoTime > 0) || seucheSlomo;
     if (slomoOn) { simDt = realDt * SLOMO_SCALE; if (!seucheSlomo) slomoTime = Math.max(0, slomoTime - realDt); }
     else if (ARENA_MODE && !scopeActive && slomoTime < SLOMO_TIME) slomoTime = Math.min(SLOMO_TIME, slomoTime + realDt * SLOMO_REGEN); // außerhalb des Scopes regeneriert das Budget
@@ -1519,7 +1537,7 @@ function boot(combatStyle: CombatStyle): void {
     if (ultActive > 0) {
       ultActive -= realDt;
       if (ultActive <= 0) {
-        if (!GIFT_BUILD) { ultCd = befehlUltDef(befehlUltId).cd; if (befehlUltId === 'seuche') seucheEnde(); } // Verfall-Ult zündet beim Ablauf
+        if (!GIFT_BUILD) { ultCd = Math.max(2, befehlUltDef(befehlSkill.ult).cd - befehlSkill.ranks.cooldown * CD_PRO_RANG); if (befehlSkill.ult === 'seuche') seucheEnde(); } // Schneller Stab kürzt CD; Verfall zündet
         else { const u = activeUltDef(skill); ultCd = u ? u.cd : 0; }
       }
     }
@@ -2024,16 +2042,18 @@ function boot(combatStyle: CombatStyle): void {
     // Befehl-Ult-Effekte (während aktiv): kommando = Auto-Exekution (eins nach dem anderen),
     // streuung/seuche = Flächen-Markierung aller sichtbaren Ziele (kein Counter); seuche zusätzlich DoT.
     if (!GIFT_BUILD && ultActive > 0) {
-      if (befehlUltId === 'kommando') {
-        if (!befehl.marks.some((m) => roster.some((r) => r.id === m.id && r.combatant.alive))) autoMarkEins(screenBlips);
+      if (befehlSkill.ult === 'kommando') {
+        const lebende = befehl.marks.filter((m) => roster.some((r) => r.id === m.id && r.combatant.alive)).length;
+        if (lebende < Math.min(MAX_MARKS, 1 + befehlSkill.ranks.pol * POL_UEBERMACHT_PRO_RANG)) autoMarkEins(screenBlips); // Übermacht: mehr gleichzeitige Auto-Ziele
         const ziel = aktuellesZiel(befehl);
         if (ziel) befehlSchuss(ziel.id);
       } else {
+        const slowEff = Math.max(0, MARK_SLOW - (befehlSkill.ult === 'streuung' ? befehlSkill.ranks.pol * POL_KLAMMER_PRO_RANG : 0)); // Klammergriff
         for (const b of screenBlips) {
           const r = roster.find((x) => x.id === b.id);
           if (!r || !r.combatant.alive) continue;
-          if (!r.buffs.active().some((bf) => bf.id === 'markiert')) r.buffs.add({ id: 'markiert', icon: befehlUltId === 'seuche' ? '☣' : '🎯', label: 'markiert', speedMul: MARK_SLOW, duration: 0.5 });
-          if (befehlUltId === 'seuche' && !r.dot) r.dot = { left: dotDur, tickCd: dotEvery };
+          if (!r.buffs.active().some((bf) => bf.id === 'markiert')) r.buffs.add({ id: 'markiert', icon: befehlSkill.ult === 'seuche' ? '☣' : '🎯', label: 'markiert', speedMul: slowEff, duration: 0.5 });
+          if (befehlSkill.ult === 'seuche' && !r.dot) r.dot = { left: dotDur, tickCd: dotEvery };
         }
       }
     }
@@ -2052,6 +2072,10 @@ function boot(combatStyle: CombatStyle): void {
       }
       // Auto-Markierer (ab BB): einzeln das nächste Ziel in Reichweite nachziehen (4·5·6…), wenn die vorige Marke weg ist.
       if (evo.unlockedStagesByChannel.sniper_core >= 2 && autoMarkBereit(befehl, evo.unlockedStagesByChannel.sniper_core >= 3)) autoMarkEins(screenBlips);
+      // Eiserne Disziplin: eine Schutz-Ladung lädt nach, sobald eine Kette ≥ SCHUTZ_NACHLADE_KETTE erreicht (nicht während einer Ult).
+      if (befehl.kette >= SCHUTZ_NACHLADE_KETTE && prevKette < SCHUTZ_NACHLADE_KETTE && ultActive <= 0) schutzLadungen = Math.min(befehlSkill.ranks.disziplin, schutzLadungen + 1);
+      prevKette = befehl.kette;
+      schutzLadungen = Math.min(schutzLadungen, befehlSkill.ranks.disziplin); // clamp auf max = Rang
     }
 
     if (sniperCrosshair) {
