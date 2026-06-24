@@ -50,7 +50,7 @@ import { gegnerWelle, gartenTypStats, pulkGroesse, BUILD_STUFE_NAME } from './bu
 import { createHeatState, updateHeat, DEFAULT_HEAT_CFG, type HeatState } from './build/heatTracker';
 import { haescherSoll, haescherStats } from './build/haescher';
 import {
-  createBefehlState, markiere, trefferArt, registriereKill, bruch, aktuellesZiel,
+  createBefehlState, markiere, trefferArt, registriereKill, bruch,
   aufbauStufe, schadenStufe, tickBefehl, autoMarkBereit,
   MAX_MARKS, BB_CAP, BUFF_TIME,
 } from './build/befehl';
@@ -2070,10 +2070,14 @@ function boot(combatStyle: CombatStyle): void {
     // streuung/seuche = Flächen-Markierung aller sichtbaren Ziele (kein Counter); seuche zusätzlich DoT.
     if (!GIFT_BUILD && ultActive > 0) {
       if (befehlSkill.ult === 'kommando') {
-        const lebende = befehl.marks.filter((m) => roster.some((r) => r.id === m.id && r.combatant.alive)).length;
-        if (lebende < Math.min(MAX_MARKS, 1 + befehlSkill.ranks.pol * POL_UEBERMACHT_PRO_RANG)) autoMarkEins(screenBlips); // Übermacht: mehr gleichzeitige Auto-Ziele
-        const ziel = aktuellesZiel(befehl);
-        if (ziel) befehlSchuss(ziel.id);
+        const ziele = Math.min(MAX_MARKS, 1 + befehlSkill.ranks.pol * POL_UEBERMACHT_PRO_RANG); // Übermacht: mehr gleichzeitige Auto-Ziele
+        const lebende = befehl.marks.filter((m) => roster.some((r) => r.id === m.id && r.combatant.alive));
+        if (lebende.length < ziele) autoMarkEins(screenBlips);
+        if (lebende.length) {
+          const ziel = lebende.reduce((a, b) => (a.order < b.order ? a : b)); // nächste lebende Marke
+          befehl.nextOrder = ziel.order; // als „aktuell" setzen → Auto-Hit ohne Vorgriff-Bruch
+          befehlSchuss(ziel.id);
+        }
       } else {
         const slowEff = Math.max(0, MARK_SLOW - (befehlSkill.ult === 'streuung' ? befehlSkill.ranks.pol * POL_KLAMMER_PRO_RANG : 0)); // Klammergriff
         for (const b of screenBlips) {

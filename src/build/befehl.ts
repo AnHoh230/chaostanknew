@@ -49,8 +49,11 @@ export function markVoll(s: BefehlState): boolean {
 /** Markiert ein Ziel mit der nächsten freien Order. false, wenn voll oder schon markiert. */
 export function markiere(s: BefehlState, id: string): boolean {
   if (markVoll(s) || s.marks.some((m) => m.id === id)) return false;
+  // Order = höchste vorhandene +1 (nicht marks.length+1 — sonst kollidieren Orders, wenn nach Kills
+  // Lücken entstehen, z. B. bei mehreren Auto-Marken der Generalstab-Ult).
+  const order = (s.marks.length ? Math.max(...s.marks.map((m) => m.order)) : 0) + 1;
   // nr = fortlaufende Sequenz-Position: Reihe (kette 0) → 1·2·3; Auto-Aufbau (kette≥3) → kette+1 = 4·5·6…
-  s.marks.push({ id, order: s.marks.length + 1, nr: s.kette + s.marks.length + 1 });
+  s.marks.push({ id, order, nr: s.kette + s.marks.length + 1 });
   return true;
 }
 
