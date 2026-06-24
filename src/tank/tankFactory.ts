@@ -30,17 +30,24 @@ function makeMaterial(scene: Scene, name: string, rgb: [number, number, number])
 function buildVariantMesh(scene: Scene, socket: SocketName, variantId: string): Mesh {
   let mesh: Mesh;
   switch (socket) {
-    case 'chassis':
-      if (variantId === 'c_wide') {
-        mesh = MeshBuilder.CreateBox('chassis_mesh', { width: 2.4, height: 0.6, depth: 3.0 }, scene);
-        mesh.material = makeMaterial(scene, 'chassis_mat', [0.35, 0.30, 0.20]);
-      } else {
-        // c_box (default)
-        mesh = MeshBuilder.CreateBox('chassis_mesh', { width: 1.6, height: 0.8, depth: 2.6 }, scene);
-        mesh.material = makeMaterial(scene, 'chassis_mat', [0.45, 0.40, 0.28]);
-      }
+    case 'chassis': {
+      const dims = variantId === 'c_wide'
+        ? { width: 2.4, height: 0.6, depth: 3.0 }
+        : { width: 1.6, height: 0.8, depth: 2.6 }; // c_box (default)
+      const rgb: [number, number, number] = variantId === 'c_wide' ? [0.35, 0.30, 0.20] : [0.45, 0.40, 0.28];
+      mesh = MeshBuilder.CreateBox('chassis_mesh', dims, scene);
+      mesh.material = makeMaterial(scene, 'chassis_mat', rgb);
       mesh.position = new Vector3(0, 0.4, 0);
+      // „Vorne": helle, leicht vorstehende Glacis-Leiste an der +Z-Front. Zeigt, wohin die WANNE
+      // ausgerichtet ist (der Turm dreht unabhängig). Als Kind des Chassis → dreht mit dem Fahrwerk.
+      const bug = MeshBuilder.CreateBox('chassis_bug', { width: dims.width * 0.8, height: dims.height * 0.6, depth: 0.35 }, scene);
+      const bugMat = makeMaterial(scene, 'chassis_bug_mat', [0.92, 0.84, 0.32]);
+      bugMat.emissiveColor = new Color3(0.35, 0.32, 0.1); // leicht selbstleuchtend → Front immer erkennbar
+      bug.material = bugMat;
+      bug.position = new Vector3(0, dims.height * 0.15, dims.depth / 2);
+      bug.parent = mesh;
       break;
+    }
     case 'wheels':
       if (variantId === 'w_tread') {
         mesh = MeshBuilder.CreateBox('wheels_mesh', { width: 1.9, height: 0.5, depth: 2.8 }, scene);
