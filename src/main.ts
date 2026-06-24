@@ -290,6 +290,8 @@ function boot(combatStyle: CombatStyle): void {
     alog.log('ernte', { fieber: erntefieber, t: +runClock.toFixed(1) });
   };
   let scopeApplied = false, savedShotRange = 40; // Übergangs-Zustand für den Scope
+  let camReturn = 0, camReturnDur = 1; // Scope→Normal-Kamera: sanfte Rückkehr (Befehl: mit Marken langsam)
+  const CAM_RETURN_SLOW = 2.5, CAM_RETURN_FAST = 0.25; // s Rückkehr-Dauer mit / ohne Marken
   const aoeFields: { x: number; z: number; r: number; left: number; tickCd: number; disc: Mesh }[] = [];
 
   // Gegner werden dauerhaft nachgespawnt (feste Dichte; Steuerung kommt später über die Doktrin).
@@ -1660,9 +1662,19 @@ function boot(combatStyle: CombatStyle): void {
       if (scopeActive && !scopeApplied) {
         savedShotRange = shotRange; shotRange = sniperRange;
         camApi?.set(sniperCamHeight, sniperCamBack, camF);
-        scopeApplied = true;
+        scopeApplied = true; camReturn = 0; // laufende Rückkehr abbrechen
       } else if (!scopeActive && scopeApplied) {
-        shotRange = savedShotRange; applyCam(); scopeApplied = false;
+        shotRange = savedShotRange; scopeApplied = false;
+        // Befehl: mit Marken langsam zurückgleiten (Zeit, die markierten Ziele wegzuschießen), sonst schnell.
+        camReturnDur = (!GIFT_BUILD && befehl.marks.length > 0) ? CAM_RETURN_SLOW : CAM_RETURN_FAST;
+        camReturn = camReturnDur;
+      }
+      // Kamera-Rückkehr aus dem Scope sanft interpolieren (statt hartem Sprung).
+      if (camReturn > 0) {
+        camReturn = Math.max(0, camReturn - realDt);
+        const p = 1 - camReturn / camReturnDur; // 0 → 1
+        camApi?.set(sniperCamHeight + (camH - sniperCamHeight) * p, sniperCamBack + (camB - sniperCamBack) * p);
+        if (camReturn <= 0) applyCam(); // final exakt auf Normal
       }
     }
 
