@@ -42,7 +42,7 @@ describe('Balance-Taschenrechner (auf Basis echter Run-Messpunkte)', () => {
   });
 
   it('markiert Hochrechnung jenseits der Messpunkte als extrapoliert', () => {
-    expect(balanceZeile(6.5).extrapoliert).toBe(false); // = MESS_ENDE (390s)
+    expect(balanceZeile(6).extrapoliert).toBe(false); // 360s < MESS_ENDE
     expect(balanceZeile(10).extrapoliert).toBe(true);
   });
 });

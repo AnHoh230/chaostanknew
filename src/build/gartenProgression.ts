@@ -17,9 +17,9 @@ export const BUILD_STUFE_NAME = ['Grundschuss', 'Z · Gift', 'ZZ · Seuche', 'ZZ
 // — Gegner-Eskalation (Stärke je Level). HP STEIL (zieht dem Spieler-Schaden davon), Schaden/Tempo
 //   moderat (sonst zu tödlich). Level steigt schnell + zeit-getrieben. Alles Drehregler. —
 export const LEVEL_ALLE_SEK = 60; // Stärke-Level +1 alle X s
-export const HP_PRO_LEVEL = 1.4; // HP-Faktor je Level über 1 (steil)
-export const DMG_PRO_LEVEL = 1.12; // Schaden-Faktor je Level (moderat)
-export const SPEED_PRO_LEVEL = 1.03; // Tempo-Faktor je Level (kaum)
+export const HP_PRO_LEVEL = 1.4; // HP-Faktor je Level über 1 (steil — Zähigkeit ist die Eskalation)
+export const DMG_PRO_LEVEL = 1.04; // Schaden-Faktor je Level (SEHR flach — Gegner sollen zäh sein, nicht one-shotten)
+export const SPEED_PRO_LEVEL = 1.02; // Tempo-Faktor je Level (kaum; Rubberband regelt das Aufholen)
 
 /** Zeit (s) → ausgebildete Build-Stufe. 0 = Grundschuss … 3 = ZZZ, 4+ = Verstärkung. */
 export function buildStufe(t: number): number {

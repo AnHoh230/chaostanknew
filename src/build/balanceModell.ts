@@ -16,14 +16,14 @@ import { DEFAULT_GARTEN } from './garten';
 // — ECHTE MESSPUNKTE (run-111, Befehl-Build) — t[s] → gemessen —
 export interface Messpunkt { t: number; kpm: number; dmgProSchuss: number; }
 export const MESSPUNKTE: Messpunkt[] = [
-  { t: 30, kpm: 8.0, dmgProSchuss: 72 }, // St0 Grundschuss
+  { t: 30, kpm: 9.0, dmgProSchuss: 72 }, // St0 Grundschuss
   { t: 60, kpm: 9.0, dmgProSchuss: 115 }, // markiert, noch kein Aufbau
-  { t: 120, kpm: 12.0, dmgProSchuss: 115 },
-  { t: 210, kpm: 13.1, dmgProSchuss: 125 }, // Aufbau setzt ein
-  { t: 270, kpm: 15.5, dmgProSchuss: 240 },
-  { t: 300, kpm: 16.4, dmgProSchuss: 360 },
-  { t: 360, kpm: 22.6, dmgProSchuss: 879 },
-  { t: 390, kpm: 24.9, dmgProSchuss: 1144 }, // ~6,5 min, Aufbau explodiert
+  { t: 120, kpm: 11.5, dmgProSchuss: 125 },
+  { t: 180, kpm: 12.7, dmgProSchuss: 145 }, // Aufbau setzt ein
+  { t: 240, kpm: 13.7, dmgProSchuss: 255 },
+  { t: 300, kpm: 16.0, dmgProSchuss: 515 },
+  { t: 360, kpm: 20.8, dmgProSchuss: 555 },
+  { t: 385, kpm: 23.8, dmgProSchuss: 1344 }, // ~6,4 min, Aufbau explodiert (run-118)
 ];
 
 // — ANNAHMEN für das, was (noch) NICHT im Log steht —
