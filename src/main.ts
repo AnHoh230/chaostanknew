@@ -55,7 +55,7 @@ import {
 } from './build/skilltree';
 import { thresholdForStage, maxStage, type TuningProfile } from './evolution/profiles';
 import { CHANNEL_DISPLAY, type BaseMode, type EvolutionChannelId } from './evolution/channels';
-import { createEvolutionState, gainProgress, tryTriggerEvolution, emergingChannel } from './evolution/evolution';
+import { createEvolutionState, gainProgress, tryTriggerEvolution } from './evolution/evolution';
 import { createCompassState, baryWeights } from './evolution/compass';
 import { createProgression } from './progression/progression';
 import { startLoop } from './core/loop';
@@ -185,8 +185,17 @@ function boot(combatStyle: CombatStyle): void {
   let sniperTargets: string[] = []; // Ziele, die der nächste Schuss trifft (Auto-Targeting, jeden Frame neu)
   // GARTEN-BUILD (Z-Z-Z) als SEUCHE: Schuss INFIZIERT (sät Gift) statt Direktschaden. Das Gift reift,
   // drosselt, steckt nahe Panzer an; reif → Panzer steht & stirbt am Gift → Erntefieber-Buff.
-  // Fest an für diesen Test; der Spieler IST der Garten (noch kein Kompass/Formung).
-  const GARTEN_MODE = true;
+  // Aktiver Build — fest für den Test; der Kompass wird ignoriert, ALLES levelt den aktiven Kern.
+  //  'garten' = Z/Seuche (dot_core), 'befehl' = B/Kommandant (sniper_core).
+  // ARENA_MODE = gemeinsames Gerüst (Spawn/Waffen-Ökonomie/Kamera/Heat) für jeden Arena-Build;
+  // GIFT_BUILD nur für die Garten-spezifische Gift-Mechanik (säen/ticken).
+  const BUILD = 'befehl' as 'garten' | 'befehl';
+  const ARENA_MODE = true;
+  const GIFT_BUILD = BUILD === 'garten';
+  const ACTIVE_CORE: EvolutionChannelId = GIFT_BUILD ? 'dot_core' : 'sniper_core';
+  // Befehl läuft über den Kommandant-/Scope-Pfad (combatStyle 'sniper'). Für den Test erzwingen,
+  // damit die Start-Screen-Wahl den festen Build nicht aushebelt.
+  if (BUILD === 'befehl') combatStyle = 'sniper';
   const gartenCfg = { ...DEFAULT_GARTEN };
   const GARTEN_SNAP_PX = 150; // großzügiger Cursor-Fang fürs manuelle Säen (du wählst die Ziele selbst)
   // Sichtbare Reife (Slot 2): der vergiftete Panzer glüht stufenweise grün→rot, je näher am Erntebruch.
@@ -325,8 +334,8 @@ function boot(combatStyle: CombatStyle): void {
   const evo = createEvolutionState(baseMode);
   const compass = createCompassState();
   const evoMinFirst = 20, evoMinBetween = 25; // Mindestzeiten fürs Evolutions-Fenster (LOOP_TEST-Debug)
-  // Aktiver Kanal = wohin der Kompass-Punkt zeigt — SOFORT, ohne Glättung (reibungslos).
-  const activeChannelNow = (): EvolutionChannelId => emergingChannel(evo, compass.raw);
+  // (Kompass-basierter Live-Kanal entfällt im fest-Build-Modus — alles lenkt ACTIVE_CORE in den
+  // festen Kern. Kehrt mit dem späteren Multi-Build-Kompass zurück: emergingChannel(evo, compass.raw).)
   // — Impuls-Orbs: droppen beim Kill, fliegen automatisch zum Spieler, geben dort Fortschritt.
   // Farbe = Richtung beim Drop: blau = Kommandant/Kern, lila = Raum/AoE, grün = Zustand/DoT.
   const POLE_HEX = { kommandant: '#4dabf7', aoe: '#c77dff', dot: '#69db7c' };
@@ -388,7 +397,7 @@ function boot(combatStyle: CombatStyle): void {
   document.body.appendChild(frontHud);
   let frontHudCd = 0;
   const updateFrontHud = (): void => {
-    const ch: EvolutionChannelId = GARTEN_MODE ? 'dot_core' : activeChannelNow();
+    const ch: EvolutionChannelId = ACTIVE_CORE;
     const stage = evo.unlockedStagesByChannel[ch];
     const thrNext = thresholdForStage(currentTuningProfile, stage + 1);
     const prevThr = stage >= 1 ? thresholdForStage(currentTuningProfile, stage) ?? 0 : 0;
@@ -521,7 +530,7 @@ function boot(combatStyle: CombatStyle): void {
       // (sonst flutet der späte Schwarm den Aufbau); Rest gibt weniger als früher → Progress gestreckt.
       // Häscher geben NICHTS: kein Impuls-Orb, keine XP (reiner Druck, kein Futter fürs Build).
       if (!e.haescher) {
-        if (flowState === 'flow' && e.typeId !== 'swarm') spawnImpulseOrb(e.combatant.x, e.combatant.z, GARTEN_MODE ? 'dot_core' : activeChannelNow(), e.typeId === 'bunker' ? 8 : 4);
+        if (flowState === 'flow' && e.typeId !== 'swarm') spawnImpulseOrb(e.combatant.x, e.combatant.z, ACTIVE_CORE, e.typeId === 'bunker' ? 8 : 4);
         const up = progression.addXp(Math.round(18 + (e.combatant.lootValue ?? 0.4) * 60));
         if (up.gained > 0) {
           const mkNote = up.newMkUnlocks.length ? ` — MK${up.newMkUnlocks[up.newMkUnlocks.length - 1]} frei!` : '';
@@ -610,7 +619,7 @@ function boot(combatStyle: CombatStyle): void {
       if (!e) continue;
       turret.rotation.y = yawTo(origin.x, origin.z, e.combatant.x, e.combatant.z) - root.rotation.y;
       spawnLaser(origin.x, origin.z, e.combatant.x, e.combatant.z);
-      if (GARTEN_MODE) {
+      if (GIFT_BUILD) {
         // Stufenweise: St 0 = Grundschuss (direkter Treffer, Z noch nicht ausgebildet); ab St 1
         // INFIZIERT der Schuss (Gift säen) — töten tut dann nur das Gift. „Markieren" = anschießen.
         if (evo.unlockedStagesByChannel.dot_core < 1) damageEnemyTick(e, dmg);
@@ -645,7 +654,7 @@ function boot(combatStyle: CombatStyle): void {
     if (hits > 0) {
       metrics.onShot(); lastFireClock = runClock; bus.emit('tank.fired', { tankId: tank.id });
       alog.log('volley', { hits });
-      fireCd = (GARTEN_MODE ? GARTEN_FIRE_BASE : PLAYER_FIRE_BASE) / playerBuffs.aggregate().fireRateMul; // Cooldown nach der Salve
+      fireCd = (ARENA_MODE ? GARTEN_FIRE_BASE : PLAYER_FIRE_BASE) / playerBuffs.aggregate().fireRateMul; // Cooldown nach der Salve
     }
   }
 
@@ -681,9 +690,9 @@ function boot(combatStyle: CombatStyle): void {
     if (combatStyle === 'sniper') {
       if (fireCd > 0) return; // nach einer Salve kurz nachladen
       if (!sniperTargets.length) return; // kein Ziel in Reichweite → kein Schuss (kein Cooldown verbraten)
-      if (GARTEN_MODE && ammo <= 0) return; // leer → erst auf R nachladen
+      if (ARENA_MODE && ammo <= 0) return; // leer → erst auf R nachladen
       fireVolley(sniperTargets);
-      if (GARTEN_MODE) ammo = Math.max(0, ammo - 1); // ein Infektions-Schuss verbraucht
+      if (ARENA_MODE) ammo = Math.max(0, ammo - 1); // ein Infektions-Schuss verbraucht
       return;
     }
     if (fireCd > 0) return; // Feuer-Cooldown (Kühlmittel senkt ihn)
@@ -912,7 +921,7 @@ function boot(combatStyle: CombatStyle): void {
   // Nachladen: R füllt die 3 Infektions-Schüsse wieder auf (CD; Tempo-Schub läuft solange = mobil).
   window.addEventListener('keydown', (ev) => {
     if (ev.key !== 'r' && ev.key !== 'R') return;
-    if (!GARTEN_MODE || reloadCd > 0 || !playerCombatant.alive) return;
+    if (!ARENA_MODE || reloadCd > 0 || !playerCombatant.alive) return;
     if (ammo >= AMMO_MAX && slomoTime >= SLOMO_TIME) return; // schon randvoll
     reloadCd = RELOAD_TIME;
     alog.log('reload', { t: +runClock.toFixed(1) });
@@ -937,7 +946,7 @@ function boot(combatStyle: CombatStyle): void {
   const minimap = createMinimap(168, 150); // Reichweite 150 (Spawn-Ring reicht bis 130 — sonst fallen Gegner von der Karte)
   const enemyBars = createEnemyBars(scene, camera, engine); // HP-Balken über den Gegnern
   const swarmHud = createSwarmHud(); // Schwarm-Lage: Anzahl je Typ + Zieldichte
-  const heatHud = GARTEN_MODE ? null : createHeatHud(); // Garten: Heat-Lage ist interne Mechanik, NICHT angezeigt // Heat je Stil-Richtung (warum dieser Mix)
+  const heatHud = ARENA_MODE ? null : createHeatHud(); // Garten: Heat-Lage ist interne Mechanik, NICHT angezeigt // Heat je Stil-Richtung (warum dieser Mix)
   // Spielernahe Namen der Richtungen (was den Heat treibt). Bunker entfernt (s. doctrineConfig).
   const STYLE_LABEL: Record<string, string> = {
     stoerkrieg: 'Auto-Turret', nebel: 'Distanz', sperrkrieg: 'Rush',
@@ -950,7 +959,7 @@ function boot(combatStyle: CombatStyle): void {
   const applyCam = (): void => camApi?.set(camH, camB, camF);
   // Garten: Fahr-Kamera weiter raus (Höhe 50 / Distanz 90), sonst fährt man blind in Gegner, die
   // schon auf 40 schießen. Scope bleibt mit 95/150 deutlich weiter (Survey). Per __cam-Panel feinjustierbar.
-  if (GARTEN_MODE) { camH = 50; camB = 90; applyCam(); }
+  if (ARENA_MODE) { camH = 50; camB = 90; applyCam(); }
   tunables.add({ label: 'Höhe', category: 'Kamera', value: camH, min: 8, max: 60, step: 1, onChange: (v) => { camH = v; applyCam(); } });
   tunables.add({ label: 'Distanz', category: 'Kamera', value: camB, min: 5, max: 80, step: 1, onChange: (v) => { camB = v; applyCam(); } });
   tunables.add({ label: 'Zoom (FOV)', category: 'Kamera', value: camF, min: 0.3, max: 1.0, step: 0.01, onChange: (v) => { camF = v; applyCam(); } });
@@ -1302,7 +1311,7 @@ function boot(combatStyle: CombatStyle): void {
     // SLOMO: im Scope kriecht die WELT (Bullet-Time), Feuertakt bleibt real → 3 Dots zügig setzen.
     // Begrenzt durch ein ZEIT-Budget (sonst klebt man ewig im Slomo, indem man den letzten Schuss hält).
     // Endet, sobald Munition ODER Slomo-Zeit leer ist — was zuerst kommt.
-    const slomoOn = GARTEN_MODE && scopeActive && ammo > 0 && slomoTime > 0;
+    const slomoOn = ARENA_MODE && scopeActive && ammo > 0 && slomoTime > 0;
     if (slomoOn) { simDt = realDt * SLOMO_SCALE; slomoTime = Math.max(0, slomoTime - realDt); }
     // Nachladen (R) läuft in Echtzeit + Tempo-Schub (mobile Ausweich-Phase); füllt Munition UND Slomo-Zeit.
     if (reloadCd > 0) { reloadCd -= realDt; if (reloadCd <= 0) { ammo = AMMO_MAX; slomoTime = SLOMO_TIME; } }
@@ -1353,12 +1362,12 @@ function boot(combatStyle: CombatStyle): void {
       const evoUnlock = tryTriggerEvolution(evo, {
         now: runClock, flow: flowState,
         minSecondsBeforeFirst: evoMinFirst, minSecondsBetween: evoMinBetween,
-        dominantChannel: GARTEN_MODE ? 'dot_core' : activeChannelNow(),
+        dominantChannel: ACTIVE_CORE,
       });
       if (evoUnlock) {
-        showToast(GARTEN_MODE && evoUnlock.channelId === 'dot_core'
+        showToast(GIFT_BUILD && evoUnlock.channelId === 'dot_core'
           ? `🦠 STUFE ${evoUnlock.stage} · ${BUILD_STUFE_NAME[Math.min(evoUnlock.stage, BUILD_STUFE_NAME.length - 1)]}`
-          : `NEUE FORMUNG · ${CHANNEL_DISPLAY[evoUnlock.channelId].displayName} ${evoUnlock.stage}`);
+          : `STUFE ${evoUnlock.stage} · ${CHANNEL_DISPLAY[evoUnlock.channelId].displayName}`);
         alog.log('evolution', { ch: evoUnlock.channelId, stage: evoUnlock.stage, t: +runClock.toFixed(1) });
       }
     }
@@ -1406,7 +1415,7 @@ function boot(combatStyle: CombatStyle): void {
     runClock += simDt;
     const aliveCount = roster.reduce((n, e) => n + (e.combatant.alive ? 1 : 0), 0);
     // BROKEN: keine neuen Spawns (Druck raus, Loop erholt sich). Sonst normaler gedeckelter Nachschub.
-    const welle = GARTEN_MODE ? gegnerWelle(runClock) : null; // Garten: Timer+Batch-Eskalation (kein Auffüllen)
+    const welle = ARENA_MODE ? gegnerWelle(runClock) : null; // Garten: Timer+Batch-Eskalation (kein Auffüllen)
     const spawnPlan = welle
       ? { targetCount: welle.cap, weights: welle.weights, interval: welle.interval, batch: welle.batch }
       : currentSwarmPlan();
@@ -1559,7 +1568,7 @@ function boot(combatStyle: CombatStyle): void {
     // SEUCHE (Z-Z-Z) — STUFENWEISE nach buildStufe: St 1 nur Köchel-DoT (kein Reifen/Ansteckung);
     // ab St 2 reifen + anstecken (reif steht & stirbt am Gift); ab St 3 gibt der reife Gift-Tod
     // Erntefieber. Plus die grau-Animation der geernteten Panzer.
-    if (GARTEN_MODE) {
+    if (GIFT_BUILD) {
       const stufe = evo.unlockedStagesByChannel.dot_core;
       for (let i = roster.length - 1; i >= 0; i--) {
         const e = roster[i];
@@ -1694,7 +1703,7 @@ function boot(combatStyle: CombatStyle): void {
         .filter((e) => e.combatant.alive)
         .map((e) => ({ x: e.combatant.x, z: e.combatant.z, color: '#e8a23c' })),
     ]);
-    if (GARTEN_MODE) {
+    if (ARENA_MODE) {
       const mag = `${'●'.repeat(ammo)}${'○'.repeat(AMMO_MAX - ammo)}`;
       ammoHud.textContent = reloadCd > 0
         ? `⟳ Nachladen ${reloadCd.toFixed(1)}s`
@@ -1703,7 +1712,7 @@ function boot(combatStyle: CombatStyle): void {
           : `Munition ${mag} · Slomo ${slomoTime.toFixed(1)}s`;
     }
     updateUltHud();
-    if (GARTEN_MODE && skill.punkte > 0 && !skillOpen) {
+    if (ARENA_MODE && skill.punkte > 0 && !skillOpen) {
       skillHint.style.display = 'block';
       skillHint.textContent = `✦ ${skill.punkte} Skillpunkt${skill.punkte > 1 ? 'e' : ''} frei — [T]`;
     } else skillHint.style.display = 'none';
@@ -1764,7 +1773,7 @@ function boot(combatStyle: CombatStyle): void {
     if (sniperCrosshair) {
       if (combatStyle === 'sniper' && scopeActive) {
         const col = fireCd <= 0 ? '#9be36b' : '#ffa94d'; // grün = feuerbereit, orange = nachladen
-        if (GARTEN_MODE) {
+        if (ARENA_MODE) {
           // Garten: DU wählst, wen du ansäst — Ziel unter dem Cursor. Manuell verteilen statt Auto-Snap.
           // Fadenkreuz IMMER aufs Cursor-Ziel zeigen (im Cooldown orange statt verschwinden) — sonst
           // flackert beim Nachfeuern die Zielmarke weg ("seltsam"). Feuerbar nur ohne Cooldown.
