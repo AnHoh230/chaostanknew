@@ -50,7 +50,7 @@ import { gegnerWelle, gartenTypStats, pulkGroesse, BUILD_STUFE_NAME } from './bu
 import { createHeatState, updateHeat, DEFAULT_HEAT_CFG, type HeatState } from './build/heatTracker';
 import { haescherSoll, haescherStats } from './build/haescher';
 import {
-  createBefehlState, markiere, trefferArt, registriereKill, bruch,
+  createBefehlState, markiere, trefferArt, registriereKill, bruch, aktuellesZiel,
   aufbauStufe, schadenStufe, tickBefehl, autoMarkBereit,
   MAX_MARKS, BB_CAP, BUFF_TIME,
 } from './build/befehl';
@@ -59,6 +59,7 @@ import {
   HEAL_PRO_ERNTE, EXECUTE_FRAC, AUSBRUCH_RADIUS, AUSBRUCH_FIEBER, PUNKT_KOSTEN, TALENT_MAX,
   type TalentId, type UltId,
 } from './build/skilltree';
+import { befehlUltDef, SEUCHE_LIFESTEAL, type BefehlUltId } from './build/befehlSkill';
 import { thresholdForStage, maxStage, type TuningProfile } from './evolution/profiles';
 import { CHANNEL_DISPLAY, type BaseMode, type EvolutionChannelId } from './evolution/channels';
 import { createEvolutionState, gainProgress, tryTriggerEvolution } from './evolution/evolution';
@@ -265,6 +266,8 @@ function boot(combatStyle: CombatStyle): void {
   const skill = createSkillState();
   let skillProgress = 0; // gesammelter Impuls-Überschuss Richtung nächstem Skillpunkt
   let ultActive = 0, ultCd = 0; // Ult-Timer: s noch aktiv / s noch Cooldown
+  let befehlUltId: BefehlUltId = 'kommando'; // gewählte Befehl-Ult (später per Talentbaum; Tasten 1/2/3 zum Testen)
+  let ultSchaden = 0; // Seuche-Ult: Summe des ausgeteilten Schadens (für Lifesteal am Ende)
   let giftDotEff = GIFT_DOT_ST1; // effektiver St1-Köchel (Köchel-Talent hebt ihn)
   const recomputeSkills = (): void => {
     const a = applySkills(DEFAULT_GARTEN, skill);
@@ -602,6 +605,7 @@ function boot(combatStyle: CombatStyle): void {
   function damageEnemyTick(e: Enemy, dmg: number, kind: 'schuss' | 'gift' | 'sonst' = 'schuss'): void {
     if (!e.combatant.alive) return;
     e.combatant.hp -= dmg;
+    if (!GIFT_BUILD && ultActive > 0 && befehlUltId === 'seuche') ultSchaden += dmg; // Verfall-Ult: für den Lifesteal am Ende
     metrics.onHitDealt(dmg);
     floatNums.spawn(e.combatant.x, e.combatant.z, dmg, kind === 'gift' ? '#9be36b' : kind === 'sonst' ? '#cdd6dd' : '#ffe08a');
     if (e.combatant.hp <= 0) {
@@ -759,6 +763,13 @@ function boot(combatStyle: CombatStyle): void {
     const bbb = stufe >= 3; // BBB: Aufbau grenzenlos + permanent; BB: bei BB_CAP gedeckelt → Buff B
     const e = roster.find((r) => r.id === id && r.combatant.alive);
     if (!e) return;
+    // Sperrfeuer-Ult: alles ist markiert (Flächen-Buff) → frei abknallen mit Markier-Schaden, kein Counter/Bruch, keine Munition.
+    if (ultActive > 0 && befehlUltId === 'streuung') {
+      const bonus = schadenStufe(befehl) * BEFEHL_DMG_PRO_STUFE;
+      schiessLaser(e); damageEnemyTick(e, Math.round(playerStats().damage * sniperDmgMul * MARK_VERWUNDBAR + bonus));
+      fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
+      return;
+    }
     const art = trefferArt(befehl, id);
     alog.log('befehl', { art, ammo, m: befehl.marks.length, k: befehl.kette, b: befehl.buffStufe, st: stufe });
     if (art === 'fremd') {
@@ -794,6 +805,19 @@ function boot(combatStyle: CombatStyle): void {
     if (befehl.marks.length === 0) befehl.nextOrder = 1; // Salve leer (auch unvollständig) → Zeiger zurück
     fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
   };
+  // Verfall-Ult-Ende: alle infizierten/markierten Gegner explodieren (großer Schlag), der Spieler heilt
+  // SEUCHE_LIFESTEAL des in der Ult-Phase ausgeteilten Schadens.
+  const seucheEnde = (): void => {
+    for (const e of roster) {
+      if (!e.combatant.alive) continue;
+      const infiziert = !!e.dot || e.buffs.active().some((b) => b.id === 'markiert');
+      if (!infiziert) continue;
+      const burst = Math.round(e.combatant.maxHp * 0.6 + schadenStufe(befehl) * BEFEHL_DMG_PRO_STUFE); // tödlicher Schlussschlag
+      damageEnemyTick(e, burst, 'sonst');
+    }
+    const heal = Math.round(ultSchaden * SEUCHE_LIFESTEAL);
+    if (heal > 0) { playerCombatant.hp = Math.min(playerCombatant.maxHp, playerCombatant.hp + heal); showToast(`☣ VERFALL — +${heal} HP`, '#9be36b'); }
+  };
 
   function fire(): void {
     // Befehl schießt auch im Fahrmodus; nur der Garten-Kommandant feuert ausschließlich im Scope.
@@ -816,7 +840,8 @@ function boot(combatStyle: CombatStyle): void {
         }
         // St1+ (B): im Scope MARKIEREN (Munition pro Marke, nur bei offener Salve), Fahrmodus = SCHIESSEN.
         if (scopeActive) {
-          if (salveOffen && ammo > 0 && befehl.marks.length < MAX_MARKS && sniperTargets.length && markiereZiel(sniperTargets[0]!)) {
+          if (ultActive > 0 && befehlUltId === 'streuung') befehlSchuss(sniperTargets[0] ?? hoveredId); // Sperrfeuer: frei schießen statt markieren
+          else if (salveOffen && ammo > 0 && befehl.marks.length < MAX_MARKS && sniperTargets.length && markiereZiel(sniperTargets[0]!)) {
             ammo = Math.max(0, ammo - 1);
             fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
             alog.log('mark', { m: befehl.marks.length, ammo });
@@ -1075,10 +1100,27 @@ function boot(combatStyle: CombatStyle): void {
   // Pol-Ult auslösen (Q): drücken → dauer s aktiv → cd s Cooldown. Nur wenn gewählt + bereit.
   window.addEventListener('keydown', (ev) => {
     if (ev.key !== 'q' && ev.key !== 'Q') return;
-    const u = activeUltDef(skill);
-    if (!u || ultActive > 0 || ultCd > 0 || !playerCombatant.alive) return;
-    ultActive = u.dauer;
-    alog.log('ult', { id: u.id, t: +runClock.toFixed(1) });
+    if (ultActive > 0 || ultCd > 0 || !playerCombatant.alive) return;
+    if (!GIFT_BUILD) { // Befehl: eine der drei Pol-Ults
+      const u = befehlUltDef(befehlUltId);
+      ultActive = u.dauer; ultSchaden = 0;
+      alog.log('ult', { id: u.id, t: +runClock.toFixed(1) });
+    } else {
+      const u = activeUltDef(skill);
+      if (!u) return;
+      ultActive = u.dauer;
+      alog.log('ult', { id: u.id, t: +runClock.toFixed(1) });
+    }
+  });
+  // Test-Wahl der Befehl-Ult, bis der Talentbaum da ist: Tasten 1 (Generalstab) / 2 (Sperrfeuer) / 3 (Verfall).
+  window.addEventListener('keydown', (ev) => {
+    if (GIFT_BUILD) return;
+    if (ev.key === '1') befehlUltId = 'kommando';
+    else if (ev.key === '2') befehlUltId = 'streuung';
+    else if (ev.key === '3') befehlUltId = 'seuche';
+    else return;
+    const u = befehlUltDef(befehlUltId);
+    showToast(`Ult: ${u.icon} ${u.name}`, '#bfe3ff');
   });
 
   // OS-Mauszeiger über dem Canvas ausblenden — das Spiel zeichnet sein eigenes
@@ -1188,7 +1230,7 @@ function boot(combatStyle: CombatStyle): void {
     'border-radius:7px;padding:5px 8px;font:600 11px system-ui,sans-serif;display:none;';
   dashHud.appendChild(ultSlotEl);
   function updateUltHud(): void {
-    const u = activeUltDef(skill);
+    const u = GIFT_BUILD ? activeUltDef(skill) : befehlUltDef(befehlUltId);
     if (!u) { ultSlotEl.style.display = 'none'; return; }
     ultSlotEl.style.display = 'block';
     if (ultActive > 0) { ultSlotEl.style.borderColor = '#69db7c'; ultSlotEl.innerHTML = `${u.icon} <b style="color:#9be36b">AKTIV ${ultActive.toFixed(1)}s</b>`; }
@@ -1467,13 +1509,20 @@ function boot(combatStyle: CombatStyle): void {
     // SLOMO: im Scope kriecht die WELT (Bullet-Time), Feuertakt bleibt real → 3 Dots zügig setzen.
     // Begrenzt durch ein ZEIT-Budget (sonst klebt man ewig im Slomo, indem man den letzten Schuss hält).
     // Endet, sobald Munition ODER Slomo-Zeit leer ist — was zuerst kommt.
-    const slomoOn = ARENA_MODE && scopeActive && ammo > 0 && slomoTime > 0;
-    if (slomoOn) { simDt = realDt * SLOMO_SCALE; slomoTime = Math.max(0, slomoTime - realDt); }
+    const seucheSlomo = !GIFT_BUILD && ultActive > 0 && befehlUltId === 'seuche'; // Verfall-Ult: Dauer-Slomo, kein Budget-Verbrauch
+    const slomoOn = (ARENA_MODE && scopeActive && ammo > 0 && slomoTime > 0) || seucheSlomo;
+    if (slomoOn) { simDt = realDt * SLOMO_SCALE; if (!seucheSlomo) slomoTime = Math.max(0, slomoTime - realDt); }
     else if (ARENA_MODE && !scopeActive && slomoTime < SLOMO_TIME) slomoTime = Math.min(SLOMO_TIME, slomoTime + realDt * SLOMO_REGEN); // außerhalb des Scopes regeneriert das Budget
     // Nachladen (R) läuft in Echtzeit + Tempo-Schub (mobile Ausweich-Phase); füllt Munition UND Slomo-Zeit.
     if (reloadCd > 0) { reloadCd -= realDt; if (reloadCd <= 0) { ammo = AMMO_MAX; slomoTime = SLOMO_TIME; if (!GIFT_BUILD && befehl.marks.length === 0) salveOffen = true; } } // nach dem Nachladen wieder markierbar (Salve offen)
     // Ult-Timer (Echtzeit): aktiv runter → bei 0 in den Cooldown; danach Cooldown runter.
-    if (ultActive > 0) { ultActive -= realDt; if (ultActive <= 0) { const u = activeUltDef(skill); ultCd = u ? u.cd : 0; } }
+    if (ultActive > 0) {
+      ultActive -= realDt;
+      if (ultActive <= 0) {
+        if (!GIFT_BUILD) { ultCd = befehlUltDef(befehlUltId).cd; if (befehlUltId === 'seuche') seucheEnde(); } // Verfall-Ult zündet beim Ablauf
+        else { const u = activeUltDef(skill); ultCd = u ? u.cd : 0; }
+      }
+    }
     else if (ultCd > 0) ultCd -= realDt;
     simTime += simDt;
     // SH2: Buffs altern, effektive Spieler-Stats (Tempo/Rüstung) = Loadout × Buffs.
@@ -1971,6 +2020,22 @@ function boot(combatStyle: CombatStyle): void {
         camera.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight()),
       );
       if (s.z > 0 && s.z < 1) screenBlips.push({ id: e.id, sx: s.x, sy: s.y });
+    }
+    // Befehl-Ult-Effekte (während aktiv): kommando = Auto-Exekution (eins nach dem anderen),
+    // streuung/seuche = Flächen-Markierung aller sichtbaren Ziele (kein Counter); seuche zusätzlich DoT.
+    if (!GIFT_BUILD && ultActive > 0) {
+      if (befehlUltId === 'kommando') {
+        if (!befehl.marks.some((m) => roster.some((r) => r.id === m.id && r.combatant.alive))) autoMarkEins(screenBlips);
+        const ziel = aktuellesZiel(befehl);
+        if (ziel) befehlSchuss(ziel.id);
+      } else {
+        for (const b of screenBlips) {
+          const r = roster.find((x) => x.id === b.id);
+          if (!r || !r.combatant.alive) continue;
+          if (!r.buffs.active().some((bf) => bf.id === 'markiert')) r.buffs.add({ id: 'markiert', icon: befehlUltId === 'seuche' ? '☣' : '🎯', label: 'markiert', speedMul: MARK_SLOW, duration: 0.5 });
+          if (befehlUltId === 'seuche' && !r.dot) r.dot = { left: dotDur, tickCd: dotEvery };
+        }
+      }
     }
     // Kommandant: Auto-Targeting. Jeden Frame die Ziele bestimmen, die der nächste Schuss trifft
     // (1..maxMarks je Kern-Stufe, Prio dumm→schlau). Cursor-Fadenkreuz = Feuerbereitschaft,
