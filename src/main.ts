@@ -1658,7 +1658,7 @@ function boot(combatStyle: CombatStyle): void {
     // Gegner-Verhalten (R2): jeder Typ steuert nach seinem Muster auf einen Zielpunkt zu,
     // hält bei seinem Standoff und feuert in Schussweite. Konter = Verhalten, nicht Stats.
     // Rubberband gegen den Wegfahr-Exploit: zurückgefallene Gegner holen schneller auf (nah = normal).
-    const RUBBER_AB = 70, RUBBER_SPANNE = 90, RUBBER_MAX = 2.5; // ab 70 Distanz wächst der Catch-up bis ×2.5 (~160+) — Stellschrauben
+    const RUBBER_AB = 40, RUBBER_SPANNE = 90, RUBBER_MAX = 2.5; // ab 40 Distanz wächst der Catch-up bis ×2.5 (~160+) — Stellschrauben
     for (const e of roster) {
       if (!e.combatant.alive) continue;
       const er = e.view.root;
