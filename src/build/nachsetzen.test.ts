@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { nachsetzenFaellig, spawnImFahrtweg, DEFAULT_NACHSETZ as C } from './nachsetzen';
+import { nachsetzenFaellig, spawnRundum, DEFAULT_NACHSETZ as C } from './nachsetzen';
 
 describe('Gegner-Nachsetzen (Rubberband-Ersatz)', () => {
   describe('nachsetzenFaellig', () => {
@@ -10,50 +10,32 @@ describe('Gegner-Nachsetzen (Rubberband-Ersatz)', () => {
     });
   });
 
-  describe('spawnImFahrtweg', () => {
-    const rngMitte = () => 0.5; // kein Winkel-Offset, mittlere Distanz
-
-    it('setzt den Gegner voraus in Fahrtrichtung (+x)', () => {
-      const p = spawnImFahrtweg(0, 0, 10, 0, rngMitte);
-      expect(p.x).toBeGreaterThan(0);
-      expect(p.z).toBeCloseTo(0); // exakt in Fahrtrichtung bei rng 0.5
+  describe('spawnRundum (nah um den Spieler)', () => {
+    it('platziert relativ zur Spielerposition (Offset, nicht Absolutpunkt)', () => {
+      const p = spawnRundum(100, 200, () => 0.5);
+      const d = Math.hypot(p.x - 100, p.z - 200);
+      expect(d).toBeGreaterThanOrEqual(C.distMin - 1e-6);
+      expect(d).toBeLessThanOrEqual(C.distMin + C.distSpanne + 1e-6);
     });
 
-    it('folgt der Fahrtrichtung (+z)', () => {
-      const p = spawnImFahrtweg(0, 0, 0, 10, rngMitte);
-      expect(p.z).toBeGreaterThan(0);
-      expect(p.x).toBeCloseTo(0);
-    });
-
-    it('voraus relativ zur Spielerposition (Offset, nicht Absolutpunkt)', () => {
-      const p = spawnImFahrtweg(100, 200, 10, 0, rngMitte);
-      expect(p.x).toBeGreaterThan(100);
-      expect(p.z).toBeCloseTo(200);
-    });
-
-    it('Distanz immer in [distMin, distMin+distSpanne]', () => {
+    it('Distanz immer im Ring [distMin, distMin+distSpanne]', () => {
       for (const r of [0, 0.25, 0.5, 0.75, 0.999]) {
-        const p = spawnImFahrtweg(0, 0, 5, 5, () => r);
+        const p = spawnRundum(0, 0, () => r);
         const d = Math.hypot(p.x, p.z);
         expect(d).toBeGreaterThanOrEqual(C.distMin - 1e-6);
         expect(d).toBeLessThanOrEqual(C.distMin + C.distSpanne + 1e-6);
       }
     });
 
-    it('bleibt im Streuungs-Fächer um die Fahrtrichtung (±streuung/2)', () => {
-      const basis = 0; // Fahrtrichtung +x
-      for (const r of [0, 1]) { // Winkel-Extreme
-        const p = spawnImFahrtweg(0, 0, 10, 0, () => r);
-        const ang = Math.atan2(p.z, p.x);
-        expect(Math.abs(ang - basis)).toBeLessThanOrEqual(C.streuung / 2 + 1e-6);
-      }
-    });
-
-    it('bei Stillstand (kein Tempo) trotzdem ein gültiger Punkt im Distanz-Ring', () => {
-      const p = spawnImFahrtweg(0, 0, 0, 0, rngMitte);
-      const d = Math.hypot(p.x, p.z);
-      expect(d).toBeGreaterThanOrEqual(C.distMin - 1e-6);
-      expect(d).toBeLessThanOrEqual(C.distMin + C.distSpanne + 1e-6);
+    it('verteilt rundum (verschiedene Winkel je rng)', () => {
+      // rng-Sequenz: erster Wert = Winkel-Anteil, zweiter = Radius
+      const mk = (a: number) => { let i = 0; return () => (i++ === 0 ? a : 0.5); };
+      const ost = spawnRundum(0, 0, mk(0));      // Winkel 0 → +x
+      const nord = spawnRundum(0, 0, mk(0.25));  // Winkel π/2 → +z
+      expect(ost.x).toBeGreaterThan(0);
+      expect(ost.z).toBeCloseTo(0);
+      expect(nord.z).toBeGreaterThan(0);
+      expect(nord.x).toBeCloseTo(0);
     });
   });
 });

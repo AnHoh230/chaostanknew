@@ -76,7 +76,7 @@ import {
   createRaumState, legeFeld, feldAn, naechstesFeld, feldRadius, feldSlow, zugZurMitte,
   ernteFeldKill, tickFeld, DEFAULT_RAUM,
 } from './build/raum';
-import { nachsetzenFaellig, spawnImFahrtweg, DEFAULT_NACHSETZ } from './build/nachsetzen';
+import { nachsetzenFaellig, spawnRundum, DEFAULT_NACHSETZ } from './build/nachsetzen';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
 import { createFireRecorder } from './debug/fireRecorder';
@@ -1848,13 +1848,15 @@ function boot(combatStyle: CombatStyle): void {
       }, behaviorTuning);
 
       const distToPlayer = Math.hypot(px - er.position.x, pz - er.position.z) || 1;
-      // Nachsetzen statt Rubberband: in Schussreichweite = relevant (Timer-Reset); sonst untätig hochzählen.
-      // Zu lange untätig (weder getroffen noch in Reichweite) → in den Fahrtweg des Spielers neu setzen.
-      if (distToPlayer <= enemyShotRange) e.untaetig = 0;
+      // Nachsetzen statt Rubberband: relevant (Timer-Reset) ist, wer in Schussreichweite ist ODER ein
+      // Fadenkreuz trägt (markiert). Sonst untätig hochzählen; zu lange untätig → NAH um den Spieler neu
+      // setzen (rundum ~45), damit er sofort wieder im Kampf ist statt weit voraus zu verschwinden.
+      const traegtFadenkreuz = befehl.marks.some((m) => m.id === e.id);
+      if (distToPlayer <= enemyShotRange || traegtFadenkreuz) e.untaetig = 0;
       else {
         e.untaetig = (e.untaetig ?? 0) + simDt;
         if (nachsetzenFaellig(e.untaetig, NACHSETZ_CFG)) {
-          const p = spawnImFahrtweg(px, pz, playerVelX, playerVelZ, () => aiRng.next(), NACHSETZ_CFG);
+          const p = spawnRundum(px, pz, () => aiRng.next(), NACHSETZ_CFG);
           er.position.x = p.x; er.position.z = p.z;
           e.combatant.x = p.x; e.combatant.z = p.z;
           e.untaetig = 0;
