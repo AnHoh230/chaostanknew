@@ -1052,7 +1052,7 @@ function boot(combatStyle: CombatStyle): void {
     scene, camera, tank, () => playerSpeed, fire,
     () => BASE_TURRET_SLEW * playerBuffs.aggregate().turretSlewMul,
     () => !scopeActive || !GIFT_BUILD, // nur der Garten-Scope hält an; Befehl fährt im Scope weiter (nur Slomo)
-    () => combatStyle !== 'sniper', // Sniper: kein Auto-Vorwärts, manuell per W/S fahren
+    () => combatStyle === 'dot', // nur Garten fährt auto-vorwärts; Befehl + Raum manuell per W/S (Position selbst wählen)
   );
 
   // Sniper-Scope: Rechtsklick als SCHALTER (1× an, nochmal aus). Im Scope steht der Panzer,
