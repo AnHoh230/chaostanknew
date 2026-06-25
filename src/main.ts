@@ -371,10 +371,11 @@ function boot(combatStyle: CombatStyle): void {
   const progression = createProgression(); // Level/XP/MK (P2)
   // Crit-Wurf auf den FINALEN Schaden (inkl. Aufbau-Bonus → multiplikativ mit dem Build, das ist die
   // gesuchte Synergie). critPending merkt den letzten Wurf, damit damageEnemyTick Crits rot färbt.
-  let critPending = false;
+  let critPending = false, critTotal = 0, schussTotal = 0; // Crit-Statistik fürs snap-Log
   const mitCrit = (dmg: number): number => {
     const r = rollCrit(playerBoni, Math.random);
     critPending = r.crit;
+    schussTotal += 1; if (r.crit) critTotal += 1;
     return Math.round(dmg * r.dmgMul);
   };
 
@@ -1811,6 +1812,8 @@ function boot(combatStyle: CombatStyle): void {
         ...(snap as unknown as Record<string, unknown>), idle: Math.round(idleFor), flow: flowState, rel,
         heat: { kes: +heatState.kessel.toFixed(2), fae: +heatState.faehrte.toFixed(2) },
         hae: { soll: hSollLog.front + hSollLog.ring, alive: hAliveLog },
+        crit: schussTotal ? +(critTotal / schussTotal).toFixed(2) : 0, // tatsächliche Crit-Rate (Anteil der Schüsse)
+        boni: { hp: playerBoni.maxHp, spd: +playerBoni.speed.toFixed(2), cc: +playerBoni.critChance.toFixed(2), cm: +playerBoni.critMult.toFixed(2), dge: +playerBoni.dodge.toFixed(2) }, // gewählte Level-Boni
       });
     }
 
