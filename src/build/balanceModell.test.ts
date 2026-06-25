@@ -36,13 +36,13 @@ describe('Balance-Taschenrechner (auf Basis echter Run-Messpunkte)', () => {
 
   it('liest die Messpunkte korrekt (1 Minute = Messpunkt t=60s)', () => {
     const z = balanceZeile(1);
-    expect(z.kpm).toBe(9); // exakter Messpunkt
-    expect(z.schussSchaden).toBe(115); // gemessener Schaden/Schuss
+    expect(z.kpm).toBe(9.4); // exakter Messpunkt (run-119)
+    expect(z.schussSchaden).toBe(103); // gemessener Schaden/Schuss
     expect(z.extrapoliert).toBe(false);
   });
 
   it('markiert Hochrechnung jenseits der Messpunkte als extrapoliert', () => {
-    expect(balanceZeile(6).extrapoliert).toBe(false); // 360s < MESS_ENDE
-    expect(balanceZeile(10).extrapoliert).toBe(true);
+    expect(balanceZeile(6).extrapoliert).toBe(false); // 360s < MESS_ENDE (600s)
+    expect(balanceZeile(11).extrapoliert).toBe(true); // 660s > MESS_ENDE
   });
 });
