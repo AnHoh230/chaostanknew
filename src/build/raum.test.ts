@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  createRaumState, legeFeld, feldRadius, feldAn, feldSchaden, feldSlow, zugZurMitte,
+  createRaumState, legeFeld, feldRadius, feldAn, naechstesFeld, feldSchaden, feldSlow, zugZurMitte,
   ernteFeldKill, tickFeld, DEFAULT_RAUM as C, type FeldTreffer,
 } from './raum';
 
@@ -73,6 +73,19 @@ describe('Raum-Build (Felder)', () => {
       expect(feldAn(s, knappDraussen, 0)).toBeNull();
       s.buff = 500; // +50 % Radius
       expect(feldAn(s, knappDraussen, 0)).not.toBeNull();
+    });
+  });
+
+  describe('naechstesFeld (RR-Zug)', () => {
+    it('findet das nächstgelegene Feld, auch von außerhalb', () => {
+      const s = createRaumState();
+      legeFeld(s, 0, 0);
+      legeFeld(s, 100, 0);
+      expect(naechstesFeld(s, 90, 0)).toEqual({ x: 100, z: 0 });
+      expect(naechstesFeld(s, 5, 0)).toEqual({ x: 0, z: 0 });
+    });
+    it('null ohne Felder', () => {
+      expect(naechstesFeld(createRaumState(), 0, 0)).toBeNull();
     });
   });
 

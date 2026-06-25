@@ -71,6 +71,16 @@ export function feldAn(s: RaumState, x: number, z: number, cfg: RaumConfig = DEF
   return null;
 }
 
+/** Das (egal ob innen/außen) nächstgelegene Feld zur Position — oder null. Für den RR-Zug Gefangener. */
+export function naechstesFeld(s: RaumState, x: number, z: number): Feld | null {
+  let best: Feld | null = null, bd = Infinity;
+  for (const f of s.felder) {
+    const d = Math.hypot(x - f.x, z - f.z);
+    if (d < bd) { bd = d; best = f; }
+  }
+  return best;
+}
+
 /**
  * Feld-Schaden pro Tick gegen einen Gegner. Basis = ANFANGS-HP / ticksZumTod (so stirbt ein Gegner mit
  * Start-Leben in genau ticksZumTod Ticks), plus additiver Ernte-Buff (RRR). NICHT von der aktuellen

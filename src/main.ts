@@ -46,7 +46,7 @@ import { TANK_CLASSES } from './game/classes';
 import { computeFlowState, pruneDeathTimes, type FlowState } from './game/flowState';
 import { ROSTER, DEFAULT_ESCALATION, scaleStats } from './enemy/roster';
 import { saeGift, tickGift, istReif, reifeStufe, giftSlow, DEFAULT_GARTEN } from './build/garten';
-import { gegnerWelle, gartenTypStats, pulkGroesse, BUILD_STUFE_NAME } from './build/gartenProgression';
+import { gegnerWelle, gartenTypStats, pulkGroesse, BUILD_STUFE_NAME, GARTEN_BASIS } from './build/gartenProgression';
 import { createHeatState, updateHeat, DEFAULT_HEAT_CFG, type HeatState } from './build/heatTracker';
 import { haescherSoll, haescherStats } from './build/haescher';
 import {
@@ -72,6 +72,10 @@ import { createProgression } from './progression/progression';
 import {
   createPlayerBoni, waehleBoni, randomBoniAuswahl, rollCrit, boniDef, type BoniId,
 } from './build/playerBoni';
+import {
+  createRaumState, legeFeld, feldAn, naechstesFeld, feldRadius, feldSlow, zugZurMitte,
+  ernteFeldKill, tickFeld, DEFAULT_RAUM,
+} from './build/raum';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
 import { createFireRecorder } from './debug/fireRecorder';
@@ -91,9 +95,9 @@ const DAMAGE_TICK = 0.5; // Länge eines „Ticks" (s) für DoT/AoE-Schaden
 /** Kampfstil (Startwahl): bestimmt, wie der Hauptschuss wirkt. */
 export type CombatStyle = 'sniper' | 'aoe' | 'dot';
 const COMBAT_STYLES: { id: CombatStyle; name: string; desc: string }[] = [
-  { id: 'sniper', name: 'Kommandant', desc: 'Übersichtsmodus (Rechtsklick): herauszoomen, Ziele markieren, Angriff auslösen. Kein klassischer Sniper.' },
-  { id: 'aoe', name: 'AoE', desc: 'Bogenlampe legt Flächen ab (kürzere Wurfweite). Gegner darin nehmen pro Tick Schaden. Unbegrenzt, halten 5 Ticks.' },
-  { id: 'dot', name: 'DoT', desc: 'Normaler Schuss, kein Soforttreffer — setzt Gift: tickt alle 2 Ticks. Nachschuss erneuert die Dauer.' },
+  { id: 'sniper', name: 'Kommandant (Befehl)', desc: 'Scope (Rechtsklick): Ziele markieren und in Reihenfolge exekutieren. B/BB/BBB baut grenzenlos Schaden auf.' },
+  { id: 'aoe', name: 'Raum (Felder)', desc: 'Felder ablegen (max 3, FIFO). Gegner darin sterben & werden verlangsamt; RR fängt sie ein, RRR-Ernte macht Felder größer + stärker.' },
+  { id: 'dot', name: 'Garten (Gift)', desc: 'Schuss sät Gift wie eine Seuche: Z infiziert, ZZ reift & steckt an, ZZZ erntet — reife sterben am Gift.' },
 ];
 
 const log = createLogger('main');
@@ -203,13 +207,14 @@ function boot(combatStyle: CombatStyle): void {
   //  'garten' = Z/Seuche (dot_core), 'befehl' = B/Kommandant (sniper_core).
   // ARENA_MODE = gemeinsames Gerüst (Spawn/Waffen-Ökonomie/Kamera/Heat) für jeden Arena-Build;
   // GIFT_BUILD nur für die Garten-spezifische Gift-Mechanik (säen/ticken).
-  const BUILD = 'befehl' as 'garten' | 'befehl';
+  // Build kommt aus der Start-Screen-Wahl (combatStyle): Kommandant→Befehl, AoE→Raum, DoT→Garten.
+  // Welche drei Builds im Menü stehen, steuern wir über COMBAT_STYLES — so tauschen wir aus, was testbar ist.
+  const BUILD: 'garten' | 'befehl' | 'raum' =
+    combatStyle === 'dot' ? 'garten' : combatStyle === 'aoe' ? 'raum' : 'befehl';
   const ARENA_MODE = true;
   const GIFT_BUILD = BUILD === 'garten';
-  const ACTIVE_CORE: EvolutionChannelId = GIFT_BUILD ? 'dot_core' : 'sniper_core';
-  // Befehl läuft über den Kommandant-/Scope-Pfad (combatStyle 'sniper'). Für den Test erzwingen,
-  // damit die Start-Screen-Wahl den festen Build nicht aushebelt.
-  if (BUILD === 'befehl') combatStyle = 'sniper';
+  const ACTIVE_CORE: EvolutionChannelId =
+    BUILD === 'garten' ? 'dot_core' : BUILD === 'raum' ? 'aoe_core' : 'sniper_core';
   const gartenCfg = { ...DEFAULT_GARTEN };
   const GARTEN_SNAP_PX = 150; // großzügiger Cursor-Fang fürs manuelle Säen (du wählst die Ziele selbst)
   // Sichtbare Reife (Slot 2): der vergiftete Panzer glüht stufenweise grün→rot, je näher am Erntebruch.
@@ -244,7 +249,10 @@ function boot(combatStyle: CombatStyle): void {
   let netLinger = 4, netDmg = 8, netSpreadR = 10; // s Restdauer / Schaden je Tick / Streuradius (ab St2)
   const woundPressure = new Map<string, number>(); // Auswahl-Wundbruch: Wunddruck je Ziel
   let woundStep = 20, woundCap = 90, woundBurstDmg = 60, woundBurstR = 14; // Aufbau / Bruch-Schwelle / Bruch-AoE
-  let aoeRange = 26, aoeRadius = 4, aoeDmg = 14, aoeTickCount = 5; // AoE-Feld (Radius ~2 Späher)
+  let aoeRange = 26; // Raum: Wurfweite — wie weit man ein Feld werfen kann (Größe/Schaden/Slow/Zug kommen aus RAUM_CFG/raum)
+  const raum = createRaumState(); // Raum-Build: liegende Felder (FIFO max 3) + Ernte-Buff (RRR)
+  const RAUM_CFG = { ...DEFAULT_RAUM }; // tunebare Feld-Config
+  const feldDiscs: Mesh[] = []; // Boden-Discs, FIFO-synchron zu raum.felder
   let dotDmg = 36, dotEvery = DAMAGE_TICK * 2, dotDur = DAMAGE_TICK * 8; // DoT: alle 2 Ticks, 8 Ticks lang
   let scopeActive = false; // Sniper: RMB GEHALTEN → Scope+Slomo an (kein Fahren, weiter zoomen)
   // Garten-Waffen-Ökonomie: 3 Infektions-Schüsse, dann auf R nachladen (mit Tempo-Schub = mobil).
@@ -308,7 +316,6 @@ function boot(combatStyle: CombatStyle): void {
   let scopeApplied = false, savedShotRange = 40; // Übergangs-Zustand für den Scope
   let camReturn = 0, camReturnDur = 1; // Scope→Normal-Kamera: sanfte Rückkehr (Befehl: mit Marken langsam)
   const CAM_RETURN_SLOW = 2.5, CAM_RETURN_FAST = 0.25; // s Rückkehr-Dauer mit / ohne Marken
-  const aoeFields: { x: number; z: number; r: number; left: number; tickCd: number; disc: Mesh }[] = [];
 
   // Gegner werden dauerhaft nachgespawnt (feste Dichte; Steuerung kommt später über die Doktrin).
   const aiRng = createRng(SEED + 7);
@@ -967,21 +974,24 @@ function boot(combatStyle: CombatStyle): void {
     }
   }
 
-  // AoE: Schadensfeld am (auf Wurfweite geklemmten) Cursor-Punkt anlegen; tickt in der Loop.
+  // Raum: ein Feld am (auf Wurfweite geklemmten) Cursor-Punkt ablegen. Bleibt liegen, FIFO max 3 —
+  // ein neues Feld schiebt das älteste weg (Logik + Disc synchron). Schaden/Slow/Zug macht die Loop.
   function placeAoeField(gx: number, gz: number, ox: number, oz: number): void {
     const ddx = gx - ox, ddz = gz - oz;
     const d = Math.hypot(ddx, ddz) || 1;
     const cx = d > aoeRange ? ox + (ddx / d) * aoeRange : gx;
     const cz = d > aoeRange ? oz + (ddz / d) * aoeRange : gz;
-    const disc = MeshBuilder.CreateCylinder('fx_aoe', { diameter: aoeRadius * 2, height: 0.3, tessellation: 28 }, scene);
+    const weg = legeFeld(raum, cx, cz, RAUM_CFG); // FIFO über maxFelder
+    const disc = MeshBuilder.CreateCylinder('fx_aoe', { diameter: RAUM_CFG.radius * 2, height: 0.3, tessellation: 32 }, scene);
     disc.position.set(cx, 0.18, cz);
     disc.isPickable = false;
     const mat = new StandardMaterial('fx_aoe_mat', scene);
-    mat.emissiveColor = new Color3(1, 0.5, 0.12);
+    mat.emissiveColor = new Color3(0.55, 0.2, 0.95); // Raum = violett
     mat.disableLighting = true;
-    mat.alpha = 0.4;
+    mat.alpha = 0.32;
     disc.material = mat;
-    aoeFields.push({ x: cx, z: cz, r: aoeRadius, left: aoeTickCount * DAMAGE_TICK, tickCd: DAMAGE_TICK, disc });
+    feldDiscs.push(disc);
+    if (weg) feldDiscs.shift()?.dispose(); // älteste Disc weg, synchron zur FIFO-Verdrängung
   }
 
   // Gegner feuert auf sein Ziel — eigene Fraktion (team = Gegner-id) + Level-Schaden.
@@ -1192,8 +1202,8 @@ function boot(combatStyle: CombatStyle): void {
   tunables.add({ label: 'Sniper-Kamera-Höhe', category: 'Stile', value: sniperCamHeight, min: 20, max: 200, step: 5, onChange: (v) => { sniperCamHeight = v; } });
   tunables.add({ label: 'Sniper-Kamera-Distanz', category: 'Stile', value: sniperCamBack, min: 20, max: 260, step: 5, onChange: (v) => { sniperCamBack = v; } });
   tunables.add({ label: 'AoE-Wurfweite', category: 'Stile', value: aoeRange, min: 8, max: 60, step: 1, onChange: (v) => { aoeRange = v; } });
-  tunables.add({ label: 'AoE-Radius', category: 'Stile', value: aoeRadius, min: 1, max: 12, step: 0.5, onChange: (v) => { aoeRadius = v; } });
-  tunables.add({ label: 'AoE-Schaden/Tick', category: 'Stile', value: aoeDmg, min: 1, max: 60, step: 1, onChange: (v) => { aoeDmg = v; } });
+  tunables.add({ label: 'Feld-Radius', category: 'Stile', value: RAUM_CFG.radius, min: 6, max: 40, step: 1, onChange: (v) => { RAUM_CFG.radius = v; } });
+  tunables.add({ label: 'Feld-Zugkraft (RR)', category: 'Stile', value: RAUM_CFG.zugStaerke, min: 0, max: 120, step: 5, onChange: (v) => { RAUM_CFG.zugStaerke = v; } });
   tunables.add({ label: 'DoT-Schaden/Tick', category: 'Stile', value: dotDmg, min: 1, max: 80, step: 1, onChange: (v) => { dotDmg = v; } });
   tunables.add({ label: 'Frontlage-Puls s', category: 'Doktrin', value: pulseLen, min: 2, max: 120, step: 2, onChange: (v) => { pulseLen = v; } });
   createTuningPanel(tunables, { onChange: (label, value) => alog.log('regler', { label, value }) });
@@ -1837,7 +1847,8 @@ function boot(combatStyle: CombatStyle): void {
       if (distToPlayer > out.standoff) {
         const tdx = out.tx - er.position.x, tdz = out.tz - er.position.z;
         const tl = Math.hypot(tdx, tdz) || 1;
-        const slowFactor = e.gift ? 1 - giftSlow(e.gift, gartenCfg) : 1; // Seuche: reifendes Gift drosselt; reif → 0 (steht)
+        const feldDrin = combatStyle === 'aoe' && feldAn(raum, er.position.x, er.position.z, RAUM_CFG); // Raum: im Feld?
+        const slowFactor = (e.gift ? 1 - giftSlow(e.gift, gartenCfg) : 1) * (feldDrin ? 1 - feldSlow(RAUM_CFG) : 1); // Gift- + Feld-Slow
         const rubber = 1 + Math.min(1, Math.max(0, (distToPlayer - RUBBER_AB) / RUBBER_SPANNE)) * (RUBBER_MAX - 1); // Catch-up je weiter zurückgefallen
         const step = e.speed * mods.speedMul * slowFactor * rubber * simDt; // Tempo type-/stufen-getrieben + Rubberband
 
@@ -1857,6 +1868,19 @@ function boot(combatStyle: CombatStyle): void {
         const typeDmgMul = e.typeId === 'racer' ? racerDmgMul() : 1; // Racer-eigener Schadensfaktor
         enemyFire(er.position.x, er.position.z, aimX, aimZ, 'enemy', e.damage * mods.damageMul * typeDmgMul, e.typeId);
         e.fireCd = ENEMY_FIRE_COOLDOWN;
+      }
+      // RR (ab Stufe 2): wer schon im Feld war (gefangen), wird zur Feld-Mitte zurückgezogen, sobald er
+      // an den Rand/heraus will. Häscher sind immun gegen den Zug (nur den Feld-Schaden kassieren sie).
+      if (combatStyle === 'aoe' && evo.unlockedStagesByChannel.aoe_core >= 2 && e.feld?.gefangen && !e.haescher) {
+        const nf = naechstesFeld(raum, er.position.x, er.position.z);
+        if (nf) {
+          const dist = Math.hypot(er.position.x - nf.x, er.position.z - nf.z) || 1;
+          if (dist > feldRadius(RAUM_CFG, raum.buff) * 0.8) { // am Rand/draußen → zurückziehen
+            const zug = zugZurMitte(nf, er.position.x, er.position.z);
+            er.position.x += zug.dx * RAUM_CFG.zugStaerke * simDt;
+            er.position.z += zug.dz * RAUM_CFG.zugStaerke * simDt;
+          }
+        }
       }
       e.combatant.x = er.position.x;
       e.combatant.z = er.position.z;
@@ -2003,20 +2027,25 @@ function boot(combatStyle: CombatStyle): void {
       }
     }
 
-    // AoE-Felder: ticken Schaden an alle Gegner im Radius; nach Ablauf entfernen.
-    for (let i = aoeFields.length - 1; i >= 0; i--) {
-      const f = aoeFields[i]!;
-      f.left -= simDt;
-      f.tickCd -= simDt;
-      if (f.tickCd <= 0) {
-        f.tickCd += DAMAGE_TICK;
-        for (let j = roster.length - 1; j >= 0; j--) {
-          const e = roster[j];
-          if (!e || !e.combatant.alive) continue;
-          if (Math.hypot(e.combatant.x - f.x, e.combatant.z - f.z) <= f.r) damageEnemyTick(e, aoeDmg);
+    // Raum-Felder: jeder Gegner IM Feld nimmt pro Tick Schaden (Anfangs-HP/ticksZumTod + Ernte-Buff,
+    // Crit wirkt mit). Ein im Feld gestorbener Gegner gibt ab RRR die Ernte (buff↑). Felder bleiben
+    // liegen (FIFO via placeAoeField); die Discs wachsen mit dem Buff. Rückwärts, weil Kills splicen.
+    if (combatStyle === 'aoe') {
+      const stufeRRR = evo.unlockedStagesByChannel.aoe_core >= 3;
+      for (let j = roster.length - 1; j >= 0; j--) {
+        const e = roster[j];
+        if (!e || !e.combatant.alive) continue;
+        e.feld ??= { tickCd: 0, gefangen: false };
+        const drin = !!feldAn(raum, e.combatant.x, e.combatant.z, RAUM_CFG);
+        const basisHp = GARTEN_BASIS[e.typeId]?.hp ?? GARTEN_BASIS.allrounder!.hp;
+        const tick = tickFeld(e.feld, drin, basisHp, raum.buff, simDt, RAUM_CFG);
+        if (tick.ticked && tick.dmg > 0) {
+          damageEnemyTick(e, mitCrit(tick.dmg), 'sonst');
+          if (stufeRRR && !e.combatant.alive && !e.haescher) ernteFeldKill(raum); // RRR: Feld-Kill = Ernte
         }
       }
-      if (f.left <= 0) { f.disc.dispose(); aoeFields.splice(i, 1); }
+      const sc = feldRadius(RAUM_CFG, raum.buff) / RAUM_CFG.radius; // Felder wachsen mit dem Ernte-Buff
+      for (const d of feldDiscs) d.scaling.x = d.scaling.z = sc;
     }
 
     ground.update();
