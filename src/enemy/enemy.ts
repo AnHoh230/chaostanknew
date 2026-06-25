@@ -25,6 +25,7 @@ export interface Enemy {
   harvested?: number; // Garten: s bis Tod nach der Ernte (grau-Animation läuft, dann killEnemy)
   haescher?: boolean; // Bewegungs-Heat-Spawn: zäh, grau, gibt KEINE Belohnung (Impuls/XP/Ernte/Heal)
   feld?: { tickCd: number; gefangen: boolean }; // Raum-Build: Feld-Tick-Countdown + ob schon im Feld (RR-Fang)
+  untaetig?: number; // s ohne Relevanz (kein Treffer kassiert + nicht in Schussreichweite) → Nachsetzen
 }
 
 export interface EnemySpec {

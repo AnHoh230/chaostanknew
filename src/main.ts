@@ -76,6 +76,7 @@ import {
   createRaumState, legeFeld, feldAn, naechstesFeld, feldRadius, feldSlow, zugZurMitte,
   ernteFeldKill, tickFeld, DEFAULT_RAUM,
 } from './build/raum';
+import { nachsetzenFaellig, spawnImFahrtweg, DEFAULT_NACHSETZ } from './build/nachsetzen';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
 import { createFireRecorder } from './debug/fireRecorder';
@@ -252,6 +253,7 @@ function boot(combatStyle: CombatStyle): void {
   let aoeRange = 26; // Raum: Wurfweite — wie weit man ein Feld werfen kann (Größe/Schaden/Slow/Zug kommen aus RAUM_CFG/raum)
   const raum = createRaumState(); // Raum-Build: liegende Felder (FIFO max 3) + Ernte-Buff (RRR)
   const RAUM_CFG = { ...DEFAULT_RAUM }; // tunebare Feld-Config
+  const NACHSETZ_CFG = { ...DEFAULT_NACHSETZ }; // Nachsetzen: untätige Gegner in den Fahrtweg setzen (statt Rubberband)
   const feldDiscs: Mesh[] = []; // Boden-Discs, FIFO-synchron zu raum.felder
   let dotDmg = 36, dotEvery = DAMAGE_TICK * 2, dotDur = DAMAGE_TICK * 8; // DoT: alle 2 Ticks, 8 Ticks lang
   let scopeActive = false; // Sniper: RMB GEHALTEN → Scope+Slomo an (kein Fahren, weiter zoomen)
@@ -637,6 +639,7 @@ function boot(combatStyle: CombatStyle): void {
   // Tick-Schaden (DoT/AoE) direkt auf HP, Rüstung ignoriert; tötet bei <=0.
   function damageEnemyTick(e: Enemy, dmg: number, kind: 'schuss' | 'gift' | 'sonst' = 'schuss'): void {
     if (!e.combatant.alive) return;
+    e.untaetig = 0; // einen Treffer kassiert = relevant (Nachsetz-Timer zurück)
     e.combatant.hp -= dmg;
     if (!GIFT_BUILD && ultActive > 0 && befehlSkill.ult === 'seuche') ultSchaden += dmg; // Verfall-Ult: für den Lifesteal am Ende
     metrics.onHitDealt(dmg);
@@ -1204,6 +1207,8 @@ function boot(combatStyle: CombatStyle): void {
   tunables.add({ label: 'AoE-Wurfweite', category: 'Stile', value: aoeRange, min: 8, max: 60, step: 1, onChange: (v) => { aoeRange = v; } });
   tunables.add({ label: 'Feld-Radius', category: 'Stile', value: RAUM_CFG.radius, min: 6, max: 40, step: 1, onChange: (v) => { RAUM_CFG.radius = v; } });
   tunables.add({ label: 'Feld-Zugkraft (RR)', category: 'Stile', value: RAUM_CFG.zugStaerke, min: 0, max: 120, step: 5, onChange: (v) => { RAUM_CFG.zugStaerke = v; } });
+  tunables.add({ label: 'Nachsetz-Timeout (s)', category: 'Gegner', value: NACHSETZ_CFG.timeout, min: 2, max: 20, step: 1, onChange: (v) => { NACHSETZ_CFG.timeout = v; } });
+  tunables.add({ label: 'Nachsetz-Distanz', category: 'Gegner', value: NACHSETZ_CFG.distMin, min: 20, max: 120, step: 5, onChange: (v) => { NACHSETZ_CFG.distMin = v; } });
   tunables.add({ label: 'DoT-Schaden/Tick', category: 'Stile', value: dotDmg, min: 1, max: 80, step: 1, onChange: (v) => { dotDmg = v; } });
   tunables.add({ label: 'Frontlage-Puls s', category: 'Doktrin', value: pulseLen, min: 2, max: 120, step: 2, onChange: (v) => { pulseLen = v; } });
   createTuningPanel(tunables, { onChange: (label, value) => alog.log('regler', { label, value }) });
@@ -1829,8 +1834,7 @@ function boot(combatStyle: CombatStyle): void {
 
     // Gegner-Verhalten (R2): jeder Typ steuert nach seinem Muster auf einen Zielpunkt zu,
     // hält bei seinem Standoff und feuert in Schussweite. Konter = Verhalten, nicht Stats.
-    // Rubberband gegen den Wegfahr-Exploit: zurückgefallene Gegner holen schneller auf (nah = normal).
-    const RUBBER_AB = 30, RUBBER_SPANNE = 30, RUBBER_MAX = 2; // ab 40 Distanz wächst der Catch-up bis ×2.5 (~160+) — Stellschrauben
+    // Wegfahr-Exploit: KEIN Rubberband mehr — wer zu lange untätig ist, wird in den Fahrtweg gesetzt (s. u.).
     for (const e of roster) {
       if (!e.combatant.alive) continue;
       const er = e.view.root;
@@ -1844,13 +1848,25 @@ function boot(combatStyle: CombatStyle): void {
       }, behaviorTuning);
 
       const distToPlayer = Math.hypot(px - er.position.x, pz - er.position.z) || 1;
+      // Nachsetzen statt Rubberband: in Schussreichweite = relevant (Timer-Reset); sonst untätig hochzählen.
+      // Zu lange untätig (weder getroffen noch in Reichweite) → in den Fahrtweg des Spielers neu setzen.
+      if (distToPlayer <= enemyShotRange) e.untaetig = 0;
+      else {
+        e.untaetig = (e.untaetig ?? 0) + simDt;
+        if (nachsetzenFaellig(e.untaetig, NACHSETZ_CFG)) {
+          const p = spawnImFahrtweg(px, pz, playerVelX, playerVelZ, () => aiRng.next(), NACHSETZ_CFG);
+          er.position.x = p.x; er.position.z = p.z;
+          e.combatant.x = p.x; e.combatant.z = p.z;
+          e.untaetig = 0;
+          continue; // diesen Frame nur umsetzen
+        }
+      }
       if (distToPlayer > out.standoff) {
         const tdx = out.tx - er.position.x, tdz = out.tz - er.position.z;
         const tl = Math.hypot(tdx, tdz) || 1;
         const feldDrin = combatStyle === 'aoe' && feldAn(raum, er.position.x, er.position.z, RAUM_CFG); // Raum: im Feld?
         const slowFactor = (e.gift ? 1 - giftSlow(e.gift, gartenCfg) : 1) * (feldDrin ? 1 - feldSlow(RAUM_CFG) : 1); // Gift- + Feld-Slow
-        const rubber = 1 + Math.min(1, Math.max(0, (distToPlayer - RUBBER_AB) / RUBBER_SPANNE)) * (RUBBER_MAX - 1); // Catch-up je weiter zurückgefallen
-        const step = e.speed * mods.speedMul * slowFactor * rubber * simDt; // Tempo type-/stufen-getrieben + Rubberband
+        const step = e.speed * mods.speedMul * slowFactor * simDt; // Tempo type-/stufen-getrieben
 
         er.position.x += (tdx / tl) * step;
         er.position.z += (tdz / tl) * step;
