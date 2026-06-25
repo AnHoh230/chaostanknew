@@ -2,7 +2,7 @@
  * Balance-Taschenrechner — Progressions-Hochrechnung auf Basis ECHTER Run-Messpunkte. Beantwortet die
  * Kern-Frage: wie laufen Spieler-Schaden und Gegner-HP über die Zeit GEGENEINANDER?
  *
- * Datengrundlage: die MESSPUNKTE unten sind aus echten Run-Logs abgelesen (run-119, Befehl-Build) —
+ * Datengrundlage: die MESSPUNKTE unten sind aus echten Run-Logs abgelesen (run-121, Befehl-Build) —
  * je Zeit der gemessene Schaden/Schuss (= dpsOut/sps, also INKL. Aufbau) und kpm. Dazwischen wird
  * linear interpoliert, darüber hinaus linear extrapoliert (klar markiert). Die Gegner-Seite kommt aus
  * den echten Formeln (gegnerWelle/gartenTypStats), zieht also automatisch mit, wenn die Kurven sich ändern.
@@ -13,20 +13,21 @@
 import { gegnerWelle, gartenTypStats } from './gartenProgression';
 import { DEFAULT_GARTEN } from './garten';
 
-// — ECHTE MESSPUNKTE (run-119, Befehl-Build, 642s-Lauf) — t[s] → gemessen (dmgProSchuss = dpsOut/sps) —
+// — ECHTE MESSPUNKTE (run-121, Befehl-Build, 838s-Lauf inkl. Crit/Boni) — t[s] → gemessen (dmgProSchuss = dpsOut/sps) —
 export interface Messpunkt { t: number; kpm: number; dmgProSchuss: number; }
 export const MESSPUNKTE: Messpunkt[] = [
-  { t: 30, kpm: 8.7, dmgProSchuss: 72 }, // St0 Grundschuss
-  { t: 60, kpm: 9.4, dmgProSchuss: 103 }, // markiert, noch kein Aufbau
-  { t: 120, kpm: 11.5, dmgProSchuss: 130 },
-  { t: 180, kpm: 12.6, dmgProSchuss: 135 },
-  { t: 240, kpm: 13.8, dmgProSchuss: 203 }, // Aufbau setzt ein
-  { t: 300, kpm: 16.0, dmgProSchuss: 521 },
-  { t: 360, kpm: 20.4, dmgProSchuss: 2324 }, // Aufbau zündet (BBB grenzenlos)
-  { t: 420, kpm: 26.1, dmgProSchuss: 6209 },
-  { t: 480, kpm: 31.8, dmgProSchuss: 6543 },
-  { t: 540, kpm: 34.2, dmgProSchuss: 7028 },
-  { t: 600, kpm: 40.2, dmgProSchuss: 8087 }, // ~10 min; Tod 42 s später durch Racer-Masse bei 5 % HP
+  { t: 30, kpm: 8.4, dmgProSchuss: 72 }, // St0 Grundschuss
+  { t: 60, kpm: 8.6, dmgProSchuss: 90 }, // markiert, noch kein Aufbau
+  { t: 120, kpm: 11.4, dmgProSchuss: 122 },
+  { t: 180, kpm: 12.6, dmgProSchuss: 140 },
+  { t: 240, kpm: 13.5, dmgProSchuss: 235 }, // Aufbau setzt ein
+  { t: 300, kpm: 14.8, dmgProSchuss: 804 },
+  { t: 360, kpm: 21.8, dmgProSchuss: 1961 }, // Aufbau zündet (BBB grenzenlos)
+  { t: 420, kpm: 27.2, dmgProSchuss: 3012 },
+  { t: 480, kpm: 30.7, dmgProSchuss: 4593 },
+  { t: 540, kpm: 33.4, dmgProSchuss: 9804 },
+  { t: 600, kpm: 36.0, dmgProSchuss: 13597 },
+  { t: 660, kpm: 41.7, dmgProSchuss: 18099 }, // ~11 min; danach Plateau ~18k, Tod bei 838s (14 min, 5–12 % HP)
 ];
 
 // — ANNAHMEN für das, was (noch) NICHT im Log steht —
