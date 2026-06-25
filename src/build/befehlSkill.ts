@@ -57,7 +57,7 @@ export interface BefehlTalentDef { id: BefehlTalentId; name: string; text: strin
 export const BEFEHL_TALENTS: readonly BefehlTalentDef[] = [
   { id: 'disziplin', name: 'Eiserne Disziplin', text: 'Schutz-Ladung: ein Reihenfolge-Bruch wird verziehen (lädt bei Kette ≥15 nach)' },
   { id: 'dauer', name: 'Dauerbefehl', text: '+Ult-Dauer' },
-  { id: 'beute', name: 'Kriegsbeute', text: '+Aufbau-Stufen je in-Reihe-Kill' },
+  { id: 'beute', name: 'Kriegsbeute', text: '+1 Buff pro Kill je Rang (1 → 2/3/4 Aufbau-Stufen je in-Reihe-Kill)' },
   { id: 'cooldown', name: 'Schneller Stab', text: '−Ult-Cooldown' },
   { id: 'pol', name: 'Pol-Talent', text: 'je nach Ult: +Auto-Ziel / +Lifesteal / +Slow' },
 ];
@@ -65,7 +65,6 @@ export const BEFEHL_TALENTS: readonly BefehlTalentDef[] = [
 // Effekt-Konstanten pro Rang (Startwerte, frei tunebar):
 export const DAUER_PRO_RANG = 5; // s zusätzliche Ult-Dauer
 export const CD_PRO_RANG = 5; // s weniger Ult-Cooldown
-export const BEUTE_PRO_RANG = 1; // +Aufbau-Stufen je Kill (zusätzlich zur Standard-1)
 export const SCHUTZ_NACHLADE_KETTE = 15; // ab dieser Kette lädt eine Schutz-Ladung nach
 export const POL_UEBERMACHT_PRO_RANG = 1; // Generalstab: +gleichzeitige Auto-Ziele
 export const POL_ADERLASS_PRO_RANG = 0.01; // Verfall: +Lifesteal-Anteil

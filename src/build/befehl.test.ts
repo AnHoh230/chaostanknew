@@ -107,6 +107,17 @@ describe('Aufbau-Stufe', () => {
     expect(aufbauStufe(s)).toBe(3);
   });
 
+  it('Kriegsbeute (proKill): jeder Kill nach der Reihe gibt proKill Aufbau-Stufen', () => {
+    const s = createBefehlState();
+    baueKette(s, 4); // kette 4 = 1 Kill nach der Reihe
+    expect(aufbauStufe(s, 1)).toBe(1); // ohne Talent: 1 Buff/Kill
+    expect(aufbauStufe(s, 2)).toBe(2); // 1 Punkt: 2 Buffs/Kill
+    expect(aufbauStufe(s, 4)).toBe(4); // 3 Punkte: 4 Buffs/Kill
+    baueKette(s, 2); // kette 6 = 3 Kills nach der Reihe
+    expect(aufbauStufe(s, 2)).toBe(6); // 3 Kills × 2
+    expect(schadenStufe(s, 2)).toBe(6);
+  });
+
   it('schadenStufe nimmt den größeren aus laufendem Aufbau und gehaltenem Buff', () => {
     const s = createBefehlState();
     s.buffStufe = 2; s.buffRest = 5; // gehaltener Buff B aktiv, keine Kette

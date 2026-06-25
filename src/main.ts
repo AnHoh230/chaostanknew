@@ -61,7 +61,7 @@ import {
 } from './build/skilltree';
 import {
   befehlUltDef, SEUCHE_LIFESTEAL, createBefehlSkillState, chooseBefehlUlt, spendBefehlTalent,
-  BEFEHL_ULTS, BEFEHL_TALENTS, BEFEHL_TALENT_MAX, DAUER_PRO_RANG, CD_PRO_RANG, BEUTE_PRO_RANG, SCHUTZ_NACHLADE_KETTE,
+  BEFEHL_ULTS, BEFEHL_TALENTS, BEFEHL_TALENT_MAX, DAUER_PRO_RANG, CD_PRO_RANG, SCHUTZ_NACHLADE_KETTE,
   POL_UEBERMACHT_PRO_RANG, POL_ADERLASS_PRO_RANG, POL_KLAMMER_PRO_RANG, type BefehlUltId, type BefehlTalentId,
 } from './build/befehlSkill';
 import { thresholdForStage, maxStage, type TuningProfile } from './evolution/profiles';
@@ -802,7 +802,7 @@ function boot(combatStyle: CombatStyle): void {
     if (!e) return;
     // Sperrfeuer-Ult: alles ist markiert (Flächen-Buff) → frei abknallen mit Markier-Schaden, kein Counter/Bruch, keine Munition.
     if (ultActive > 0 && befehlSkill.ult === 'streuung') {
-      const bonus = Math.round(schadenStufe(befehl) * (1 + befehlSkill.ranks.beute * BEUTE_PRO_RANG)) * BEFEHL_DMG_PRO_STUFE; // Kriegsbeute-Talent
+      const bonus = schadenStufe(befehl, 1 + befehlSkill.ranks.beute) * BEFEHL_DMG_PRO_STUFE; // Kriegsbeute: +Buffs/Kill
       schiessLaser(e); damageEnemyTick(e, mitCrit(Math.round(playerStats().damage * sniperDmgMul * MARK_VERWUNDBAR + bonus)));
       fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
       return;
@@ -831,13 +831,13 @@ function boot(combatStyle: CombatStyle): void {
       fireCd = BEFEHL_FIRE_BASE; return;
     }
     // Aufbau-Bonus: additiv je Schadens-Stufe (laufender Aufbau bzw. gehaltener Buff), Gift-Größenordnung.
-    const bonus = stufe >= 2 ? Math.round(schadenStufe(befehl) * (1 + befehlSkill.ranks.beute * BEUTE_PRO_RANG)) * BEFEHL_DMG_PRO_STUFE : 0; // Kriegsbeute-Talent
+    const bonus = stufe >= 2 ? schadenStufe(befehl, 1 + befehlSkill.ranks.beute) * BEFEHL_DMG_PRO_STUFE : 0; // Kriegsbeute: +Buffs/Kill
     const dmg = mitCrit(Math.round(playerStats().damage * sniperDmgMul * MARK_VERWUNDBAR + bonus));
     schiessLaser(e); damageEnemyTick(e, dmg);
     if (!e.combatant.alive) {
       ammo = Math.min(AMMO_MAX, ammo + 1); // exekutiertes Ziel gibt die Markier-Munition zurück
       if (stufe >= 2) {
-        if (registriereKill(befehl, id, bbb).capErreicht) { entmarkiereAlle(); buffFlash(); showToast(`🔥 VERSTÄRKUNG +${BB_CAP} · ${BUFF_TIME}s`, '#9be36b'); } // BB: Buff B eingerastet, Auto-Stop
+        if (registriereKill(befehl, id, bbb, 1 + befehlSkill.ranks.beute).capErreicht) { entmarkiereAlle(); buffFlash(); showToast(`🔥 VERSTÄRKUNG +${BB_CAP} · ${BUFF_TIME}s`, '#9be36b'); } // BB: Buff B eingerastet, Auto-Stop
         // sonst: der Auto-Markierer (Loop) zieht einzeln das nächste Ziel nach (4·5·6…)
       } else befehl.marks = befehl.marks.filter((m) => m.id !== id); // B: einfach entfernen
     }
@@ -851,7 +851,7 @@ function boot(combatStyle: CombatStyle): void {
       if (!e.combatant.alive) continue;
       const infiziert = !!e.dot || e.buffs.active().some((b) => b.id === 'markiert');
       if (!infiziert) continue;
-      const burst = Math.round(e.combatant.maxHp * 0.6 + schadenStufe(befehl) * BEFEHL_DMG_PRO_STUFE); // tödlicher Schlussschlag
+      const burst = Math.round(e.combatant.maxHp * 0.6 + schadenStufe(befehl, 1 + befehlSkill.ranks.beute) * BEFEHL_DMG_PRO_STUFE); // tödlicher Schlussschlag
       damageEnemyTick(e, burst, 'sonst');
     }
     const lifesteal = SEUCHE_LIFESTEAL + befehlSkill.ranks.pol * POL_ADERLASS_PRO_RANG; // Aderlass-Talent
@@ -2106,7 +2106,7 @@ function boot(combatStyle: CombatStyle): void {
       // BB-Countdown bzw. BBB-permanent ∞) — zwei getrennte Blöcke, sofort unterscheidbar.
       if (!GIFT_BUILD && evo.unlockedStagesByChannel.sniper_core >= 2) {
         const teile: string[] = [];
-        const auf = aufbauStufe(befehl);
+        const auf = aufbauStufe(befehl, 1 + befehlSkill.ranks.beute);
         if (befehl.kette > 0) { // A: nur sichtbar, solange eine Kette läuft
           const reihe = Math.min(MAX_MARKS, befehl.kette);
           const aufTxt = auf > 0 ? ` <span style="color:#ffd166">▸ +${auf}</span>` : '';

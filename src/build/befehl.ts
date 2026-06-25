@@ -81,15 +81,18 @@ export function trefferArt(s: BefehlState, id: string): TrefferArt {
   return m.order === s.nextOrder ? 'aktuell' : 'vorgriff';
 }
 
-/** Laufende Aufbau-Stufe aus der lebenden Kette: 0 bis zur ersten vollen Reihe, dann +1 je weiterem Kill. */
-export function aufbauStufe(s: BefehlState): number {
-  return Math.max(0, s.kette - MAX_MARKS);
+/**
+ * Laufende Aufbau-Stufe aus der lebenden Kette: 0 bis zur ersten vollen Reihe, dann +proKill je weiterem
+ * Kill. `proKill` ist die Anzahl Buffs/Kill (Kriegsbeute-Talent: 1 ohne, 2/3/4 mit 1/2/3 Punkten).
+ */
+export function aufbauStufe(s: BefehlState, proKill = 1): number {
+  return Math.max(0, s.kette - MAX_MARKS) * proKill;
 }
 
-/** Effektive Schadens-Stufe = größerer Wert aus laufendem Aufbau und gehaltenem Buff (B/perma). */
-export function schadenStufe(s: BefehlState): number {
+/** Effektive Schadens-Stufe = größerer Wert aus laufendem Aufbau (×proKill) und gehaltenem Buff (B/perma). */
+export function schadenStufe(s: BefehlState, proKill = 1): number {
   const gehalten = s.buffRest !== 0 ? s.buffStufe : 0; // buffRest<0 = permanent (BBB), >0 = Countdown (BB)
-  return Math.max(aufbauStufe(s), gehalten);
+  return Math.max(aufbauStufe(s, proKill), gehalten);
 }
 
 /**
@@ -114,7 +117,7 @@ export interface KillFolge {
  * ein; BBB lässt den gehaltenen Bonus grenzenlos und permanent mitwachsen.
  * Ein Kill, der NICHT das aktuelle Ziel ist, ändert nichts (Kollateral/Edge).
  */
-export function registriereKill(s: BefehlState, id: string, bbb: boolean): KillFolge {
+export function registriereKill(s: BefehlState, id: string, bbb: boolean, proKill = 1): KillFolge {
   const m = s.marks.find((x) => x.id === id);
   if (!m || m.order !== s.nextOrder) return { reiheKomplett: false, capErreicht: false };
   s.kette += 1;
@@ -124,7 +127,7 @@ export function registriereKill(s: BefehlState, id: string, bbb: boolean): KillF
   const reiheKomplett = s.nextOrder > MAX_MARKS; // nur eine VOLLE MAX_MARKS-Reihe gilt als komplett
   // Salve abgearbeitet (auch unvollständig, z. B. nur 2 markiert) → Zeiger zurück für die nächste Salve.
   if (s.marks.length === 0) { s.nextOrder = 1; s.marks = []; }
-  const stufe = aufbauStufe(s);
+  const stufe = aufbauStufe(s, proKill);
   if (bbb) {
     // BBB: gehaltener Bonus wächst grenzenlos mit der Kette, verfällt nie (permanent).
     if (stufe > s.buffStufe) s.buffStufe = stufe;
