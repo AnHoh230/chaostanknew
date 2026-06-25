@@ -1207,7 +1207,7 @@ function boot(combatStyle: CombatStyle): void {
   tunables.add({ label: 'AoE-Wurfweite', category: 'Stile', value: aoeRange, min: 8, max: 60, step: 1, onChange: (v) => { aoeRange = v; } });
   tunables.add({ label: 'Feld-Radius', category: 'Stile', value: RAUM_CFG.radius, min: 6, max: 40, step: 1, onChange: (v) => { RAUM_CFG.radius = v; } });
   tunables.add({ label: 'Feld-Zugkraft (RR)', category: 'Stile', value: RAUM_CFG.zugStaerke, min: 0, max: 120, step: 5, onChange: (v) => { RAUM_CFG.zugStaerke = v; } });
-  tunables.add({ label: 'Nachsetz-Timeout (s)', category: 'Gegner', value: NACHSETZ_CFG.timeout, min: 2, max: 20, step: 1, onChange: (v) => { NACHSETZ_CFG.timeout = v; } });
+  tunables.add({ label: 'Nachsetz-Timeout (s)', category: 'Gegner', value: NACHSETZ_CFG.timeout, min: 2, max: 40, step: 1, onChange: (v) => { NACHSETZ_CFG.timeout = v; } });
   tunables.add({ label: 'Nachsetz-Distanz', category: 'Gegner', value: NACHSETZ_CFG.distMin, min: 20, max: 120, step: 5, onChange: (v) => { NACHSETZ_CFG.distMin = v; } });
   tunables.add({ label: 'DoT-Schaden/Tick', category: 'Stile', value: dotDmg, min: 1, max: 80, step: 1, onChange: (v) => { dotDmg = v; } });
   tunables.add({ label: 'Frontlage-Puls s', category: 'Doktrin', value: pulseLen, min: 2, max: 120, step: 2, onChange: (v) => { pulseLen = v; } });

@@ -12,7 +12,7 @@ export interface NachsetzCfg {
 }
 
 export const DEFAULT_NACHSETZ: NachsetzCfg = {
-  timeout: 7,
+  timeout: 15,
   distMin: 55,
   distSpanne: 35,
   streuung: Math.PI / 3, // ±60° um die Fahrtrichtung
