@@ -69,6 +69,9 @@ import { CHANNEL_DISPLAY, type BaseMode, type EvolutionChannelId } from './evolu
 import { createEvolutionState, gainProgress, tryTriggerEvolution } from './evolution/evolution';
 import { createCompassState, baryWeights } from './evolution/compass';
 import { createProgression } from './progression/progression';
+import {
+  createPlayerBoni, waehleBoni, randomBoniAuswahl, rollCrit, boniDef, type BoniId,
+} from './build/playerBoni';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
 import { createFireRecorder } from './debug/fireRecorder';
@@ -353,12 +356,27 @@ function boot(combatStyle: CombatStyle): void {
   };
   const liveCombatants = (): Combatant[] => [playerCombatant, ...roster.map((e) => e.combatant)];
 
-  // Spieler-Werte: fest aus der Klassen-Basis (kein Equipment mehr). armor/dodge bleiben 0,
-  // die Live-Regler (Buffs/Tempo-Mul) wirken zusätzlich darauf.
-  const playerStats = () => ({ damage: cls.damage, maxHp: cls.maxHp, speed: cls.speed, armor: 0, dodge: 0 });
+  // Spieler-Werte: Klassen-Basis + akkumulierte Level-Boni (maxHp/Tempo/Dodge). Crit läuft separat
+  // über mitCrit() auf den ausgeteilten Schaden; die Live-Regler (Buffs/Tempo-Mul) wirken zusätzlich.
+  const playerBoni = createPlayerBoni(); // zweite Wachstums-Achse: Level-Up-Wahlkarten
+  const playerStats = () => ({
+    damage: cls.damage,
+    maxHp: cls.maxHp + playerBoni.maxHp,
+    speed: cls.speed * (1 + playerBoni.speed),
+    armor: 0,
+    dodge: playerBoni.dodge,
+  });
   let playerSpeed = cls.speed; // Klassen-Basis × Buffs × Regler
   let playerSpeedMul = 1; // Live-Regler auf die eigene Fahrgeschwindigkeit
   const progression = createProgression(); // Level/XP/MK (P2)
+  // Crit-Wurf auf den FINALEN Schaden (inkl. Aufbau-Bonus → multiplikativ mit dem Build, das ist die
+  // gesuchte Synergie). critPending merkt den letzten Wurf, damit damageEnemyTick Crits rot färbt.
+  let critPending = false;
+  const mitCrit = (dmg: number): number => {
+    const r = rollCrit(playerBoni, Math.random);
+    critPending = r.crit;
+    return Math.round(dmg * r.dmgMul);
+  };
 
   // — Schicht 2: Kompass (Absicht) + Evolution (Fortschritt je Kanal) —
   const baseMode: BaseMode = combatStyle; // Grundmodus = gewählter Kampfstil
@@ -564,8 +582,8 @@ function boot(combatStyle: CombatStyle): void {
         if (flowState === 'flow' && e.typeId !== 'swarm') spawnImpulseOrb(e.combatant.x, e.combatant.z, ACTIVE_CORE, e.typeId === 'bunker' ? 8 : 4);
         const up = progression.addXp(Math.round(18 + (e.combatant.lootValue ?? 0.4) * 60));
         if (up.gained > 0) {
-          const mkNote = up.newMkUnlocks.length ? ` — MK${up.newMkUnlocks[up.newMkUnlocks.length - 1]} frei!` : '';
-          showToast(`Level ${progression.level}${mkNote}`);
+          if (up.newMkUnlocks.length) showToast(`MK${up.newMkUnlocks[up.newMkUnlocks.length - 1]} frei!`, '#9be36b');
+          onLevelUp(up.gained); // pro gewonnenem Level eine Boni-Auswahl (Welt pausiert)
         }
       }
     }
@@ -614,7 +632,8 @@ function boot(combatStyle: CombatStyle): void {
     e.combatant.hp -= dmg;
     if (!GIFT_BUILD && ultActive > 0 && befehlSkill.ult === 'seuche') ultSchaden += dmg; // Verfall-Ult: für den Lifesteal am Ende
     metrics.onHitDealt(dmg);
-    floatNums.spawn(e.combatant.x, e.combatant.z, dmg, kind === 'gift' ? '#9be36b' : kind === 'sonst' ? '#cdd6dd' : '#ffe08a');
+    const critHit = kind === 'schuss' && critPending; if (kind === 'schuss') critPending = false; // Crit-Flag pro Schuss konsumieren
+    floatNums.spawn(e.combatant.x, e.combatant.z, dmg, kind === 'gift' ? '#9be36b' : kind === 'sonst' ? '#cdd6dd' : critHit ? '#ff4d4d' : '#ffe08a');
     if (e.combatant.hp <= 0) {
       e.combatant.hp = 0;
       e.combatant.alive = false;
@@ -656,7 +675,7 @@ function boot(combatStyle: CombatStyle): void {
       if (GIFT_BUILD) {
         // Stufenweise: St 0 = Grundschuss (direkter Treffer, Z noch nicht ausgebildet); ab St 1
         // INFIZIERT der Schuss (Gift säen) — töten tut dann nur das Gift. „Markieren" = anschießen.
-        if (evo.unlockedStagesByChannel.dot_core < 1) damageEnemyTick(e, dmg);
+        if (evo.unlockedStagesByChannel.dot_core < 1) damageEnemyTick(e, mitCrit(dmg));
         else {
           const fresh = !e.gift; // nur die ERSTE Infektion loggen, nicht jedes Nachsäen
           e.gift = saeGift(e.gift, gartenCfg);
@@ -681,7 +700,7 @@ function boot(combatStyle: CombatStyle): void {
           alog.log('wundbruch', { target: id });
         } else woundPressure.set(id, np);
       }
-      damageEnemyTick(e, hitDmg); // Kill droppt einen Impuls-Orb (siehe killEnemy)
+      damageEnemyTick(e, mitCrit(hitDmg)); // Kill droppt einen Impuls-Orb (siehe killEnemy)
       if (netOn && e.combatant.alive) netMarks.push({ id, left: netLinger }); // Zielnetz: Marke bleibt liegen
       hits += 1;
     }
@@ -773,7 +792,7 @@ function boot(combatStyle: CombatStyle): void {
     // Sperrfeuer-Ult: alles ist markiert (Flächen-Buff) → frei abknallen mit Markier-Schaden, kein Counter/Bruch, keine Munition.
     if (ultActive > 0 && befehlSkill.ult === 'streuung') {
       const bonus = Math.round(schadenStufe(befehl) * (1 + befehlSkill.ranks.beute * BEUTE_PRO_RANG)) * BEFEHL_DMG_PRO_STUFE; // Kriegsbeute-Talent
-      schiessLaser(e); damageEnemyTick(e, Math.round(playerStats().damage * sniperDmgMul * MARK_VERWUNDBAR + bonus));
+      schiessLaser(e); damageEnemyTick(e, mitCrit(Math.round(playerStats().damage * sniperDmgMul * MARK_VERWUNDBAR + bonus)));
       fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
       return;
     }
@@ -789,7 +808,7 @@ function boot(combatStyle: CombatStyle): void {
         fireCd = BEFEHL_FIRE_BASE; return;
       }
       if (ammo <= 0) return; // ohne aktive Kette: unmarkiertes Ziel → normaler Schuss, kostet Munition
-      schiessLaser(e); damageEnemyTick(e, Math.round(playerStats().damage * sniperDmgMul));
+      schiessLaser(e); damageEnemyTick(e, mitCrit(Math.round(playerStats().damage * sniperDmgMul)));
       ammo = Math.max(0, ammo - 1);
       fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
       return;
@@ -802,7 +821,7 @@ function boot(combatStyle: CombatStyle): void {
     }
     // Aufbau-Bonus: additiv je Schadens-Stufe (laufender Aufbau bzw. gehaltener Buff), Gift-Größenordnung.
     const bonus = stufe >= 2 ? Math.round(schadenStufe(befehl) * (1 + befehlSkill.ranks.beute * BEUTE_PRO_RANG)) * BEFEHL_DMG_PRO_STUFE : 0; // Kriegsbeute-Talent
-    const dmg = Math.round(playerStats().damage * sniperDmgMul * MARK_VERWUNDBAR + bonus);
+    const dmg = mitCrit(Math.round(playerStats().damage * sniperDmgMul * MARK_VERWUNDBAR + bonus));
     schiessLaser(e); damageEnemyTick(e, dmg);
     if (!e.combatant.alive) {
       ammo = Math.min(AMMO_MAX, ammo + 1); // exekutiertes Ziel gibt die Markier-Munition zurück
@@ -841,7 +860,7 @@ function boot(combatStyle: CombatStyle): void {
           if (scopeActive && ammo > 0 && sniperTargets.length) {
             const e0 = roster.find((r) => r.id === sniperTargets[0] && r.combatant.alive);
             if (e0) {
-              schiessLaser(e0); damageEnemyTick(e0, Math.round(playerStats().damage * sniperDmgMul));
+              schiessLaser(e0); damageEnemyTick(e0, mitCrit(Math.round(playerStats().damage * sniperDmgMul)));
               ammo = Math.max(0, ammo - 1);
               fireCd = BEFEHL_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
             }
@@ -908,7 +927,7 @@ function boot(combatStyle: CombatStyle): void {
       }
       return;
     }
-    let shotDamage = playerStats().damage;
+    let shotDamage = mitCrit(playerStats().damage);
     if (combatStyle === 'dot') shotDamage = 0; // DoT: kein Soforttreffer, nur Gift beim Treffer
     const p = pool.acquire({
       x: origin.x,
@@ -1316,6 +1335,53 @@ function boot(combatStyle: CombatStyle): void {
     if (ev.key === 't' || ev.key === 'T') { if (skillOpen) closeSkill(); else openSkill(); }
     else if (ev.key === 'Escape' && skillOpen) closeSkill();
   });
+
+  // — Level-Up-Boni: bei jedem Aufstieg pausiert die Welt und bietet 3 zufällige Karten (zweite
+  //   Wachstums-Achse). Mehrere Level auf einmal (dicker Kill) werden als Queue nacheinander gewählt. —
+  let levelUpQueue = 0, levelUpOpen = false, levelPrevSpeed = 1;
+  let levelAuswahl: BoniId[] = [];
+  const levelPanel = document.createElement('div');
+  levelPanel.className = 'hud-cc'; // UI-Scale: bildschirmmittiges Modal (wie das Skill-Panel)
+  levelPanel.style.cssText =
+    'position:fixed;left:50%;top:50%;z-index:62;display:none;width:340px;' +
+    'background:#0e141bf2;border:1px solid #4a6a33;border-radius:10px;padding:14px 16px;font:600 12px system-ui,sans-serif;color:#cfe3ee;';
+  document.body.appendChild(levelPanel);
+  function renderLevelPanel(): void {
+    let html = `<div style="font-size:14px;color:#9be36b">⬆ Level ${progression.level} — wähle einen Bonus</div>`;
+    if (levelUpQueue > 1) html += `<div style="opacity:.6;font-size:10px;margin-top:2px">noch ${levelUpQueue} Aufstiege offen</div>`;
+    for (const id of levelAuswahl) {
+      const d = boniDef(id); if (!d) continue;
+      html += `<div data-boni="${id}" style="margin-top:6px;padding:8px 10px;border:1px solid #3a5a72;border-radius:6px;cursor:pointer">` +
+        `<div style="font-size:13px">${d.icon} ${d.name}</div>` +
+        `<div style="opacity:.7;font-size:10px;margin-top:1px">${d.text}</div></div>`;
+    }
+    levelPanel.innerHTML = html;
+  }
+  levelPanel.addEventListener('click', (ev) => {
+    const el = (ev.target as HTMLElement).closest('[data-boni]') as HTMLElement | null;
+    if (!el) return;
+    const id = el.getAttribute('data-boni') as BoniId;
+    const vorMax = playerStats().maxHp;
+    waehleBoni(playerBoni, id);
+    const nachMax = playerStats().maxHp;
+    if (nachMax > vorMax) { playerCombatant.maxHp = nachMax; playerCombatant.hp += nachMax - vorMax; } // Max-HP-Zuwachs sofort gutschreiben
+    levelUpQueue -= 1;
+    if (levelUpQueue > 0) { levelAuswahl = randomBoniAuswahl(3); renderLevelPanel(); } // nächste Wahl der Queue
+    else closeLevelUp();
+  });
+  function openLevelUp(): void {
+    if (levelUpOpen || levelUpQueue <= 0) return;
+    levelUpOpen = true; levelPrevSpeed = clock.simSpeed; clock.simSpeed = 0; // Welt pausieren
+    levelAuswahl = randomBoniAuswahl(3);
+    renderLevelPanel(); levelPanel.style.display = 'block';
+  }
+  function closeLevelUp(): void {
+    levelUpOpen = false; clock.simSpeed = levelPrevSpeed; levelPanel.style.display = 'none';
+  }
+  function onLevelUp(gained: number): void {
+    levelUpQueue += gained;
+    openLevelUp();
+  }
   function updateDashHud(): void {
     const ready = dashCd <= 0;
     dashSlotEl.style.borderColor = ready ? '#3c7d6e' : '#2a343b';
