@@ -54,8 +54,17 @@ describe('Raum-Build (Felder)', () => {
     it('ohne Buff der Basisradius', () => {
       expect(feldRadius(C, 0)).toBe(C.radius);
     });
-    it('Buff 250 → +25 % Radius (10 % des Buffs)', () => {
-      expect(feldRadius(C, 250)).toBeCloseTo(C.radius * 1.25);
+    it('mit genug Buff verdoppelt sich der Radius (+wachstumProBuff je Buff)', () => {
+      const buffFuerDoppelt = 1 / C.wachstumProBuff; // +100 %
+      expect(feldRadius(C, buffFuerDoppelt)).toBeCloseTo(C.radius * 2);
+    });
+    it('die Größe ist bei wachstumCap gedeckelt (mehr Buff = nicht größer)', () => {
+      expect(feldRadius(C, C.wachstumCap + 100)).toBeCloseTo(feldRadius(C, C.wachstumCap));
+      expect(feldRadius(C, C.wachstumCap + 100)).toBeGreaterThan(C.radius); // bis zum Cap aber gewachsen
+    });
+    it('sizeMul vergrößert den Radius multiplikativ (Großfeld-Ult ×3)', () => {
+      expect(feldRadius(C, 0, 3)).toBeCloseTo(C.radius * 3);
+      expect(feldRadius(C, 0)).toBe(C.radius); // Default-sizeMul 1 = unverändert
     });
   });
 
@@ -63,16 +72,23 @@ describe('Raum-Build (Felder)', () => {
     it('findet das Feld, in dem ein Punkt liegt; null außerhalb', () => {
       const s = createRaumState();
       legeFeld(s, 0, 0);
-      expect(feldAn(s, 5, 0)).toEqual({ x: 0, z: 0 }); // innerhalb radius 14
+      expect(feldAn(s, C.radius * 0.5, 0)).toEqual({ x: 0, z: 0 }); // innerhalb des Radius
       expect(feldAn(s, 100, 0)).toBeNull();
     });
     it('größere Felder (Buff) fangen weiter entfernte Punkte', () => {
       const s = createRaumState();
       legeFeld(s, 0, 0);
-      const knappDraussen = C.radius + 3;
+      const knappDraussen = C.radius * 1.2; // knapp außerhalb; der Buff (×1.5) holt ihn rein
       expect(feldAn(s, knappDraussen, 0)).toBeNull();
-      s.buff = 500; // +50 % Radius
+      s.buff = 0.5 / C.wachstumProBuff; // genug Buff, dass der gewachsene Radius knappDraussen einschließt
       expect(feldAn(s, knappDraussen, 0)).not.toBeNull();
+    });
+    it('sizeMul vergrößert die Fang-Reichweite (Großfeld-Ult ×3)', () => {
+      const s = createRaumState();
+      legeFeld(s, 0, 0);
+      const draussen = C.radius * 2; // normal außerhalb
+      expect(feldAn(s, draussen, 0)).toBeNull();
+      expect(feldAn(s, draussen, 0, C, 3)).not.toBeNull(); // mit ×3 drin
     });
   });
 

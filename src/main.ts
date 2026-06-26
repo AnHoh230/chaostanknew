@@ -43,7 +43,6 @@ import { createRunMetrics } from './debug/runMetrics';
 import { createTunables } from './ui/tunables';
 import { createTuningPanel } from './ui/tuningPanel';
 import { TANK_CLASSES } from './game/classes';
-import { computeFlowState, pruneDeathTimes, type FlowState } from './game/flowState';
 import { ROSTER, DEFAULT_ESCALATION, scaleStats } from './enemy/roster';
 import { saeGift, tickGift, istReif, reifeStufe, giftSlow, DEFAULT_GARTEN } from './build/garten';
 import { gegnerWelle, gartenTypStats, pulkGroesse, BUILD_STUFE_NAME, GARTEN_BASIS } from './build/gartenProgression';
@@ -64,6 +63,11 @@ import {
   BEFEHL_ULTS, BEFEHL_TALENTS, BEFEHL_TALENT_MAX, DAUER_PRO_RANG, CD_PRO_RANG, SCHUTZ_NACHLADE_KETTE,
   POL_UEBERMACHT_PRO_RANG, POL_ADERLASS_PRO_RANG, POL_KLAMMER_PRO_RANG, type BefehlUltId, type BefehlTalentId,
 } from './build/befehlSkill';
+import {
+  createRaumSkillState, chooseRaumUlt, spendRaumTalent, raumUltDef, RAUM_ULTS, RAUM_TALENTS,
+  RAUM_TALENT_MAX, RAUM_ULT_GROSSFELD_MUL, RAUM_DAUER_PRO_RANG, RAUM_CD_PRO_RANG,
+  RAUM_BEUTE_PRO_RANG, RAUM_DMG_PRO_RANG, RAUM_MUNITION_PRO_RANG, type RaumUltId, type RaumTalentId,
+} from './build/raumSkill';
 import { thresholdForStage, maxStage, type TuningProfile } from './evolution/profiles';
 import { CHANNEL_DISPLAY, type BaseMode, type EvolutionChannelId } from './evolution/channels';
 import { createEvolutionState, gainProgress, tryTriggerEvolution } from './evolution/evolution';
@@ -76,10 +80,10 @@ import {
   createRaumState, legeFeld, feldAn, naechstesFeld, feldRadius, feldSlow, zugZurMitte,
   ernteFeldKill, tickFeld, DEFAULT_RAUM,
 } from './build/raum';
+import { primaerPol, polKernKanal, archetyp, KOMMANDER_MODE, type Pol, type BuildFolge } from './build/buildModell';
 import { nachsetzenFaellig, spawnRundum, DEFAULT_NACHSETZ } from './build/nachsetzen';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
-import { createFireRecorder } from './debug/fireRecorder';
 import { createReticle } from './ui/reticle';
 import type { TankComposition } from './tank/sockets';
 
@@ -93,17 +97,20 @@ const HIT_DAMAGE = 20; // Schaden pro Treffer (100 HP -> 5 Treffer)
 const ENEMY_FIRE_COOLDOWN = 1.4; // Sekunden zwischen Gegner-Schüssen
 const DAMAGE_TICK = 0.5; // Länge eines „Ticks" (s) für DoT/AoE-Schaden
 
-/** Kampfstil (Startwahl): bestimmt, wie der Hauptschuss wirkt. */
-export type CombatStyle = 'sniper' | 'aoe' | 'dot';
-const COMBAT_STYLES: { id: CombatStyle; name: string; desc: string }[] = [
-  { id: 'sniper', name: 'Kommandant (Befehl)', desc: 'Scope (Rechtsklick): Ziele markieren und in Reihenfolge exekutieren. B/BB/BBB baut grenzenlos Schaden auf.' },
-  { id: 'aoe', name: 'Raum (Felder)', desc: 'Felder ablegen (max 3, FIFO). Gegner darin sterben & werden verlangsamt; RR fängt sie ein, RRR-Ernte macht Felder größer + stärker.' },
-  { id: 'dot', name: 'Garten (Gift)', desc: 'Schuss sät Gift wie eine Seuche: Z infiziert, ZZ reift & steckt an, ZZZ erntet — reife sterben am Gift.' },
+/**
+ * Build-Wahl (Startwahl). Die KLASSE ist immer der Kommander (Scope + 3 Munition + Slomo);
+ * gewählt wird der BUILD als reiner Archetyp (BBB/ZZZ/RRR). Der Build bestimmt nur, was der
+ * Scope-Schuss tut — er ist KEINE eigene Klasse. (Kompass-Mischbuilds folgen später.)
+ */
+const BUILDS: { pol: Pol; name: string; desc: string }[] = [
+  { pol: 'befehl', name: 'Befehl · BBB', desc: 'Scope (Rechtsklick): Ziele markieren und in Reihenfolge exekutieren. B/BB/BBB baut grenzenlos Schaden auf.' },
+  { pol: 'raum', name: 'Raum · RRR', desc: 'Felder ablegen (max 3, FIFO). Gegner darin sterben & werden verlangsamt; RR fängt sie ein, RRR-Ernte macht Felder größer + stärker.' },
+  { pol: 'zustand', name: 'Zustand · ZZZ', desc: 'Schuss sät Gift wie eine Seuche: Z infiziert, ZZ reift & steckt an, ZZZ erntet — reife sterben am Gift.' },
 ];
 
 const log = createLogger('main');
 
-function mountStartScreen(onStart: (style: CombatStyle) => void): void {
+function mountStartScreen(onStart: (build: BuildFolge) => void): void {
   const overlay = document.createElement('div');
   overlay.id = 'start-screen';
   overlay.style.cssText =
@@ -111,7 +118,7 @@ function mountStartScreen(onStart: (style: CombatStyle) => void): void {
     'gap:20px;background:#0b0d10;z-index:10;font-family:system-ui,sans-serif;';
 
   const title = document.createElement('div');
-  title.textContent = 'Wähle deinen Kampfstil';
+  title.textContent = 'Kommander — wähle deinen Build';
   title.style.cssText = 'color:#f0e6cc;font-size:24px;font-weight:700;letter-spacing:0.5px;';
   overlay.appendChild(title);
 
@@ -119,7 +126,7 @@ function mountStartScreen(onStart: (style: CombatStyle) => void): void {
   row.style.cssText = 'display:flex;gap:18px;flex-wrap:wrap;justify-content:center;';
   overlay.appendChild(row);
 
-  for (const s of COMBAT_STYLES) {
+  for (const s of BUILDS) {
     const card = document.createElement('button');
     card.style.cssText =
       'width:240px;text-align:left;cursor:pointer;border:2px solid #2a343b;background:#13171c;' +
@@ -129,7 +136,7 @@ function mountStartScreen(onStart: (style: CombatStyle) => void): void {
     card.innerHTML =
       `<div style="font-size:20px;font-weight:700;margin-bottom:6px">${s.name}</div>` +
       `<div style="font:13px/1.45 system-ui;color:#b9b29c;min-height:96px">${s.desc}</div>`;
-    card.addEventListener('click', () => { overlay.remove(); onStart(s.id); });
+    card.addEventListener('click', () => { overlay.remove(); onStart(archetyp(s.pol)); });
     row.appendChild(card);
   }
 
@@ -147,9 +154,9 @@ function getCanvas(): HTMLCanvasElement {
   return canvas;
 }
 
-function boot(combatStyle: CombatStyle): void {
-  const cls = TANK_CLASSES[0]!; // feste Klasse; Wahl ist jetzt der Kampfstil
-  log.info('boot start', { seed: SEED, biome: BIOME_ID, stil: combatStyle });
+function boot(build: BuildFolge): void {
+  const cls = TANK_CLASSES[0]!; // feste Klasse (Kommander); die Wahl ist der BUILD, nicht die Klasse
+  log.info('boot start', { seed: SEED, biome: BIOME_ID, build: build.join('-') });
 
   const canvas = getCanvas();
   const engine = new Engine(canvas, true);
@@ -207,15 +214,19 @@ function boot(combatStyle: CombatStyle): void {
   // Aktiver Build — fest für den Test; der Kompass wird ignoriert, ALLES levelt den aktiven Kern.
   //  'garten' = Z/Seuche (dot_core), 'befehl' = B/Kommandant (sniper_core).
   // ARENA_MODE = gemeinsames Gerüst (Spawn/Waffen-Ökonomie/Kamera/Heat) für jeden Arena-Build;
-  // GIFT_BUILD nur für die Garten-spezifische Gift-Mechanik (säen/ticken).
+  // istZustand nur für die Garten-spezifische Gift-Mechanik (säen/ticken).
   // Build kommt aus der Start-Screen-Wahl (combatStyle): Kommandant→Befehl, AoE→Raum, DoT→Garten.
   // Welche drei Builds im Menü stehen, steuern wir über COMBAT_STYLES — so tauschen wir aus, was testbar ist.
-  const BUILD: 'garten' | 'befehl' | 'raum' =
-    combatStyle === 'dot' ? 'garten' : combatStyle === 'aoe' ? 'raum' : 'befehl';
+  // Eine Klasse: der Kommander. Der gewählte BUILD (Slot 1) bestimmt, was der Scope-Schuss tut:
+  // Befehl=markieren · Zustand=Gift säen · Raum=Feld legen. KEINE eigene Klasse je Build.
+  const pol = primaerPol(build);
+  const istBefehl = pol === 'befehl';
+  const istZustand = pol === 'zustand';
+  const istRaum = pol === 'raum';
   const ARENA_MODE = true;
-  const GIFT_BUILD = BUILD === 'garten';
-  const ACTIVE_CORE: EvolutionChannelId =
-    BUILD === 'garten' ? 'dot_core' : BUILD === 'raum' ? 'aoe_core' : 'sniper_core';
+  // Alle Builds laufen auf dem Kommander-EIGENEN Kanal (sniper_core / sniper_dot_aoe / sniper_aoe_dot),
+  // NIE auf dot_core/aoe_core — das wären die Kerne anderer (späterer) Klassen.
+  const ACTIVE_CORE: EvolutionChannelId = polKernKanal(pol);
   const gartenCfg = { ...DEFAULT_GARTEN };
   const GARTEN_SNAP_PX = 150; // großzügiger Cursor-Fang fürs manuelle Säen (du wählst die Ziele selbst)
   // Sichtbare Reife (Slot 2): der vergiftete Panzer glüht stufenweise grün→rot, je näher am Erntebruch.
@@ -250,7 +261,6 @@ function boot(combatStyle: CombatStyle): void {
   let netLinger = 4, netDmg = 8, netSpreadR = 10; // s Restdauer / Schaden je Tick / Streuradius (ab St2)
   const woundPressure = new Map<string, number>(); // Auswahl-Wundbruch: Wunddruck je Ziel
   let woundStep = 20, woundCap = 90, woundBurstDmg = 60, woundBurstR = 14; // Aufbau / Bruch-Schwelle / Bruch-AoE
-  let aoeRange = 26; // Raum: Wurfweite — wie weit man ein Feld werfen kann (Größe/Schaden/Slow/Zug kommen aus RAUM_CFG/raum)
   const raum = createRaumState(); // Raum-Build: liegende Felder (FIFO max 3) + Ernte-Buff (RRR)
   const RAUM_CFG = { ...DEFAULT_RAUM }; // tunebare Feld-Config
   const NACHSETZ_CFG = { ...DEFAULT_NACHSETZ }; // Nachsetzen: untätige Gegner in den Fahrtweg setzen (statt Rubberband)
@@ -284,6 +294,17 @@ function boot(combatStyle: CombatStyle): void {
   let skillProgress = 0; // gesammelter Impuls-Überschuss Richtung nächstem Skillpunkt
   let ultActive = 0, ultCd = 0; // Ult-Timer: s noch aktiv / s noch Cooldown
   const befehlSkill = createBefehlSkillState(); // Ult/Talente werden im Skill-Panel (T) gewählt
+  const raumSkill = createRaumSkillState(); // RRR: drei Pol-Ults (Umlagerung/Großfeld/Verseuchung), im Panel (T)
+  // Pol-Ult → Kanal des KOMMANDERS für diesen Pol. Eine RRR-Ult ist nur wählbar, wenn DIESER Pol
+  // Impulse gesammelt hat (Stufe ≥ 1). Im reinen RRR-Build hat nur Raum (sniper_aoe_dot) Stufen →
+  // nur Großfeld (Raum-Pol) wählbar; Umlagerung/Verseuchung brauchen B-/Z-Impulse (Mischbuild/Kompass).
+  const polUltKanal = (pol: string): EvolutionChannelId =>
+    pol === 'Befehl' ? 'sniper_core' : pol === 'Zustand' ? 'sniper_dot_aoe' : 'sniper_aoe_dot';
+  const raumUltVerfuegbar = (pol: string): boolean => evo.unlockedStagesByChannel[polUltKanal(pol)] >= 1;
+  // Großfeld-Ult: solange aktiv ×3 Feldgröße (sonst 1). An feldAn/feldRadius/Disc weitergereicht.
+  const raumSizeMul = (): number => (ultActive > 0 && istRaum && raumSkill.ult === 'grossfeld') ? RAUM_ULT_GROSSFELD_MUL : 1;
+  // Vorrat-Talent (nur Raum): +1 Munition (Magazingröße) je Rang.
+  const maxAmmo = (): number => AMMO_MAX + (istRaum ? raumSkill.ranks.munition * RAUM_MUNITION_PRO_RANG : 0);
   let ultSchaden = 0; // Seuche-Ult: Summe des ausgeteilten Schadens (für Lifesteal am Ende)
   let schutzLadungen = 0; // Eiserne Disziplin: aktuelle Ketten-Schutz-Ladungen
   let prevKette = 0; // für die Kette-≥15-Nachlade-Erkennung
@@ -389,7 +410,7 @@ function boot(combatStyle: CombatStyle): void {
   };
 
   // — Schicht 2: Kompass (Absicht) + Evolution (Fortschritt je Kanal) —
-  const baseMode: BaseMode = combatStyle; // Grundmodus = gewählter Kampfstil
+  const baseMode: BaseMode = KOMMANDER_MODE; // eine Klasse: immer der Kommander ('sniper')
   const evo = createEvolutionState(baseMode);
   const compass = createCompassState();
   const evoMinFirst = 20, evoMinBetween = 25; // Mindestzeiten fürs Evolutions-Fenster (LOOP_TEST-Debug)
@@ -491,10 +512,6 @@ function boot(combatStyle: CombatStyle): void {
   let spawnGraceCd = 5; // 5s nach Erscheinen: unverwundbar (Spawn & Respawn)
   // — Schicht 0/1: Bauprofil (aus evolution/profiles) + Flow-State-Maschine —
   const currentTuningProfile: TuningProfile = 'LOOP_TEST'; // bis der Loop 5+ min stabil trägt
-  const deathTimes: number[] = []; // Zeitstempel jüngster Tode (runClock) für Deathloop-Erkennung
-  let lastRespawnAt = 0; // runClock des letzten Respawns (Respawn-Schonfrist)
-  let flowState: FlowState = 'flow';
-  let prevFlowState: FlowState = 'flow';
   let runOver = false; // Tod = Run vorbei (kein Respawn) → alles auf Anfang per Reload
   const fxList: { mesh: Mesh; mat: StandardMaterial; life: number; max: number; fade: boolean; alpha0: number }[] = []; // kurzlebige Effekt-Meshes (Laser, Rauch)
 
@@ -558,7 +575,7 @@ function boot(combatStyle: CombatStyle): void {
       if (h.projectile.team === 'player') {
         styleTracker.onDamageDealt({ amount: h.damage, fromAutoTurret: h.projectile.auto });
         metrics.onHitDealt(h.damage);
-        if (combatStyle === 'dot' && !h.projectile.auto) {
+        if (istZustand && !h.projectile.auto) {
           const e = roster.find((r) => r.id === h.target.id); // Gift setzen/erneuern (kein Initial: 1. Tick nach dotEvery)
           if (e) e.dot = { left: dotDur, tickCd: dotEvery };
         }
@@ -589,7 +606,7 @@ function boot(combatStyle: CombatStyle): void {
       // (sonst flutet der späte Schwarm den Aufbau); Rest gibt weniger als früher → Progress gestreckt.
       // Häscher geben NICHTS: kein Impuls-Orb, keine XP (reiner Druck, kein Futter fürs Build).
       if (!e.haescher) {
-        if (flowState === 'flow' && e.typeId !== 'swarm') spawnImpulseOrb(e.combatant.x, e.combatant.z, ACTIVE_CORE, e.typeId === 'bunker' ? 8 : 4);
+        if (e.typeId !== 'swarm') spawnImpulseOrb(e.combatant.x, e.combatant.z, ACTIVE_CORE, e.typeId === 'bunker' ? 8 : 4); // Kill droppt Impuls (Schwarm = Futter, gibt keinen); KEINE Spieler-Schonfrist auf Gegner-Drops
         const up = progression.addXp(Math.round(18 + (e.combatant.lootValue ?? 0.4) * 60));
         if (up.gained > 0) {
           if (up.newMkUnlocks.length) showToast(`MK${up.newMkUnlocks[up.newMkUnlocks.length - 1]} frei!`, '#9be36b');
@@ -641,7 +658,7 @@ function boot(combatStyle: CombatStyle): void {
     if (!e.combatant.alive) return;
     e.untaetig = 0; // einen Treffer kassiert = relevant (Nachsetz-Timer zurück)
     e.combatant.hp -= dmg;
-    if (!GIFT_BUILD && ultActive > 0 && befehlSkill.ult === 'seuche') ultSchaden += dmg; // Verfall-Ult: für den Lifesteal am Ende
+    if (istBefehl && ultActive > 0 && befehlSkill.ult === 'seuche') ultSchaden += dmg; // Verfall-Ult: für den Lifesteal am Ende
     metrics.onHitDealt(dmg);
     const critHit = kind === 'schuss' && critPending; if (kind === 'schuss') critPending = false; // Crit-Flag pro Schuss konsumieren
     floatNums.spawn(e.combatant.x, e.combatant.z, dmg, kind === 'gift' ? '#9be36b' : kind === 'sonst' ? '#cdd6dd' : critHit ? '#ff4d4d' : '#ffe08a');
@@ -652,11 +669,8 @@ function boot(combatStyle: CombatStyle): void {
     }
   }
 
-  // Permanenter Schuss-Rekorder: friert pro Schuss alle Zahlen + Cursor ein.
-  const recorder = createFireRecorder(scene, camera);
   let simTime = 0; // Sekunden seit Boot (Sim-Uhr), in der Loop akkumuliert
   let frame = 0;
-  let shotSeq = 0;
   let snapCd = 0; // Diagnose-Snapshot-Takt (s); Default/Regler unten
   let runClock = 0; // Laufzeit-Uhr (Summe simDt) für Gegner-Lebensdauer
   const spawnTimes = new Map<string, number>(); // Gegner-ID → Spawn-Zeitpunkt (für Ø-Lebensdauer)
@@ -683,10 +697,10 @@ function boot(combatStyle: CombatStyle): void {
       if (!e) continue;
       turret.rotation.y = yawTo(origin.x, origin.z, e.combatant.x, e.combatant.z) - root.rotation.y;
       spawnLaser(origin.x, origin.z, e.combatant.x, e.combatant.z);
-      if (GIFT_BUILD) {
+      if (istZustand) {
         // Stufenweise: St 0 = Grundschuss (direkter Treffer, Z noch nicht ausgebildet); ab St 1
         // INFIZIERT der Schuss (Gift säen) — töten tut dann nur das Gift. „Markieren" = anschießen.
-        if (evo.unlockedStagesByChannel.dot_core < 1) damageEnemyTick(e, mitCrit(dmg));
+        if (evo.unlockedStagesByChannel[ACTIVE_CORE] < 1) damageEnemyTick(e, mitCrit(dmg));
         else {
           const fresh = !e.gift; // nur die ERSTE Infektion loggen, nicht jedes Nachsäen
           e.gift = saeGift(e.gift, gartenCfg);
@@ -860,11 +874,10 @@ function boot(combatStyle: CombatStyle): void {
   };
 
   function fire(): void {
-    // Befehl schießt auch im Fahrmodus; nur der Garten-Kommandant feuert ausschließlich im Scope.
-    if (GIFT_BUILD && combatStyle === 'sniper' && !scopeActive) return;
-    if (combatStyle === 'sniper') {
+    // Eine Klasse (Kommander): was der Schuss tut, entscheidet der Build-Pol weiter unten.
+    if (istBefehl) {
       if (fireCd > 0) return; // nach einem Schuss kurz nachladen
-      if (!GIFT_BUILD) {
+      if (istBefehl) {
         // Befehl wächst von St0 (Grundschuss) zu St1 (B = Markieren) — Stufen schalten über sniper_core frei.
         if (evo.unlockedStagesByChannel.sniper_core < 1) {
           // St0 — Grundschuss: im Scope direkter Treffer aufs Cursor-Ziel, B noch nicht ausgebildet.
@@ -891,102 +904,43 @@ function boot(combatStyle: CombatStyle): void {
         }
         return;
       }
-      if (!sniperTargets.length) return; // Garten: kein Ziel in Reichweite
-      if (ammo <= 0) return; // leer → erst auf R nachladen
-      fireVolley(sniperTargets);
-      ammo = Math.max(0, ammo - 1); // ein Infektions-Schuss verbraucht
+    }
+    // Z & R sind Builds DESSELBEN Kommanders: gefeuert wird NUR im Scope (die Slomo-/Magazin-Ökonomie
+    // der Klasse), Linksklick kostet eine Munition. Kein freies Fahrmodus-Feuern für Z/R.
+    if (!scopeActive || fireCd > 0 || ammo <= 0) return;
+    fireCd = GARTEN_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
+    if (istZustand) {
+      // Z: das per Cursor gewählte Ziel infizieren → volles Gift (reift, steckt an, erntet).
+      if (sniperTargets.length) { fireVolley(sniperTargets); ammo = Math.max(0, ammo - 1); }
       return;
     }
-    if (fireCd > 0) return; // Feuer-Cooldown (Kühlmittel senkt ihn)
-    fireCd = PLAYER_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
-    const root = tank.view.root;
-    const turret = tank.view.turretNode;
-    const origin = root.getAbsolutePosition();
-    const ray = scene.createPickingRay(scene.pointerX, scene.pointerY, Matrix.Identity(), camera);
-    const g = rayGroundY0(
-      ray.origin.x,
-      ray.origin.y,
-      ray.origin.z,
-      ray.direction.x,
-      ray.direction.y,
-      ray.direction.z,
-    );
-    // Richtung vom Schuss-Ursprung zum Cursor-Bodenpunkt; Fallback: Turm-Vorwärts.
-    let dx: number;
-    let dz: number;
-    if (g) {
-      const tx = g.x - origin.x;
-      const tz = g.z - origin.z;
-      const tl = Math.hypot(tx, tz) || 1;
-      dx = tx / tl;
-      dz = tz / tl;
-      turret.rotation.y = yawTo(origin.x, origin.z, g.x, g.z) - root.rotation.y; // Optik, Chassis kompensiert
-    } else {
-      turret.computeWorldMatrix(true);
-      const fwd = turret.getDirection(new Vector3(0, 0, 1));
-      const len = Math.hypot(fwd.x, fwd.z) || 1;
-      dx = fwd.x / len;
-      dz = fwd.z / len;
-    }
-    // AoE: KEIN Projektil — die Bogenlampe legt am Cursor ein Schadensfeld ab (Wurfweite begrenzt).
-    if (combatStyle === 'aoe') {
-      if (g) {
-        placeAoeField(g.x, g.z, origin.x, origin.z);
-        metrics.onShot();
-        lastFireClock = runClock;
-        alog.log('aoe', { x: +g.x.toFixed(1), z: +g.z.toFixed(1) });
+    // R: Stufe 0 = der Kommander-Normalschuss (Direkttreffer aufs Cursor-Ziel) — die Klassen-Baseline;
+    // erst ab Stufe 1 (R) legt der Scope-Schuss Felder. (Z macht das analog intern in fireVolley.)
+    if (evo.unlockedStagesByChannel[ACTIVE_CORE] < 1) {
+      if (sniperTargets.length) {
+        const e0 = roster.find((r) => r.id === sniperTargets[0] && r.combatant.alive);
+        if (e0) { schiessLaser(e0); damageEnemyTick(e0, mitCrit(Math.round(playerStats().damage * sniperDmgMul))); ammo = Math.max(0, ammo - 1); }
       }
       return;
     }
-    let shotDamage = mitCrit(playerStats().damage);
-    if (combatStyle === 'dot') shotDamage = 0; // DoT: kein Soforttreffer, nur Gift beim Treffer
-    const p = pool.acquire({
-      x: origin.x,
-      y: 0.5,
-      z: origin.z,
-      dx,
-      dz,
-      speed: playerProjSpeed,
-      life: shotRange / playerProjSpeed, // begrenzte Schussweite (im Scope = sniperRange)
-      team: 'player',
-      damage: shotDamage,
-    });
-    if (p) {
-      bus.emit('tank.fired', { tankId: tank.id });
-      bus.emit('projectile.spawned', { id: p.id });
+    // R (ab Stufe 1): ein Feld FREI am Cursor-Bodenpunkt ablegen (im Scope-Blick, keine Wurfweiten-Klemme).
+    const ray = scene.createPickingRay(scene.pointerX, scene.pointerY, Matrix.Identity(), camera);
+    const g = rayGroundY0(ray.origin.x, ray.origin.y, ray.origin.z, ray.direction.x, ray.direction.y, ray.direction.z);
+    if (g) {
+      placeAoeField(g.x, g.z);
+      if (!(ultActive > 0 && raumSkill.ult === 'umlagerung')) ammo = Math.max(0, ammo - 1); // Umlagerung-Ult: freie Verlegung ohne Munition
       metrics.onShot();
-      lastFireClock = runClock; // manuelles Feuern = aktiver Input (für Idle-Erkennung)
-      alog.log('shot', { x: +origin.x.toFixed(1), z: +origin.z.toFixed(1), dmg: shotDamage });
-      // Schuss mit Zeitstempel + eingefrorenem Cursor protokollieren.
-      recorder.recordShot({
-        shotId: ++shotSeq,
-        frame,
-        simTime,
-        tankX: root.position.x,
-        tankZ: root.position.z,
-        originX: origin.x,
-        originZ: origin.z,
-        dirX: dx,
-        dirZ: dz,
-        speed: PROJECTILE_SPEED,
-        range: shotRange,
-      });
-      log.debug('fired', { tankId: tank.id, projectile: p.id, dx, dz });
-    } else {
-      log.warn('pool full, shot dropped', { capacity: PROJECTILE_CAPACITY });
+      lastFireClock = runClock;
+      alog.log('aoe', { x: +g.x.toFixed(1), z: +g.z.toFixed(1) });
     }
   }
 
-  // Raum: ein Feld am (auf Wurfweite geklemmten) Cursor-Punkt ablegen. Bleibt liegen, FIFO max 3 —
-  // ein neues Feld schiebt das älteste weg (Logik + Disc synchron). Schaden/Slow/Zug macht die Loop.
-  function placeAoeField(gx: number, gz: number, ox: number, oz: number): void {
-    const ddx = gx - ox, ddz = gz - oz;
-    const d = Math.hypot(ddx, ddz) || 1;
-    const cx = d > aoeRange ? ox + (ddx / d) * aoeRange : gx;
-    const cz = d > aoeRange ? oz + (ddz / d) * aoeRange : gz;
-    const weg = legeFeld(raum, cx, cz, RAUM_CFG); // FIFO über maxFelder
+  // Raum: ein Feld FREI am Cursor-Punkt ablegen (im Scope-Blick, KEINE Wurfweiten-Klemme um den Spieler).
+  // Bleibt liegen, FIFO max 3 — ein neues Feld schiebt das älteste weg (Logik + Disc synchron).
+  function placeAoeField(gx: number, gz: number): void {
+    const weg = legeFeld(raum, gx, gz, RAUM_CFG); // FIFO über maxFelder
     const disc = MeshBuilder.CreateCylinder('fx_aoe', { diameter: RAUM_CFG.radius * 2, height: 0.3, tessellation: 32 }, scene);
-    disc.position.set(cx, 0.18, cz);
+    disc.position.set(gx, 0.18, gz);
     disc.isPickable = false;
     const mat = new StandardMaterial('fx_aoe_mat', scene);
     mat.emissiveColor = new Color3(0.55, 0.2, 0.95); // Raum = violett
@@ -1051,13 +1005,13 @@ function boot(combatStyle: CombatStyle): void {
   const input = createInput(
     scene, camera, tank, () => playerSpeed, fire,
     () => BASE_TURRET_SLEW * playerBuffs.aggregate().turretSlewMul,
-    () => !scopeActive || !GIFT_BUILD, // nur der Garten-Scope hält an; Befehl fährt im Scope weiter (nur Slomo)
+    () => !scopeActive || istBefehl, // im Scope stehen Z/R (zielen/platzieren); nur Befehl fährt weiter (nur Slomo)
     () => false, // EINE Klasse: nie Auto-Vorwärts, immer manuell per W/S — bei JEDEM Build identisch
   );
 
-  // Sniper-Scope: Rechtsklick als SCHALTER (1× an, nochmal aus). Im Scope steht der Panzer,
-  // die Maus snappt aufs Ziel (Fadenkreuz), der Schuss trifft garantiert.
-  if (combatStyle === 'sniper') {
+  // Scope = die KLASSENMECHANIK des Kommanders (Rechtsklick-halten → Gottansicht + Slomo + Munition),
+  // für JEDEN Build. Was der Linksklick im Scope tut, entscheidet der Build (markieren/infizieren/legen).
+  {
     // Sichtbarer Scope-Indikator — sonst rät man, ob der Schalter ankam (Debug: erst sichtbar machen).
     const badge = document.createElement('div');
     badge.textContent = '🔭 SCOPE';
@@ -1099,7 +1053,7 @@ function boot(combatStyle: CombatStyle): void {
       if (on) {
         // Befehl: neue Markier-Salve startet nur, wenn alle alten Marken weg sind UND Munition voll
         // (sonst erst nachladen). Kein Sofort-Nachmarkieren, solange noch Marken aktiv sind.
-        salveOffen = !GIFT_BUILD && befehl.marks.length === 0 && ammo >= AMMO_MAX;
+        salveOffen = istBefehl && befehl.marks.length === 0 && ammo >= AMMO_MAX;
       } else {
         // Scope aus → Salve abgeschlossen (Exekutionsphase); Ziel-Ringe weg; St3 „Rückkehrfenster".
         salveOffen = false;
@@ -1108,7 +1062,7 @@ function boot(combatStyle: CombatStyle): void {
         if (evo.unlockedStagesByChannel.sniper_core >= 3) returnBoostCd = 1.5;
       }
       log.info('scope', { on });
-      if (!GIFT_BUILD) alog.log('scope', { on: on ? 1 : 0, m: befehl.marks.length, ammo, salve: salveOffen ? 1 : 0 });
+      if (istBefehl) alog.log('scope', { on: on ? 1 : 0, m: befehl.marks.length, ammo, salve: salveOffen ? 1 : 0 });
     };
     // Rechtsklick HALTEN = Scope+Slomo (zielen/infizieren), loslassen = Fahrmodus (ausweichen).
     // POINTER-Events (nicht mouse-): Babylon preventDefault't den Pointer am Canvas und unterdrückt
@@ -1134,9 +1088,9 @@ function boot(combatStyle: CombatStyle): void {
   window.addEventListener('keydown', (ev) => {
     if (ev.key !== 'r' && ev.key !== 'R') return;
     if (!ARENA_MODE || reloadCd > 0 || !playerCombatant.alive) return;
-    if (ammo >= AMMO_MAX && slomoTime >= SLOMO_TIME) return; // schon randvoll
+    if (ammo >= maxAmmo() && slomoTime >= SLOMO_TIME) return; // schon randvoll
     reloadCd = RELOAD_TIME;
-    if (!GIFT_BUILD) { entmarkiereAlle(); bruch(befehl); } // Nachladen verwirft die gesetzten Markierungen (+ laufende Kette; gehaltener Buff bleibt)
+    if (istBefehl) { entmarkiereAlle(); bruch(befehl); } // Nachladen verwirft die gesetzten Markierungen (+ laufende Kette; gehaltener Buff bleibt)
     alog.log('reload', { t: +runClock.toFixed(1) });
   });
 
@@ -1144,7 +1098,12 @@ function boot(combatStyle: CombatStyle): void {
   window.addEventListener('keydown', (ev) => {
     if (ev.key !== 'q' && ev.key !== 'Q') return;
     if (ultActive > 0 || ultCd > 0 || !playerCombatant.alive) return;
-    if (!GIFT_BUILD) { // Befehl: eine der drei Pol-Ults
+    if (istRaum) { // Raum: eine der drei Pol-Ults (Umlagerung/Großfeld/Verseuchung)
+      if (!raumSkill.ult) return;
+      const u = raumUltDef(raumSkill.ult);
+      ultActive = u.dauer + raumSkill.ranks.dauer * RAUM_DAUER_PRO_RANG; // Ausdauer-Talent
+      alog.log('ult', { id: u.id, t: +runClock.toFixed(1) });
+    } else if (istBefehl) { // Befehl: eine der drei Pol-Ults
       if (!befehlSkill.ult) return;
       const u = befehlUltDef(befehlSkill.ult);
       ultActive = u.dauer + befehlSkill.ranks.dauer * DAUER_PRO_RANG; ultSchaden = 0; // Dauerbefehl-Talent
@@ -1204,7 +1163,6 @@ function boot(combatStyle: CombatStyle): void {
   tunables.add({ label: 'Wundbruch-AoE-Radius', category: 'Routen', value: woundBurstR, min: 4, max: 40, step: 1, onChange: (v) => { woundBurstR = v; } });
   tunables.add({ label: 'Sniper-Kamera-Höhe', category: 'Stile', value: sniperCamHeight, min: 20, max: 200, step: 5, onChange: (v) => { sniperCamHeight = v; } });
   tunables.add({ label: 'Sniper-Kamera-Distanz', category: 'Stile', value: sniperCamBack, min: 20, max: 260, step: 5, onChange: (v) => { sniperCamBack = v; } });
-  tunables.add({ label: 'AoE-Wurfweite', category: 'Stile', value: aoeRange, min: 8, max: 60, step: 1, onChange: (v) => { aoeRange = v; } });
   tunables.add({ label: 'Feld-Radius', category: 'Stile', value: RAUM_CFG.radius, min: 6, max: 40, step: 1, onChange: (v) => { RAUM_CFG.radius = v; } });
   tunables.add({ label: 'Feld-Zugkraft (RR)', category: 'Stile', value: RAUM_CFG.zugStaerke, min: 0, max: 120, step: 5, onChange: (v) => { RAUM_CFG.zugStaerke = v; } });
   tunables.add({ label: 'Nachsetz-Timeout (s)', category: 'Gegner', value: NACHSETZ_CFG.timeout, min: 2, max: 40, step: 1, onChange: (v) => { NACHSETZ_CFG.timeout = v; } });
@@ -1266,7 +1224,7 @@ function boot(combatStyle: CombatStyle): void {
     'border-radius:7px;padding:5px 8px;font:600 11px system-ui,sans-serif;display:none;';
   dashHud.appendChild(ultSlotEl);
   function updateUltHud(): void {
-    const u = GIFT_BUILD ? activeUltDef(skill) : (befehlSkill.ult ? befehlUltDef(befehlSkill.ult) : null);
+    const u = istZustand ? activeUltDef(skill) : istRaum ? (raumSkill.ult ? raumUltDef(raumSkill.ult) : null) : (befehlSkill.ult ? befehlUltDef(befehlSkill.ult) : null);
     if (!u) { ultSlotEl.style.display = 'none'; return; }
     ultSlotEl.style.display = 'block';
     if (ultActive > 0) { ultSlotEl.style.borderColor = '#69db7c'; ultSlotEl.innerHTML = `${u.icon} <b style="color:#9be36b">AKTIV ${ultActive.toFixed(1)}s</b>`; }
@@ -1291,7 +1249,8 @@ function boot(combatStyle: CombatStyle): void {
     `border-radius:6px;cursor:${dim ? 'default' : 'pointer'};opacity:${dim ? 0.5 : 1}">` +
     `<div>${title}</div><div style="opacity:.65;font-size:10px;margin-top:1px">${sub}</div></div>`;
   function renderSkillPanel(): void {
-    if (!GIFT_BUILD) { renderBefehlSkillPanel(); return; }
+    if (istRaum) { renderRaumSkillPanel(); return; }
+    if (istBefehl) { renderBefehlSkillPanel(); return; }
     let html = `<div style="font-size:14px;color:#9be36b">✦ Skillpunkte: ${skill.punkte}</div>`;
     if (!skill.ult) {
       html += `<div style="opacity:.7;margin:7px 0 1px">Wähle deine Pol-Ult (kostet 1 Punkt):</div>`;
@@ -1331,11 +1290,40 @@ function boot(combatStyle: CombatStyle): void {
     html += `<div style="opacity:.5;margin-top:11px;font-size:10px">[T] / [Esc] schließen</div>`;
     skillPanel.innerHTML = html;
   }
+  function renderRaumSkillPanel(): void {
+    let html = `<div style="font-size:14px;color:#9be36b">✦ Skillpunkte: ${raumSkill.punkte}</div>`;
+    if (!raumSkill.ult) {
+      html += `<div style="opacity:.7;margin:7px 0 1px">Wähle deine Pol-Ult (kostet 1 Punkt):</div>`;
+      for (const u of RAUM_ULTS) {
+        const verf = raumUltVerfuegbar(u.pol);
+        const desc = verf
+          ? `${u.text} (Taste ${u.taste}, ${u.dauer}s / CD ${u.cd}s)`
+          : `🔒 Kompass nötig: nach RRR Impulse auf ${u.pol} lenken (Kompass noch nicht gebaut → vorerst nur Raum)`;
+        html += skillRow(`ult:${u.id}`, `${u.icon} ${u.name} · ${u.pol}`, desc, raumSkill.punkte <= 0 || !verf);
+      }
+    } else {
+      const u = raumUltDef(raumSkill.ult);
+      html += `<div style="margin:7px 0 1px">Ult: <b>${u.icon} ${u.name}</b> · Taste [${u.taste}]</div>`;
+      html += `<div style="opacity:.7;margin:5px 0 1px">Talente (Rang/${RAUM_TALENT_MAX}):</div>`;
+      for (const t of RAUM_TALENTS) {
+        const rk = raumSkill.ranks[t.id]; const max = rk >= RAUM_TALENT_MAX;
+        html += skillRow(`tal:${t.id}`, `${t.name} &nbsp; ${'●'.repeat(rk)}${'○'.repeat(RAUM_TALENT_MAX - rk)}`, t.text, raumSkill.punkte <= 0 || max);
+      }
+    }
+    html += `<div style="opacity:.5;margin-top:11px;font-size:10px">[T] / [Esc] schließen</div>`;
+    skillPanel.innerHTML = html;
+  }
   skillPanel.addEventListener('click', (ev) => {
     const el = (ev.target as HTMLElement).closest('[data-act]') as HTMLElement | null;
     if (!el) return;
     const act = el.getAttribute('data-act') ?? '';
-    if (!GIFT_BUILD) {
+    if (istRaum) {
+      if (act.startsWith('ult:')) { const id = act.slice(4) as RaumUltId; if (raumUltVerfuegbar(raumUltDef(id).pol)) chooseRaumUlt(raumSkill, id); }
+      else if (act.startsWith('tal:')) spendRaumTalent(raumSkill, act.slice(4) as RaumTalentId);
+      renderSkillPanel();
+      return;
+    }
+    if (istBefehl) {
       if (act.startsWith('ult:')) chooseBefehlUlt(befehlSkill, act.slice(4) as BefehlUltId);
       else if (act.startsWith('tal:')) { const id = act.slice(4) as BefehlTalentId; if (spendBefehlTalent(befehlSkill, id) && id === 'disziplin') schutzLadungen = befehlSkill.ranks.disziplin; }
       renderSkillPanel();
@@ -1497,29 +1485,10 @@ function boot(combatStyle: CombatStyle): void {
     playerCombatant.hp = playerCombatant.maxHp;
     playerCombatant.alive = true;
     playerCombatant.invulnerable = true; // sofort (schützt auch im selben combat-Frame)
-    lastRespawnAt = runClock;
-    // Notstart-Hilfe: in der Todesspirale länger unverwundbar + nahe Gegner wegdrücken,
-    // damit man nicht direkt wieder in den Tod respawnt (kein neuer Counter, nur Entlastung).
-    const broken = flowState === 'broken';
-    spawnGraceCd = broken ? 7 : 5;
-    if (broken) {
-      const relief = 28; // Radius, in dem Gegner beim Notstart weggeschoben werden
-      for (const e of roster) {
-        if (!e.combatant.alive) continue;
-        const dx = e.combatant.x - playerCombatant.x, dz = e.combatant.z - playerCombatant.z;
-        const d = Math.hypot(dx, dz);
-        if (d < relief) {
-          const ux = d > 0.01 ? dx / d : 1, uz = d > 0.01 ? dz / d : 0;
-          e.view.root.position.x = playerCombatant.x + ux * relief;
-          e.view.root.position.z = playerCombatant.z + uz * relief;
-          e.combatant.x = e.view.root.position.x;
-          e.combatant.z = e.view.root.position.z;
-        }
-      }
-    }
+    spawnGraceCd = 5; // Debug-Respawn: kurze Spawn-Schonfrist (Deathloop-Notstart entfällt — kein Respawn-Loop)
     prevPosInit = false; // Teleport NICHT als Tempo werten (kein falsches Rush-Signal/Ø-Tempo-Spike)
-    alog.log('player.respawn', { x: +playerCombatant.x.toFixed(1), z: +playerCombatant.z.toFixed(1), broken });
-    showToast(broken ? 'Notstart — Druck entschärft' : 'Zerstört — neu aufgebaut');
+    alog.log('player.respawn', { x: +playerCombatant.x.toFixed(1), z: +playerCombatant.z.toFixed(1) });
+    showToast('Zerstört — neu aufgebaut');
   }
 
   // Mess-Overlay (Phase 1 Debugging): macht Cursor-Bodenpunkt, Ziel und Schussrichtung sichtbar.
@@ -1565,7 +1534,6 @@ function boot(combatStyle: CombatStyle): void {
       x: +f.mesh.position.x.toFixed(1), z: +f.mesh.position.z.toFixed(1), life: +f.life.toFixed(1),
     })),
     playerInvuln: () => playerCombatant.invulnerable === true,
-    flow: () => flowState,
     profile: () => currentTuningProfile,
     inspect: () => ({ open: inspecting, simSpeed: clock.simSpeed, hovered: hoveredId }),
     logTail: (n?: number) => alog.tail(n),
@@ -1622,17 +1590,18 @@ function boot(combatStyle: CombatStyle): void {
     // SLOMO: im Scope kriecht die WELT (Bullet-Time), Feuertakt bleibt real → 3 Dots zügig setzen.
     // Begrenzt durch ein ZEIT-Budget (sonst klebt man ewig im Slomo, indem man den letzten Schuss hält).
     // Endet, sobald Munition ODER Slomo-Zeit leer ist — was zuerst kommt.
-    const seucheSlomo = !GIFT_BUILD && ultActive > 0 && befehlSkill.ult === 'seuche'; // Verfall-Ult: Dauer-Slomo, kein Budget-Verbrauch
+    const seucheSlomo = istBefehl && ultActive > 0 && befehlSkill.ult === 'seuche'; // Verfall-Ult: Dauer-Slomo, kein Budget-Verbrauch
     const slomoOn = (ARENA_MODE && scopeActive && ammo > 0 && slomoTime > 0) || seucheSlomo;
     if (slomoOn) { simDt = realDt * SLOMO_SCALE; if (!seucheSlomo) slomoTime = Math.max(0, slomoTime - realDt); }
     else if (ARENA_MODE && !scopeActive && slomoTime < SLOMO_TIME) slomoTime = Math.min(SLOMO_TIME, slomoTime + realDt * SLOMO_REGEN); // außerhalb des Scopes regeneriert das Budget
     // Nachladen (R) läuft in Echtzeit + Tempo-Schub (mobile Ausweich-Phase); füllt Munition UND Slomo-Zeit.
-    if (reloadCd > 0) { reloadCd -= realDt; if (reloadCd <= 0) { ammo = AMMO_MAX; slomoTime = SLOMO_TIME; if (!GIFT_BUILD && befehl.marks.length === 0) salveOffen = true; } } // nach dem Nachladen wieder markierbar (Salve offen)
+    if (reloadCd > 0) { reloadCd -= realDt; if (reloadCd <= 0) { ammo = maxAmmo(); slomoTime = SLOMO_TIME; if (istBefehl && befehl.marks.length === 0) salveOffen = true; } } // nach dem Nachladen wieder markierbar (Salve offen)
     // Ult-Timer (Echtzeit): aktiv runter → bei 0 in den Cooldown; danach Cooldown runter.
     if (ultActive > 0) {
       ultActive -= realDt;
       if (ultActive <= 0) {
-        if (!GIFT_BUILD) { ultCd = Math.max(2, befehlUltDef(befehlSkill.ult).cd - befehlSkill.ranks.cooldown * CD_PRO_RANG); if (befehlSkill.ult === 'seuche') seucheEnde(); } // Schneller Stab kürzt CD; Verfall zündet
+        if (istRaum) { ultCd = Math.max(2, raumUltDef(raumSkill.ult).cd - raumSkill.ranks.cooldown * RAUM_CD_PRO_RANG); } // Abklingen-Talent
+        else if (istBefehl) { ultCd = Math.max(2, befehlUltDef(befehlSkill.ult).cd - befehlSkill.ranks.cooldown * CD_PRO_RANG); if (befehlSkill.ult === 'seuche') seucheEnde(); } // Schneller Stab kürzt CD; Verfall zündet
         else { const u = activeUltDef(skill); ultCd = u ? u.cd : 0; }
       }
     }
@@ -1647,7 +1616,7 @@ function boot(combatStyle: CombatStyle): void {
     if (returnBoostCd > 0) returnBoostCd = Math.max(0, returnBoostCd - simDt);
     const returnBoost = returnBoostCd > 0 ? 1.5 : 1;
     // Befehl-Kaskade (ab BB): jeder in-Reihe-Kill staffelt das Tempo (aus befehl.kette), gedeckelt.
-    const kaskade = !GIFT_BUILD && evo.unlockedStagesByChannel.sniper_core >= 2
+    const kaskade = istBefehl && evo.unlockedStagesByChannel.sniper_core >= 2
       ? 1 + Math.min(KASKADE_SPEED_MAX, befehl.kette * KASKADE_SPEED_PRO_KETTE) : 1;
     playerSpeed = pst.speed * pmods.speedMul * playerSpeedMul * returnBoost * kaskade * (reloadCd > 0 ? RELOAD_SPEED : 1);
     playerCombatant.armor = pst.armor + pmods.armorAdd;
@@ -1665,29 +1634,23 @@ function boot(combatStyle: CombatStyle): void {
     }
     updateDashHud();
     // Im Sniper-Scope kein Boden-Reticle (Cursor-Punkt) — dort zählt nur das Ziel-Fadenkreuz.
-    reticle.update(combatStyle === 'sniper' && scopeActive ? null : input.getAimTarget());
+    reticle.update(istBefehl && scopeActive ? null : input.getAimTarget());
     pool.update(simDt);
     updateFx(simDt); // Laser/Rauch-Effekte altern lassen
 
     const px = tank.view.root.position.x;
     const pz = tank.view.root.position.z;
 
-    // Schicht 0: Flow-State pro Frame. BROKEN (Todesspirale) = Notstart: Spawns pausiert,
-    // kein Heat-Anstieg. Tode altern aus dem Fenster → Zustand kehrt von selbst zu flow zurück.
-    if (deathTimes.length) { const kept = pruneDeathTimes(deathTimes, runClock); if (kept.length !== deathTimes.length) deathTimes.splice(0, deathTimes.length, ...kept); }
-    flowState = computeFlowState({ alive: playerCombatant.alive, now: runClock, lastRespawnAt, deathTimes });
-    if (flowState !== prevFlowState) { alog.log('flow', { from: prevFlowState, to: flowState, t: +runClock.toFixed(1) }); prevFlowState = flowState; }
-
     // Schicht 2: vorgemerkte Evolution im sicheren Fenster freischalten. Im GARTEN levelt sie den
     // ZUSTAND (dot_core) — egal was der Kompass zeigt (alle Impulse fließen dorthin, siehe Orb-Drop).
     {
       const evoUnlock = tryTriggerEvolution(evo, {
-        now: runClock, flow: flowState,
+        now: runClock, flow: 'flow',
         minSecondsBeforeFirst: evoMinFirst, minSecondsBetween: evoMinBetween,
         dominantChannel: ACTIVE_CORE,
       });
       if (evoUnlock) {
-        showToast(GIFT_BUILD && evoUnlock.channelId === 'dot_core'
+        showToast(istZustand && evoUnlock.channelId === ACTIVE_CORE
           ? `🦠 STUFE ${evoUnlock.stage} · ${BUILD_STUFE_NAME[Math.min(evoUnlock.stage, BUILD_STUFE_NAME.length - 1)]}`
           : `STUFE ${evoUnlock.stage} · ${CHANNEL_DISPLAY[evoUnlock.channelId].displayName}`);
         alog.log('evolution', { ch: evoUnlock.channelId, stage: evoUnlock.stage, t: +runClock.toFixed(1) });
@@ -1705,10 +1668,10 @@ function boot(combatStyle: CombatStyle): void {
       if (d < 1.8) {
         gainProgress(evo, o.channel, o.points, currentTuningProfile);
         // 3. Build-Stufe erreicht (Garten ZZZ / Befehl BBB) → Impuls-Überschuss wird zu Skillpunkten.
-        const stufe3 = GIFT_BUILD ? evo.unlockedStagesByChannel.dot_core >= 3 : evo.unlockedStagesByChannel.sniper_core >= 3;
+        const stufe3 = evo.unlockedStagesByChannel[ACTIVE_CORE] >= 3; // 3. Build-Stufe (BBB/ZZZ/RRR) erreicht
         if (stufe3) {
           skillProgress += o.points;
-          while (skillProgress >= PUNKT_KOSTEN) { skillProgress -= PUNKT_KOSTEN; (GIFT_BUILD ? skill : befehlSkill).punkte += 1; showToast('✦ Skillpunkt frei — [T]'); }
+          while (skillProgress >= PUNKT_KOSTEN) { skillProgress -= PUNKT_KOSTEN; (istZustand ? skill : istRaum ? raumSkill : befehlSkill).punkte += 1; showToast('✦ Skillpunkt frei — [T]'); }
         }
         o.mesh.dispose(); orbs.splice(i, 1); continue;
       }
@@ -1728,9 +1691,8 @@ function boot(combatStyle: CombatStyle): void {
     if (simDt > 0) styleTracker.onMove({ speed: actualSpeed, x: px, z: pz, dt: simDt });
     pulseCd -= simDt;
     if (pulseCd <= 0) {
-      // BROKEN: kein Heat-Anstieg — leeres Profil (nur Decay), Tracker dennoch leeren (kein Stau).
       const snap = styleTracker.snapshotAndReset();
-      director.evaluate(flowState === 'broken' ? emptyProfile() : snap);
+      director.evaluate(snap);
       pulseCd = pulseLen;
     }
 
@@ -1754,7 +1716,7 @@ function boot(combatStyle: CombatStyle): void {
     const spawnPlan = welle
       ? { targetCount: welle.cap, weights: welle.weights, interval: welle.interval, batch: welle.batch }
       : currentSwarmPlan();
-    const spawnedList = flowState === 'broken' ? [] : spawner.update(simDt, px, pz, aliveCount, spawnPlan);
+    const spawnedList = spawner.update(simDt, px, pz, aliveCount, spawnPlan);
     for (const spawned of spawnedList) {
       if (welle) {
         // Garten: Stats pro Typ × Wellen-Level (Charakter steckt im Typ, Level skaliert) — ersetzt die
@@ -1783,7 +1745,7 @@ function boot(combatStyle: CombatStyle): void {
     const hSoll = haescherSoll(runClock, heatState.kessel, heatState.faehrte);
     const hAlive = roster.reduce((n, e) => n + (e.combatant.alive && e.haescher ? 1 : 0), 0);
     haescherCd -= simDt;
-    if (flowState !== 'broken' && hAlive < hSoll.front + hSoll.ring && haescherCd <= 0) {
+    if (hAlive < hSoll.front + hSoll.ring && haescherCd <= 0) {
       haescherCd = HAESCHER_SPAWN_CD;
       const vorne = hSoll.front > 0 && heatState.faehrte >= heatState.kessel; // Fährte dominiert → voraus
       const h = spawnHaescher(px, pz, playerVelX, playerVelZ, vorne);
@@ -1824,7 +1786,7 @@ function boot(combatStyle: CombatStyle): void {
       const hAliveLog = roster.reduce((n, e) => n + (e.combatant.alive && e.haescher ? 1 : 0), 0);
       // idle = Sekunden ohne Input; ab ~2 s ist „Hände weg" → Analyse ignoriert diese Zeilen.
       alog.log('snap', {
-        ...(snap as unknown as Record<string, unknown>), idle: Math.round(idleFor), flow: flowState, rel,
+        ...(snap as unknown as Record<string, unknown>), idle: Math.round(idleFor), rel,
         heat: { kes: +heatState.kessel.toFixed(2), fae: +heatState.faehrte.toFixed(2) },
         hae: { soll: hSollLog.front + hSollLog.ring, alive: hAliveLog },
         crit: schussTotal ? +(critTotal / schussTotal).toFixed(2) : 0, // tatsächliche Crit-Rate (Anteil der Schüsse)
@@ -1852,7 +1814,10 @@ function boot(combatStyle: CombatStyle): void {
       // Fadenkreuz trägt (markiert). Sonst untätig hochzählen; zu lange untätig → NAH um den Spieler neu
       // setzen (rundum ~45), damit er sofort wieder im Kampf ist statt weit voraus zu verschwinden.
       const traegtFadenkreuz = befehl.marks.some((m) => m.id === e.id);
-      if (distToPlayer <= enemyShotRange || traegtFadenkreuz) e.untaetig = 0;
+      // Kein Nachsetzen, wenn der Gegner ENGAGIERT ist: nah genug zum Schießen, trägt eine
+      // Zielscheibe (Befehl-Marke), ODER hat Gift/Dot drauf (nimmt bereits Schaden — auch wenn das
+      // reife Gift direkt auf die HP geht und nicht über damageEnemyTick läuft).
+      if (distToPlayer <= enemyShotRange || traegtFadenkreuz || e.gift || e.dot) e.untaetig = 0;
       else {
         e.untaetig = (e.untaetig ?? 0) + simDt;
         if (nachsetzenFaellig(e.untaetig, NACHSETZ_CFG)) {
@@ -1866,7 +1831,7 @@ function boot(combatStyle: CombatStyle): void {
       if (distToPlayer > out.standoff) {
         const tdx = out.tx - er.position.x, tdz = out.tz - er.position.z;
         const tl = Math.hypot(tdx, tdz) || 1;
-        const feldDrin = combatStyle === 'aoe' && feldAn(raum, er.position.x, er.position.z, RAUM_CFG); // Raum: im Feld?
+        const feldDrin = istRaum && feldAn(raum, er.position.x, er.position.z, RAUM_CFG, raumSizeMul()); // Raum: im Feld?
         const slowFactor = (e.gift ? 1 - giftSlow(e.gift, gartenCfg) : 1) * (feldDrin ? 1 - feldSlow(RAUM_CFG) : 1); // Gift- + Feld-Slow
         const step = e.speed * mods.speedMul * slowFactor * simDt; // Tempo type-/stufen-getrieben
 
@@ -1887,17 +1852,20 @@ function boot(combatStyle: CombatStyle): void {
         enemyFire(er.position.x, er.position.z, aimX, aimZ, 'enemy', e.damage * mods.damageMul * typeDmgMul, e.typeId);
         e.fireCd = ENEMY_FIRE_COOLDOWN;
       }
-      // RR (ab Stufe 2): wer schon im Feld war (gefangen), wird zur Feld-Mitte zurückgezogen, sobald er
-      // an den Rand/heraus will. Häscher sind immun gegen den Zug (nur den Feld-Schaden kassieren sie).
-      if (combatStyle === 'aoe' && evo.unlockedStagesByChannel.aoe_core >= 2 && e.feld?.gefangen && !e.haescher) {
+      // RR (ab Stufe 2): wer im Feld war (gefangen), wird am Rand zur Feld-Mitte zurückgezogen — ABER
+      // nur zur EIGENEN (nahen) Fläche. Fällt die eigene Fläche per FIFO raus (nächste Fläche zu weit),
+      // wird der Panzer NICHT zu einer fremden Fläche gerissen, sondern der Fang gelöst (er ist frei,
+      // bis er wieder in ein Feld fährt). Häscher sind ohnehin immun gegen den Zug.
+      if (istRaum && evo.unlockedStagesByChannel[ACTIVE_CORE] >= 2 && e.feld?.gefangen && !e.haescher) {
         const nf = naechstesFeld(raum, er.position.x, er.position.z);
-        if (nf) {
-          const dist = Math.hypot(er.position.x - nf.x, er.position.z - nf.z) || 1;
-          if (dist > feldRadius(RAUM_CFG, raum.buff) * 0.8) { // am Rand/draußen → zurückziehen
-            const zug = zugZurMitte(nf, er.position.x, er.position.z);
-            er.position.x += zug.dx * RAUM_CFG.zugStaerke * simDt;
-            er.position.z += zug.dz * RAUM_CFG.zugStaerke * simDt;
-          }
+        const r = feldRadius(RAUM_CFG, raum.buff, raumSizeMul());
+        const dist = nf ? Math.hypot(er.position.x - nf.x, er.position.z - nf.z) : Infinity;
+        if (!nf || dist > r * 1.4) {
+          e.feld.gefangen = false; // eigene Fläche weg/zu weit → Fang lösen, kein Zug zu einer fremden Fläche
+        } else if (dist > r * 0.8) { // am Rand der eigenen Fläche → zur Mitte zurückziehen
+          const zug = zugZurMitte(nf, er.position.x, er.position.z);
+          er.position.x += zug.dx * RAUM_CFG.zugStaerke * simDt;
+          er.position.z += zug.dz * RAUM_CFG.zugStaerke * simDt;
         }
       }
       e.combatant.x = er.position.x;
@@ -1911,9 +1879,9 @@ function boot(combatStyle: CombatStyle): void {
     playerCombatant.invulnerable = spawnGraceCd > 0;
     combat.update();
 
-    // Sniper-Scope: an = Reichweite hoch + Kamera WEITER WEG (mehr Gebiet sichtbar, Panzer
-    // bleibt mittig — kein Ranzoomen, kein verschobener Blick). Aus = alles zurück auf Default.
-    if (combatStyle === 'sniper') {
+    // Scope-Kamera (Klassenmechanik, jeder Build): an = Reichweite hoch + Kamera WEITER WEG
+    // (mehr Gebiet sichtbar, Panzer bleibt mittig). Aus = alles zurück auf Default.
+    {
       if (scopeActive && !scopeApplied) {
         savedShotRange = shotRange; shotRange = sniperRange;
         camApi?.set(sniperCamHeight, sniperCamBack, camF);
@@ -1921,13 +1889,13 @@ function boot(combatStyle: CombatStyle): void {
       } else if (!scopeActive && scopeApplied) {
         shotRange = savedShotRange; scopeApplied = false;
         // Befehl: mit Marken langsam zurückgleiten (Zeit, die markierten Ziele wegzuschießen), sonst schnell.
-        camReturnDur = (!GIFT_BUILD && befehl.marks.length > 0) ? CAM_RETURN_SLOW : CAM_RETURN_FAST;
+        camReturnDur = (istBefehl && befehl.marks.length > 0) ? CAM_RETURN_SLOW : CAM_RETURN_FAST;
         camReturn = camReturnDur;
       }
       // Kamera-Rückkehr aus dem Scope sanft interpolieren (statt hartem Sprung).
       if (camReturn > 0) {
         // Marken weggeschossen → das langsame Ziel-Fenster ist erfüllt, ab jetzt zügig fertig zoomen.
-        if (!GIFT_BUILD && befehl.marks.length === 0 && camReturnDur > CAM_RETURN_FAST) {
+        if (istBefehl && befehl.marks.length === 0 && camReturnDur > CAM_RETURN_FAST) {
           const done = 1 - camReturn / camReturnDur; // bisheriger Fortschritt beibehalten
           camReturnDur = CAM_RETURN_FAST;
           camReturn = camReturnDur * (1 - done);
@@ -1950,10 +1918,10 @@ function boot(combatStyle: CombatStyle): void {
     }
 
     // SEUCHE (Z-Z-Z) — STUFENWEISE nach buildStufe: St 1 nur Köchel-DoT (kein Reifen/Ansteckung);
-    // ab St 2 reifen + anstecken (reif steht & stirbt am Gift); ab St 3 gibt der reife Gift-Tod
-    // Erntefieber. Plus die grau-Animation der geernteten Panzer.
-    if (GIFT_BUILD) {
-      const stufe = evo.unlockedStagesByChannel.dot_core;
+    // Staging: St 1 (Z) nur Gift setzen (Köchel); St 2 (ZZ) reift (reif steht & stirbt am Gift, KEINE
+    // Ansteckung); St 3 (ZZZ) steckt an + erntet (reifer Gift-Tod gibt Erntefieber). Plus grau-Animation.
+    if (istZustand) {
+      const stufe = evo.unlockedStagesByChannel[ACTIVE_CORE];
       for (let i = roster.length - 1; i >= 0; i--) {
         const e = roster[i];
         if (!e) continue;
@@ -1974,7 +1942,7 @@ function boot(combatStyle: CombatStyle): void {
           continue;
         }
 
-        // St 2+ (ZZ/ZZZ): volle Seuche — reifen, reif=tödlich, Ansteckung.
+        // St 2+ (ZZ/ZZZ): reifen, reif=tödlich. (Ansteckung erst ab St 3 — siehe unten.)
         const warReif = istReif(e.gift, gartenCfg); // schon reif → dieser Tick ist tödliches Gift
         const r = tickGift(e.gift, simDt, gartenCfg, erntefieber); // köchelt+reift, oder reif→tödlich
         if (r.dmg > 0) {
@@ -1999,8 +1967,8 @@ function boot(combatStyle: CombatStyle): void {
         if (skill.ult === 'gnadenstoss' && ultActive > 0 && !e.haescher && e.combatant.alive && e.gift && e.combatant.hp < EXECUTE_FRAC * e.combatant.maxHp) {
           doErnte(e); continue;
         }
-        // ANSTECKUNG: bei jedem Tick steckt der Infizierte den NÄCHSTEN Gesunden in Reichweite an.
-        if (r.ticked) {
+        // ANSTECKUNG (erst ab ZZZ / St 3): bei jedem Tick steckt der Infizierte den NÄCHSTEN Gesunden an.
+        if (r.ticked && stufe >= 3) {
           let best: Enemy | null = null, bestD = gartenCfg.ansteckRadius;
           for (const o of roster) {
             if (o === e || !o.combatant.alive || o.gift || o.harvested != null) continue;
@@ -2048,21 +2016,26 @@ function boot(combatStyle: CombatStyle): void {
     // Raum-Felder: jeder Gegner IM Feld nimmt pro Tick Schaden (Anfangs-HP/ticksZumTod + Ernte-Buff,
     // Crit wirkt mit). Ein im Feld gestorbener Gegner gibt ab RRR die Ernte (buff↑). Felder bleiben
     // liegen (FIFO via placeAoeField); die Discs wachsen mit dem Buff. Rückwärts, weil Kills splicen.
-    if (combatStyle === 'aoe') {
-      const stufeRRR = evo.unlockedStagesByChannel.aoe_core >= 3;
+    if (istRaum) {
+      const stufeRRR = evo.unlockedStagesByChannel[ACTIVE_CORE] >= 3;
       for (let j = roster.length - 1; j >= 0; j--) {
         const e = roster[j];
         if (!e || !e.combatant.alive) continue;
         e.feld ??= { tickCd: 0, gefangen: false };
-        const drin = !!feldAn(raum, e.combatant.x, e.combatant.z, RAUM_CFG);
+        const drin = !!feldAn(raum, e.combatant.x, e.combatant.z, RAUM_CFG, raumSizeMul());
         const basisHp = GARTEN_BASIS[e.typeId]?.hp ?? GARTEN_BASIS.allrounder!.hp;
         const tick = tickFeld(e.feld, drin, basisHp, raum.buff, simDt, RAUM_CFG);
         if (tick.ticked && tick.dmg > 0) {
-          damageEnemyTick(e, mitCrit(tick.dmg), 'sonst');
-          if (stufeRRR && !e.combatant.alive && !e.haescher) ernteFeldKill(raum); // RRR: Feld-Kill = Ernte
+          damageEnemyTick(e, mitCrit(Math.round(tick.dmg * (ultActive > 0 ? 1 + raumSkill.ranks.schaden * RAUM_DMG_PRO_RANG : 1))), 'sonst'); // Verdichtung: +Feld-Schaden während der Ult
+          if (stufeRRR && !e.combatant.alive && !e.haescher) { // RRR: Feld-Kill = Ernte (Buff↑ → größere/stärkere Felder)
+            ernteFeldKill(raum);
+            if (ultActive > 0) raum.buff += raumSkill.ranks.beute * RAUM_BEUTE_PRO_RANG; // Erntegier: während der Ult +Buffs je Kill
+            floatNums.spawn(e.combatant.x, e.combatant.z, raum.buff, '#c77dff'); // sichtbare Ernte am Sterbeort (Buff-Zähler)
+            showToast(`▦ ERNTE — Felder +${raum.buff}`, '#c77dff');
+          }
         }
       }
-      const sc = feldRadius(RAUM_CFG, raum.buff) / RAUM_CFG.radius; // Felder wachsen mit dem Ernte-Buff
+      const sc = feldRadius(RAUM_CFG, raum.buff, raumSizeMul()) / RAUM_CFG.radius; // Felder wachsen mit Ernte-Buff (+ Großfeld-Ult ×3)
       for (const d of feldDiscs) d.scaling.x = d.scaling.z = sc;
     }
 
@@ -2095,7 +2068,7 @@ function boot(combatStyle: CombatStyle): void {
         .map((e) => ({ x: e.combatant.x, z: e.combatant.z, color: '#e8a23c' })),
     ]);
     if (ARENA_MODE) {
-      const mag = `${'●'.repeat(ammo)}${'○'.repeat(AMMO_MAX - ammo)}`;
+      const mag = `${'●'.repeat(ammo)}${'○'.repeat(Math.max(0, maxAmmo() - ammo))}`;
       let txt = reloadCd > 0
         ? `⟳ Nachladen ${reloadCd.toFixed(1)}s`
         : (ammo <= 0 || slomoTime <= 0.05)
@@ -2104,7 +2077,7 @@ function boot(combatStyle: CombatStyle): void {
       ammoHud.textContent = txt;
       // Befehl-Macht (BB+): A = laufender Aufbau (gelb, an der Kette) | B = gehaltener Buff (orange,
       // BB-Countdown bzw. BBB-permanent ∞) — zwei getrennte Blöcke, sofort unterscheidbar.
-      if (!GIFT_BUILD && evo.unlockedStagesByChannel.sniper_core >= 2) {
+      if (istBefehl && evo.unlockedStagesByChannel.sniper_core >= 2) {
         const teile: string[] = [];
         const auf = aufbauStufe(befehl, 1 + befehlSkill.ranks.beute);
         if (befehl.kette > 0) { // A: nur sichtbar, solange eine Kette läuft
@@ -2122,7 +2095,7 @@ function boot(combatStyle: CombatStyle): void {
       } else if (befehlHud.style.display !== 'none') befehlHud.style.display = 'none';
     }
     updateUltHud();
-    const skillPunkte = GIFT_BUILD ? skill.punkte : befehlSkill.punkte;
+    const skillPunkte = istZustand ? skill.punkte : istRaum ? raumSkill.punkte : befehlSkill.punkte;
     if (ARENA_MODE && skillPunkte > 0 && !skillOpen) {
       skillHint.style.display = 'block';
       skillHint.textContent = `✦ ${skillPunkte} Skillpunkt${skillPunkte > 1 ? 'e' : ''} frei — [T]`;
@@ -2184,7 +2157,7 @@ function boot(combatStyle: CombatStyle): void {
     }
     // Befehl-Ult-Effekte (während aktiv): kommando = Auto-Exekution (eins nach dem anderen),
     // streuung/seuche = Flächen-Markierung aller sichtbaren Ziele (kein Counter); seuche zusätzlich DoT.
-    if (!GIFT_BUILD && ultActive > 0) {
+    if (istBefehl && ultActive > 0) {
       if (befehlSkill.ult === 'kommando') {
         const ziele = Math.min(MAX_MARKS, 1 + befehlSkill.ranks.pol * POL_UEBERMACHT_PRO_RANG); // Übermacht: mehr gleichzeitige Auto-Ziele
         const lebende = befehl.marks.filter((m) => roster.some((r) => r.id === m.id && r.combatant.alive));
@@ -2208,7 +2181,7 @@ function boot(combatStyle: CombatStyle): void {
     // (1..maxMarks je Kern-Stufe, Prio dumm→schlau). Cursor-Fadenkreuz = Feuerbereitschaft,
     // Ringe = die getroffenen Ziele. Bei maxMarks=1 ist das der bisherige Einzel-Schuss.
     // Befehl: Combo-Timer (ab BB) läuft bei aktiver Kette runter — Ablauf bricht sie. Tote Marken putzen.
-    if (!GIFT_BUILD) {
+    if (istBefehl) {
       // Ketten-Timer + Buff-B-Countdown (ab BB). Der Abriss reißt nur die LAUFENDE Kette — der gehaltene
       // Bonus (Buff B / perma-Sockel bei BBB) bleibt; main räumt nur die Slow-Marken auf.
       if (evo.unlockedStagesByChannel.sniper_core >= 2) {
@@ -2226,7 +2199,7 @@ function boot(combatStyle: CombatStyle): void {
     }
 
     if (sniperCrosshair) {
-      if (combatStyle === 'sniper' && scopeActive) {
+      if (scopeActive) {
         const col = fireCd <= 0 ? '#9be36b' : '#ffa94d'; // grün = feuerbereit, orange = nachladen
         if (ARENA_MODE) {
           // Garten: DU wählst, wen du ansäst — Ziel unter dem Cursor. Manuell verteilen statt Auto-Snap.
@@ -2243,14 +2216,14 @@ function boot(combatStyle: CombatStyle): void {
               if (el.hasAttribute('data-ring')) el.style.borderColor = col; else el.style.background = col;
             });
           } else sniperCrosshair.style.display = 'none';
-          if (GIFT_BUILD) {
+          if (istZustand) {
             for (const m of markPool) m.style.display = 'none'; // Garten: keine Marken-Ringe
             if (scopeBadge) {
-              const bs = evo.unlockedStagesByChannel.dot_core;
+              const bs = evo.unlockedStagesByChannel[ACTIVE_CORE];
               const nm = BUILD_STUFE_NAME[Math.min(bs, BUILD_STUFE_NAME.length - 1)];
               scopeBadge.textContent = bs >= 3 ? `🦠 St${bs} · ${nm} — Erntefieber +${erntefieber}` : `🦠 St${bs} · ${nm}`;
             }
-          } else {
+          } else if (istBefehl) {
             // Befehl: markPool zeigt die bereits markierten Ziele (gelbe Ringe über ihnen).
             for (let i = 0; i < markPool.length; i++) {
               const mk = befehl.marks[i];
@@ -2270,6 +2243,11 @@ function boot(combatStyle: CombatStyle): void {
                 : bs < 2 ? `🎯 St1 · ${nm} — geschwächt: ${befehl.marks.length}` // B = reiner Debuff, kein Reihen-Counter
                 : `🎯 St${bs} · ${nm} — Marken ${befehl.marks.length}/${MAX_MARKS}`;
             }
+          } else if (scopeBadge) {
+            // Raum: keine Marken-Ringe; Badge zeigt Feld-Stufe + Ernte-Buff (RRR).
+            for (const m of markPool) m.style.display = 'none';
+            const bs = evo.unlockedStagesByChannel[ACTIVE_CORE];
+            scopeBadge.textContent = `▦ St${bs} · Raum${raum.buff > 0 ? ` — Ernte +${raum.buff}` : ''}`;
           }
         } else {
           const coreStage = evo.unlockedStagesByChannel.sniper_core;
@@ -2290,7 +2268,7 @@ function boot(combatStyle: CombatStyle): void {
             scopeBadge.textContent = `🔭 SCOPE · Ziel: ${tgt}${cnt > 1 ? ` ×${cnt}` : ''}`;
           }
         }
-      } else if (!GIFT_BUILD && combatStyle === 'sniper' && befehl.marks.length) {
+      } else if (istBefehl && istBefehl && befehl.marks.length) {
         // Befehl im Fahrmodus: Marken-Ringe bleiben sichtbar (man schießt ohne Scope). Aktuelles Ziel grün.
         sniperCrosshair.style.display = 'none';
         for (let i = 0; i < markPool.length; i++) {
@@ -2386,4 +2364,4 @@ function boot(combatStyle: CombatStyle): void {
 logConfig.enabled = true;
 logConfig.minLevel = 'debug';
 
-mountStartScreen((style) => boot(style));
+mountStartScreen((build) => boot(build));

@@ -32,22 +32,38 @@ export function createSpawner(
   let seq = 0;
   let nameSeq = 0; // fortlaufende "Panzer N"-Nummer
 
-  // Einen Gegner eines Typs an einem zufälligen Ring-Punkt um (px,pz) erzeugen (außer Sicht).
-  function spawnOne(typeId: string, px: number, pz: number, jit = 0): Enemy | null {
-    const type = ENEMY_TYPES[typeId];
-    if (!type) return null;
+  const CLUMP_JIT = 8; // Streuung eines Pulks um SEINEN gemeinsamen Ring-Punkt (eng beieinander)
+
+  // EIN Punkt auf dem Ring um (px,pz) (außer Sicht) — der ganze Pulk landet hier, nicht versetzt.
+  function ringPoint(px: number, pz: number): { x: number; z: number } {
     const ang = rng() * Math.PI * 2;
     const r = opts.radiusMin + rng() * (opts.radiusMax - opts.radiusMin);
+    return { x: px + Math.cos(ang) * r, z: pz + Math.sin(ang) * r };
+  }
+
+  // Einen Gegner eines Typs an einem GEGEBENEN Punkt erzeugen (Jitter um den Punkt).
+  function spawnAt(typeId: string, cx: number, cz: number, jit: number): Enemy | null {
+    const type = ENEMY_TYPES[typeId];
+    if (!type) return null;
     const spec: EnemySpec = {
       id: 'e' + seq++,
       comp: type.comp,
-      spawn: { x: px + Math.cos(ang) * r + (rng() - 0.5) * jit, z: pz + Math.sin(ang) * r + (rng() - 0.5) * jit },
+      spawn: { x: cx + (rng() - 0.5) * jit, z: cz + (rng() - 0.5) * jit },
       level: 1 + Math.floor(rng() * opts.maxLevel),
       displayName: 'Panzer ' + ++nameSeq,
       typeId: type.id,
       behavior: type.behavior,
     };
     return createEnemyEntity(scene, spec, tankRadius, rng, opts.hpMul ? opts.hpMul() : 1, opts.dmgMul ? opts.dmgMul() : 1);
+  }
+
+  // Einen Typ spawnen: Pulk-Typen (clumpSize > 1) als HAUFEN auf EINEN gemeinsamen Ring-Punkt
+  // (kommen zusammen, nicht versetzt); Einzel-Typen exakt auf ihren Punkt.
+  function spawnTyp(typeId: string, px: number, pz: number, out: Enemy[]): void {
+    const n = Math.max(1, opts.clumpSize ? opts.clumpSize(typeId) : 1);
+    const c = ringPoint(px, pz); // EIN Punkt für den ganzen Pulk
+    const jit = n > 1 ? CLUMP_JIT : 0;
+    for (let k = 0; k < n; k++) { const e = spawnAt(typeId, c.x, c.z, jit); if (e) out.push(e); }
   }
 
   function update(simDt: number, px: number, pz: number, aliveCount: number, plan: SwarmPlan): Enemy[] {
@@ -63,9 +79,7 @@ export function createSpawner(
       for (let b = 0; b < plan.batch; b++) {
         const typeId = pickWeighted(plan.weights, rng());
         if (!typeId) break;
-        // Pulk-Typen (Schwarm) kommen als Haufen auf EINEN Punkt — sonst einzeln.
-        const n = Math.max(1, opts.clumpSize ? opts.clumpSize(typeId) : 1);
-        for (let k = 0; k < n; k++) { const e = spawnOne(typeId, px, pz, n > 1 ? 5 : 0); if (e) out.push(e); }
+        spawnTyp(typeId, px, pz, out); // Pulk-Typen als Haufen auf EINEN Punkt, sonst einzeln
       }
       return out;
     }
@@ -75,9 +89,8 @@ export function createSpawner(
     cd = Math.max(0.1, plan.interval ?? opts.interval());
     const typeId = pickWeighted(plan.weights, rng());
     if (!typeId) return [];
-    const n = Math.max(1, opts.clumpSize ? opts.clumpSize(typeId) : 1);
     const out: Enemy[] = [];
-    for (let k = 0; k < n; k++) { const e = spawnOne(typeId, px, pz, n > 1 ? 5 : 0); if (e) out.push(e); }
+    spawnTyp(typeId, px, pz, out); // Pulk-Typen als Haufen auf EINEN Punkt, sonst einzeln
     return out;
   }
 

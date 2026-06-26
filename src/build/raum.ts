@@ -37,18 +37,20 @@ export interface RaumConfig {
   ticksZumTod: number; // so viele Ticks töten einen Gegner mit ANFANGS-/Basis-HP (Kalibrierung)
   dmgProBuff: number; // +Feld-Schaden/Tick je Ernte-Buff (RRR — hier kommt die Schadensskalierung her)
   slow: number; // 0..1 Tempo-Anteil, der im Feld genommen wird
-  wachstumProBuff: number; // +Radius-Anteil je Buff (0.001 → Buff 250 = +25 %)
+  wachstumProBuff: number; // +Radius-Anteil je Buff (0,05 → Buff 10 = +50 %, Buff 20 = doppelte Größe)
+  wachstumCap: number; // ab so vielen Buffs wächst die GRÖSSE nicht mehr (der Schaden wächst weiter)
   zugStaerke: number; // RR: Welt-Einheiten/s, mit denen Gefangene zur Feld-Mitte gezogen werden
 }
 
 export const DEFAULT_RAUM: RaumConfig = {
   maxFelder: 3,
-  radius: 14,
+  radius: 3, // ~panzergroß (Tank-Radius 1,5): präzise frei platzierbar, fängt gezielt einen Panzer
   tickEvery: 0.5,
   ticksZumTod: 4,
   dmgProBuff: 2,
-  slow: 0.5,
-  wachstumProBuff: 0.001,
+  slow: 0.8, // war 0,5 → jetzt kriecht der Gegner im Feld auf 20 % Tempo (deutlich mehr Slow)
+  wachstumProBuff: 0.05, // war 0,001 (kaum sichtbar) → jetzt +5 % Radius je Buff
+  wachstumCap: 60, // die Größe deckelt bei 60 Buffs (= +300 % Radius); danach nur noch mehr Schaden
   zugStaerke: 40,
 };
 
@@ -60,13 +62,13 @@ export function legeFeld(s: RaumState, x: number, z: number, cfg: RaumConfig = D
 }
 
 /** Effektiver Feldradius: Basis × (1 + Buff × Wachstum). RRR lässt die Felder mit dem Ernte-Buff wachsen. */
-export function feldRadius(cfg: RaumConfig, buff: number): number {
-  return cfg.radius * (1 + buff * cfg.wachstumProBuff);
+export function feldRadius(cfg: RaumConfig, buff: number, sizeMul = 1): number {
+  return cfg.radius * (1 + Math.min(buff, cfg.wachstumCap) * cfg.wachstumProBuff) * sizeMul; // Cap-gedeckelt; sizeMul = temporäre Ult-Vergrößerung (Großfeld ×3)
 }
 
 /** Das (älteste) Feld, in dem der Punkt (x,z) liegt — oder null. Für Schaden/Slow/Zug-Mitte. */
-export function feldAn(s: RaumState, x: number, z: number, cfg: RaumConfig = DEFAULT_RAUM): Feld | null {
-  const r = feldRadius(cfg, s.buff);
+export function feldAn(s: RaumState, x: number, z: number, cfg: RaumConfig = DEFAULT_RAUM, sizeMul = 1): Feld | null {
+  const r = feldRadius(cfg, s.buff, sizeMul);
   for (const f of s.felder) if (Math.hypot(x - f.x, z - f.z) <= r) return f;
   return null;
 }

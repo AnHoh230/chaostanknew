@@ -12,7 +12,7 @@ export interface NachsetzCfg {
 }
 
 export const DEFAULT_NACHSETZ: NachsetzCfg = {
-  timeout: 15,
+  timeout: 30, // verdoppelt (war 15): Gegner kommen erst nach längerer Untätigkeit zum Nachsetzen in Frage
   distMin: 40,
   distSpanne: 10, // → 40..50 ≈ 45 um den Spieler herum
 };
