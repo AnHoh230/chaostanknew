@@ -7,6 +7,8 @@
   [Spec 1 — Kompass & Ladungen](2026-06-27-permanente-evolution-kompass-konsole-design.md)
 - **Liefert an:** Spec 3 (Spieler-Evolution).
 
+> **Update (Spec 5 — Gates/Balance):** Baupläne droppen **erst ab Kompass-Freischaltung** (nicht ab Minute 0), mit Pity + Duplikatschutz; Tier-1-Finisher sind bei Pol-Max automatisch bekannt. „Treibstoff" = getrenntes `fuel` (nicht das Level). BoardScore + Verhärtung (8 wirksame Zündungen) + Auto-Feuer-Dispatcher: [Spec 5](2026-06-27-permanente-evolution-implementierungs-gates-design.md) §6–§9.
+
 ---
 
 ## 1. Wozu diese Spec
@@ -45,7 +47,7 @@ Damit ist „erst herrichten, dann zünden" *mechanisch echt*, nicht Deko.
 
 Zwei Bedingungen, beide nötig — das löst „gefunden (VS)" und „aus gemaxten Items" sauber zusammen:
 
-1. **Bauplan gefunden + genommen.** Baupläne droppen **selten, ab Minute 0** (VS-Stil:
+1. **Bauplan gefunden + genommen.** Baupläne droppen **selten, ab Kompass-Freischaltung** (VS-Stil:
    *nimm-oder-warte*). Jeder Bauplan nennt seinen **Pol-Bedarf** (z. B. „Befehl + Raum"). Du hältst
    begrenzt viele (Vorschlag: **3 Finisher-Slots**) — passt ein Fund nicht zu deinem Kompass:
    nehmen & umschwenken, oder warten. *Das ist die VS-Spannung.*

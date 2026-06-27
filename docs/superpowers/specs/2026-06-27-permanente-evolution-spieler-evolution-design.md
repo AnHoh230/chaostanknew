@@ -8,6 +8,8 @@
   [Spec 2](2026-06-27-permanente-evolution-finisher-design.md)
 - **Liefert an:** Spec 4 (Kompass-Fusion / Systemform).
 
+> **Update (Spec 5 — Gates/Balance):** Pair-Mastery präzisiert (beide Pole `reachedMax` + Tier-2-Finisher **verhärtet**); Grundtyp sticky; Gleichzeitigkeit deterministisch aufgelöst. Details: [Spec 5](2026-06-27-permanente-evolution-implementierungs-gates-design.md) §10.
+
 ---
 
 ## 1. Wozu diese Spec

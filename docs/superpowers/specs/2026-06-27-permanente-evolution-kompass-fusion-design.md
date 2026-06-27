@@ -9,6 +9,8 @@
   [Spec 3](2026-06-27-permanente-evolution-spieler-evolution-design.md)
 - **Rolle:** Phase 5 — die Spitze der Ladder, bewusst nach oben **offen erweiterbar**.
 
+> **Update (Spec 5 — Gates/Balance):** Fusion bekommt **drei Stufen** (Preview/Phase/Systemform), getaktet am **Level des dritten Pols** — nicht an „≥2 gemeisterte Paare" (das wäre identisch mit „alle 3 gemaxt"). Edikt über Puls-Budget statt pro Frame. Details: [Spec 5](2026-06-27-permanente-evolution-implementierungs-gates-design.md) §11.
+
 ---
 
 ## 1. Wozu diese Spec

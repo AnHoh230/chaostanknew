@@ -6,6 +6,8 @@
 - **Hängt an:** [Spec 0 — Fundament](2026-06-27-permanente-evolution-fundament-design.md)
 - **Liefert an:** Spec 2 (Finisher) und Spec 3 (Spieler-Evolution).
 
+> **Update (Spec 5 — Gates/Balance):** `Ladung` wird in **zwei getrennte Größen** gespalten — `level` (0–5, dauerhaft, `reachedMax` latcht) und `fuel` (verbrauchbar). Meilensteine/Finisher-Schmieden lesen `reachedMax`, Finisher verbrauchen `fuel`; **Level sinkt nie**. Impuls-Einspeisung über umschaltbare Politik (`roh` ↔ `normalisiert`). Details: [Spec 5](2026-06-27-permanente-evolution-implementierungs-gates-design.md) §2/§4.
+
 ---
 
 ## 1. Wozu diese Spec
