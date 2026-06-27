@@ -313,6 +313,7 @@ function boot(build: BuildFolge): void {
   const kompass = createKompassState();
   const telemetry = createRunTelemetry(); // Gate 8: Run-Telemetrie + live EWMA (füttert den normalisiert-Modus)
   const phasen = createPhasenState(); // B: Häutungs-Zustand — verhärtete Schichten gehen auf Autopilot
+  let vCd = 0; // C: Grundtyp-Verb [V] Cooldown
   // Skillbaum komplett? (3. Build-Stufe + Ult gewählt + alle Talente auf Max) → schaltet den Kompass frei.
   const skillbaumVoll = (): boolean => {
     if (evo.unlockedStagesByChannel[ACTIVE_CORE] < 3) return false;
@@ -620,6 +621,40 @@ function boot(build: BuildFolge): void {
     }
     showToast(`${def.icon} ${def.name.toUpperCase()} ×${r.power.toFixed(1)}`, '#ffd166');
     return true;
+  };
+
+  // C (Spec 3/4) — Herrichten-Helfer: setzt mark/Feld/Gift (für Grundtyp-Verben, Fusion, Edikt). Nur sichere Primitive.
+  const herrichte = (e: Enemy, mark: boolean, trap: boolean, infect: boolean): void => {
+    if (mark && !e.buffs.active().some((b) => b.id === 'markiert')) e.buffs.add({ id: 'markiert', icon: '🎯', label: 'markiert', speedMul: MARK_SLOW, duration: MARK_BUFF_DUR });
+    if (trap) { e.feld ??= { tickCd: 0, gefangen: false }; e.feld.gefangen = true; }
+    if (infect) e.gift = saeGift(e.gift, gartenCfg);
+  };
+  // Grundtyp-Verb [V]: die manuelle Phase-4-Schicht, je Typ qualitativ anders (Spec 3 §4). Systemform = alle drei.
+  const GRUND_VERB_CD = 6;
+  const grundtypVerb = (): void => {
+    if (vCd > 0 || grundTyp === 'kommander' || !playerCombatant.alive) return;
+    const istArch = grundTyp === 'architekt' || grundTyp === 'systemform';
+    const istAlch = grundTyp === 'alchemist' || grundTyp === 'systemform';
+    const istRicht = grundTyp === 'richter' || grundTyp === 'systemform';
+    let n = 0;
+    for (const e of roster) {
+      if (!e.combatant.alive || e.haescher) continue;
+      const mark = e.buffs.active().some((b) => b.id === 'markiert');
+      if (istArch && (mark || e.feld?.gefangen)) { damageEnemyTick(e, Math.round(e.combatant.hp * 0.7 + 80), 'sonst'); n++; } // Artillerie-Befehl
+      if (istAlch && Math.hypot(e.combatant.x - playerCombatant.x, e.combatant.z - playerCombatant.z) < 30) { herrichte(e, false, false, true); n++; } // Sporen-Stoß
+      if (istRicht && e.combatant.alive && (mark || e.gift || e.dot)) { damageEnemyTick(e, e.combatant.hp + 1, 'sonst'); n++; } // Urteil: Vollstreckung
+    }
+    vCd = GRUND_VERB_CD;
+    showToast(`✦ ${GRUND_LABEL[grundTyp]} [V] (${n})`, GRUND_FARBE[grundTyp]);
+  };
+  // Sichtbare Transformation (Spec 3 G7 / Spec 4 §5): farbige Vignette je Grundtyp.
+  const grundVignette = document.createElement('div');
+  grundVignette.style.cssText = 'position:fixed;inset:0;z-index:25;pointer-events:none;opacity:0;transition:opacity .8s;';
+  document.body.appendChild(grundVignette);
+  const setGrundVisual = (typ: GrundTyp): void => {
+    if (typ === 'kommander') { grundVignette.style.opacity = '0'; return; }
+    grundVignette.style.boxShadow = `inset 0 0 180px 40px ${GRUND_FARBE[typ]}`;
+    grundVignette.style.opacity = typ === 'systemform' ? '0.55' : '0.3';
   };
 
   // Run-Action-Log: pro Run nach logs/run-<NNN>.log (Schüsse, Bewegung, Shop …).
@@ -1564,6 +1599,9 @@ function boot(build: BuildFolge): void {
     updateMetricsHud();
   });
 
+  // [V] — Grundtyp-Verb (die manuelle Phase-4-Schicht).
+  window.addEventListener('keydown', (ev) => { if (ev.key === 'v' || ev.key === 'V') grundtypVerb(); });
+
   // Toast: kurze Einblendung (Level-Up etc.).
   const toast = document.createElement('div');
   toast.id = 'loot-toast';
@@ -1844,6 +1882,7 @@ function boot(build: BuildFolge): void {
       o.mesh.position.y = 1 + Math.sin(runClock * 6 + i) * 0.12;
     }
     tickTelemetry(telemetry, simDt, frameImpuls); // Gate 8: Zeit + EWMA der Roh-Impulsrate
+    if (vCd > 0) vCd -= simDt; // C: Grundtyp-Verb-Cooldown
 
     // B (Spec 0 §4) — Verhärtung: gemeisterte Schichten gehen auf Autopilot (Hände wandern nach oben).
     if (evo.unlockedStagesByChannel[ACTIVE_CORE] >= 3 && verhaerte(phasen, 'build')) showToast('🤖 Build verhärtet — der Schuss läuft selbst', '#8bd5ff');
@@ -1892,20 +1931,29 @@ function boot(build: BuildFolge): void {
         if (auto) zuendeFinisher(auto);
         // Spieler-Evolution: gemeistertes Pol-Paar → Grundtyp (sticky)
         const neuTyp = evolviere(spielerEvo, kompass, finisher, pol);
-        if (neuTyp !== grundTyp) { grundTyp = neuTyp; markMeilenstein(telemetry, 'evolution'); showToast(`⭐ EVOLUTION — du bist jetzt ${GRUND_LABEL[neuTyp]}!`, GRUND_FARBE[neuTyp]); }
+        if (neuTyp !== grundTyp) { grundTyp = neuTyp; markMeilenstein(telemetry, 'evolution'); setGrundVisual(neuTyp); showToast(`⭐ EVOLUTION — du bist jetzt ${GRUND_LABEL[neuTyp]}!`, GRUND_FARBE[neuTyp]); }
         // Fusion/Systemform-Stufe (Spec 4/5 §11)
         const fs = fusionStufe(spielerEvo, kompass, finisher);
         if (fs !== fusionStufeNow) {
           fusionStufeNow = fs;
           if (fs === 'preview') { markMeilenstein(telemetry, 'fusionPreview'); showToast('🌀 Fusion beginnt — die Pole bluten ineinander', '#ff6ec7'); }
           else if (fs === 'phase') { markMeilenstein(telemetry, 'fusionPhase'); showToast('🌀 Fusion-Phase — Hybrid-Verben', '#ff6ec7'); }
-          else if (fs === 'systemform') { markMeilenstein(telemetry, 'systemform'); grundTyp = 'systemform'; showToast('✷ SYSTEMFORM — du biegst die Regeln der Arena!', '#ff6ec7'); }
+          else if (fs === 'systemform') { markMeilenstein(telemetry, 'systemform'); grundTyp = 'systemform'; setGrundVisual('systemform'); showToast('✷ SYSTEMFORM — du biegst die Regeln der Arena!', '#ff6ec7'); }
+        }
+        // C (Spec 4 §2) — Fusion: die Pole bluten ineinander. Gefangene/Markierte werden cross-hergerichtet.
+        if (fusionStufeNow !== 'keine') {
+          for (const e of roster) {
+            if (!e.combatant.alive || e.haescher) continue;
+            if (e.feld?.gefangen) herrichte(e, true, false, true); // Feld → +Marke +Seuche
+            else if (e.buffs.active().some((b) => b.id === 'markiert')) herrichte(e, false, false, true); // Marke → +Seuche
+          }
         }
       }
       // System-Edikt (per Frame): in der Systemform Auto-Loop; je Puls eine Entladung (Spec 5 §11).
       if (grundTyp === 'systemform' || ediktOffen(edikt)) {
         const pulse = tickEdikt(edikt, simDt, grundTyp === 'systemform');
         for (let p = 0; p < pulse; p++) {
+          for (const e of roster) if (e.combatant.alive && !e.haescher) herrichte(e, true, true, true); // Edikt: Auto-Herrichten (Spec 4 §4.1)
           const fired = naechsterAutoFinisher(finisher, kompass, gegnerBoard(), false);
           if (fired) zuendeFinisher(fired);
           else for (const e of roster) { if (e.combatant.alive && !e.haescher) damageEnemyTick(e, Math.round(e.combatant.hp * 0.6 + 80), 'sonst'); }
