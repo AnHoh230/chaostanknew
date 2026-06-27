@@ -6,7 +6,7 @@ import {
 } from './evolutionTuning';
 import {
   createFinisherState, finisherDef, boardScore, powerMultiplier, schmiede, feuere,
-  istVerhaertet, dispatchAutoFeuer, naechsterAutoFinisher, type GegnerBoard,
+  istVerhaertet, dispatchAutoFeuer, naechsterAutoFinisher, finisherRang, FINISHER_RANG_PRO, type GegnerBoard,
 } from './finisher';
 
 // Kompass mit gemaxten Polen + Fuel direkt aufbauen (isoliert von der Ökonomie)
@@ -106,6 +106,15 @@ describe('finisher — feuern (Spec 5 §8)', () => {
     const k = kompassMit(['befehl', 'raum'], 99);
     for (let i = 0; i < FINISHER_EFFECTIVE_USES_TO_HARDEN; i++) feuere(s, k, 'bombardement', markFeld(3));
     expect(istVerhaertet(s, 'bombardement')).toBe(true);
+  });
+
+  it('Evolution a) — finisherRang steigt je FINISHER_RANG_PRO wirksame Zündungen', () => {
+    const s = createFinisherState();
+    expect(finisherRang(s, 'bombardement')).toBe(0);
+    s.zuendungen.bombardement = FINISHER_RANG_PRO; // genau 1 Rang
+    expect(finisherRang(s, 'bombardement')).toBe(1);
+    s.zuendungen.bombardement = FINISHER_RANG_PRO * 2 + 1;
+    expect(finisherRang(s, 'bombardement')).toBe(2);
   });
 });
 

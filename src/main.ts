@@ -86,11 +86,12 @@ import { nachsetzenFaellig, spawnRundum, DEFAULT_NACHSETZ } from './build/nachse
 import { createKompassState, kompassFreischalten, waehlePol, speiseImpuls, gemaxtePole } from './build/kompass';
 import { effektiverImpuls, IMPULS_MODUS, POL_MAX_LEVEL, POL_FUEL_CAP, AUTO_FIRE_EVALUATION_SECONDS } from './build/evolutionTuning';
 import {
-  createFinisherState, finisherDef, schmiede, feuere, istVerhaertet, naechsterAutoFinisher, boardScore,
+  createFinisherState, finisherDef, schmiede, feuere, istVerhaertet, naechsterAutoFinisher, boardScore, finisherRang,
   type GegnerBoard, type FinisherId,
 } from './build/finisher';
 import {
-  createBlueprintState, tickBlueprint, zieheBauplan, nimmBauplan, mussErstenErzwingen, mussRelevantenErzwingen,
+  createBlueprintState, tickBlueprint, zieheBauplan, nimmBauplan, ersetzeBauplan, mussErstenErzwingen, mussRelevantenErzwingen,
+  type BlueprintId,
 } from './build/blueprints';
 import { createEvolutionState as createSpielerEvo, evolviere, type GrundTyp } from './build/evolution';
 import { fusionStufe, createEdiktState, invoziere, tickEdikt, ediktOffen, type FusionStufe } from './build/fusion';
@@ -314,6 +315,8 @@ function boot(build: BuildFolge): void {
   const telemetry = createRunTelemetry(); // Gate 8: Run-Telemetrie + live EWMA (füttert den normalisiert-Modus)
   const phasen = createPhasenState(); // B: Häutungs-Zustand — verhärtete Schichten gehen auf Autopilot
   let vCd = 0; // C: Grundtyp-Verb [V] Cooldown
+  let comboLog: { id: FinisherId; t: number }[] = []; // D2b: Tier-2-Kombo (2 verschiedene in 8 s → Systembruch)
+  let pendingBauplan: BlueprintId | null = null; // D3: Fund wartet auf [B] nehmen / [N] warten
   // Skillbaum komplett? (3. Build-Stufe + Ult gewählt + alle Talente auf Max) → schaltet den Kompass frei.
   const skillbaumVoll = (): boolean => {
     if (evo.unlockedStagesByChannel[ACTIVE_CORE] < 3) return false;
@@ -564,6 +567,7 @@ function boot(build: BuildFolge): void {
       }
       if (blueprint.besessen.length) html += `<div style="margin-top:3px;opacity:.5;font-size:10px">📜 ${blueprint.besessen.join(' · ')}</div>`;
     }
+    if (pendingBauplan) html += `<div style="margin-top:4px;color:#b794f4">📜 ${finisherDef(pendingBauplan).name}? [B]/[N]</div>`;
     kompassPanel.innerHTML = html;
   };
 
@@ -591,11 +595,7 @@ function boot(build: BuildFolge): void {
       + `Overflow ${kompass.overflowWaste.toFixed(0)}`;
   };
 
-  // — Finisher-Effekt (Engine): liest den hergerichteten Board-State, entlädt power-skalierten Schaden —
-  const matchtZustand = (e: Enemy, liest: readonly ('mark' | 'feld' | 'gift')[]): boolean =>
-    (liest.includes('mark') && e.buffs.active().some((b) => b.id === 'markiert'))
-    || (liest.includes('feld') && (e.feld?.gefangen ?? false))
-    || (liest.includes('gift') && (e.gift ? reifeStufe(e.gift, gartenCfg) > 0 : !!e.dot));
+  // — Finisher-Effekt (Engine): jeder Finisher entlädt SEINEN hergerichteten Zustand als Signaturaktion —
   const gegnerBoard = (): GegnerBoard[] => roster.filter((e) => e.combatant.alive && !e.haescher).map((e) => ({
     mark: e.buffs.active().some((b) => b.id === 'markiert'),
     feld: e.feld?.gefangen ?? false,
@@ -604,22 +604,50 @@ function boot(build: BuildFolge): void {
   const zuendeFinisher = (id: FinisherId): boolean => {
     const def = finisherDef(id);
     const board = gegnerBoard();
+    const bs = boardScore(def, board);
     const r = feuere(finisher, kompass, id, board);
-    zaehleFinisher(telemetry, r.wirksam, boardScore(def, board)); // Gate 8
+    zaehleFinisher(telemetry, r.wirksam, bs); // Gate 8
     if (!r.wirksam) return false;
-    // Grundtyp färbt die Entladung qualitativ (Spec 5 Regel 3 — nicht nur ×Schaden):
-    //  Architekt = fokussierte Wucht · Alchemist/Systemform = Seuche greift auch Unvorbereitete ·
-    //  Richter/Systemform = hergerichtete Überlebende werden vollstreckt.
     const grundMul = grundTyp === 'architekt' ? 1.5 : grundTyp === 'alchemist' || grundTyp === 'richter' ? 1.3 : 1;
+    const rangMul = 1 + finisherRang(finisher, id) * 0.1; // Evolution a): Rang macht stärker
+    const wucht = (e: Enemy, frac: number): number => Math.round((e.combatant.hp * frac + 60) * r.power * grundMul * rangMul);
+    let n = 0;
+    let letzter: Enemy | null = null;
+    // Jeder Finisher = eigene Signaturaktion auf SEINEN hergerichteten Zustand (Spec 2 §4).
     for (const e of roster) {
       if (!e.combatant.alive || e.haescher) continue;
-      const getroffen = matchtZustand(e, def.liest);
-      const faktor = getroffen ? 1 : (grundTyp === 'alchemist' || grundTyp === 'systemform' ? 0.4 : 0);
-      if (faktor === 0) continue;
-      damageEnemyTick(e, Math.round((e.combatant.hp * 0.5 + 60) * r.power * grundMul * faktor), 'sonst');
-      if (getroffen && (grundTyp === 'richter' || grundTyp === 'systemform') && e.combatant.alive) damageEnemyTick(e, e.combatant.hp + 1, 'sonst');
+      const mark = e.buffs.active().some((b) => b.id === 'markiert');
+      const feld = e.feld?.gefangen ?? false;
+      const giftN = e.gift ? reifeStufe(e.gift, gartenCfg) : (e.dot ? 1 : 0);
+      let hit = true;
+      switch (id) {
+        case 'generalbefehl': if (mark) damageEnemyTick(e, e.combatant.hp + 1, 'sonst'); else hit = false; break; // Salve: Marken exekutiert
+        case 'einsturz': if (feld) damageEnemyTick(e, wucht(e, 0.8), 'sonst'); else hit = false; break; // Implosion
+        case 'seuchenausbruch': if (giftN > 0) damageEnemyTick(e, wucht(e, 0.45) * Math.max(1, giftN), 'sonst'); else hit = false; break; // DoT-Detonation, je Reifegrad
+        case 'bombardement': if (mark || feld) damageEnemyTick(e, wucht(e, 0.7), 'sonst'); else hit = false; break; // Marken in Felder + Einschlag
+        case 'sporenfeld': if (feld) { herrichte(e, false, false, true); damageEnemyTick(e, wucht(e, 0.5), 'sonst'); } else hit = false; break; // Felder ansteckend
+        case 'urteil': if (mark || giftN > 0) damageEnemyTick(e, e.combatant.hp + 1, 'sonst'); else hit = false; break; // Kaskaden-Vollstreckung
+        case 'systembruch': herrichte(e, true, true, true); damageEnemyTick(e, wucht(e, 0.6), 'sonst'); break; // alles her + Gesamtentladung
+      }
+      if (hit) { n += 1; letzter = e; }
     }
-    showToast(`${def.icon} ${def.name.toUpperCase()} ×${r.power.toFixed(1)}`, '#ffd166');
+    // c) Build färbt den Finisher (Spec 2c): die Textur des Haupt-Builds am Wirkungsort.
+    if (letzter) {
+      if (istRaum) placeAoeField(letzter.combatant.x, letzter.combatant.z);
+      else if (istZustand) herrichte(letzter, false, false, true);
+      else herrichte(letzter, true, false, false);
+    }
+    screenFlash(FINISHER_FLASH[id]);
+    showToast(`${def.icon} ${def.name.toUpperCase()} ×${r.power.toFixed(1)} (${n})`, FINISHER_FLASH[id]);
+    // b) Kombo: zwei VERSCHIEDENE Tier-2-Finisher in 8 s schalten den Systembruch-Bauplan frei (Spec 2 §6b).
+    if (def.tier === 2) {
+      comboLog.push({ id, t: runClock });
+      comboLog = comboLog.filter((c) => runClock - c.t <= 8);
+      if (new Set(comboLog.map((c) => c.id)).size >= 2 && !blueprint.besessen.includes('systembruch')) {
+        blueprint.besessen.push('systembruch');
+        showToast('⚡ KOMBO — Systembruch-Bauplan freigeschaltet!', '#ff6ec7');
+      }
+    }
     return true;
   };
 
@@ -655,6 +683,20 @@ function boot(build: BuildFolge): void {
     if (typ === 'kommander') { grundVignette.style.opacity = '0'; return; }
     grundVignette.style.boxShadow = `inset 0 0 180px 40px ${GRUND_FARBE[typ]}`;
     grundVignette.style.opacity = typ === 'systemform' ? '0.55' : '0.3';
+  };
+  // Finisher-Inszenierung: kurzer farbiger Vollbild-Flash je Finisher (Spec 2: „schön aussieht").
+  const FINISHER_FLASH: Record<FinisherId, string> = {
+    generalbefehl: '#ffe08a', einsturz: '#c77dff', seuchenausbruch: '#69db7c',
+    bombardement: '#ffd166', sporenfeld: '#7bed9f', urteil: '#ff8aa8', systembruch: '#ff6ec7',
+  };
+  const finisherFlashEl = document.createElement('div');
+  finisherFlashEl.style.cssText = 'position:fixed;inset:0;z-index:28;pointer-events:none;opacity:0;transition:opacity .5s;';
+  document.body.appendChild(finisherFlashEl);
+  const screenFlash = (col: string): void => {
+    finisherFlashEl.style.transition = 'none';
+    finisherFlashEl.style.background = `radial-gradient(circle, ${col}00 40%, ${col}66 100%)`;
+    finisherFlashEl.style.opacity = '1';
+    requestAnimationFrame(() => { finisherFlashEl.style.transition = 'opacity .5s'; finisherFlashEl.style.opacity = '0'; });
   };
 
   // Run-Action-Log: pro Run nach logs/run-<NNN>.log (Schüsse, Bewegung, Shop …).
@@ -1602,6 +1644,19 @@ function boot(build: BuildFolge): void {
   // [V] — Grundtyp-Verb (die manuelle Phase-4-Schicht).
   window.addEventListener('keydown', (ev) => { if (ev.key === 'v' || ev.key === 'V') grundtypVerb(); });
 
+  // [B]/[N] — gefundenen Bauplan nehmen oder warten (VS nimm-oder-warte, Spec 2 §3). Volle Slots → ältesten ersetzen.
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key === 'b' || ev.key === 'B') {
+      if (!pendingBauplan) return;
+      const alt = blueprint.besessen[0];
+      const ok = nimmBauplan(blueprint, pendingBauplan) || (alt != null && ersetzeBauplan(blueprint, alt, pendingBauplan));
+      if (ok) { markMeilenstein(telemetry, 'ersterBauplan'); showToast(`📜 genommen: ${finisherDef(pendingBauplan).name}`, '#b794f4'); }
+      pendingBauplan = null;
+    } else if (ev.key === 'n' || ev.key === 'N') {
+      if (pendingBauplan) { showToast('Bauplan verworfen — warten', '#888'); pendingBauplan = null; }
+    }
+  });
+
   // Toast: kurze Einblendung (Level-Up etc.).
   const toast = document.createElement('div');
   toast.id = 'loot-toast';
@@ -1921,11 +1976,11 @@ function boot(build: BuildFolge): void {
         if (gm.length >= 2) markMeilenstein(telemetry, 'paarMax');
         if (finisher.aktiv.some((id) => istVerhaertet(finisher, id))) markMeilenstein(telemetry, 'finisherVerhaertet');
         blueprintOfferTimer += AUTO_FIRE_EVALUATION_SECONDS;
-        if (mussErstenErzwingen(blueprint) || mussRelevantenErzwingen(blueprint) || blueprintOfferTimer >= 25) {
+        if (!pendingBauplan && (mussErstenErzwingen(blueprint) || mussRelevantenErzwingen(blueprint) || blueprintOfferTimer >= 25)) {
           blueprintOfferTimer = 0;
           const lv = { befehl: kompass.pole.befehl.level, raum: kompass.pole.raum.level, zustand: kompass.pole.zustand.level };
           const angebot = zieheBauplan(blueprint, lv, Math.random);
-          if (angebot && nimmBauplan(blueprint, angebot.id)) { markMeilenstein(telemetry, 'ersterBauplan'); showToast(`📜 Bauplan gefunden: ${finisherDef(angebot.id).name}`, '#b794f4'); }
+          if (angebot) { pendingBauplan = angebot.id; showToast(`📜 Bauplan-Fund: ${finisherDef(angebot.id).name} — [B] nehmen / [N] warten`, '#b794f4'); }
         }
         const auto = naechsterAutoFinisher(finisher, kompass, gegnerBoard(), true); // nur verhärtete
         if (auto) zuendeFinisher(auto);

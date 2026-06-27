@@ -99,6 +99,12 @@ export function istVerhaertet(s: FinisherState, id: FinisherId): boolean {
   return s.zuendungen[id] >= FINISHER_EFFECTIVE_USES_TO_HARDEN;
 }
 
+/** Evolution a) — der Finisher wird allein STÄRKER mit Nutzung: ein Rang je FINISHER_RANG_PRO wirksame Zündungen. */
+export const FINISHER_RANG_PRO = 4;
+export function finisherRang(s: FinisherState, id: FinisherId): number {
+  return Math.floor(s.zuendungen[id] / FINISHER_RANG_PRO);
+}
+
 /**
  * Schmiedet alle noch nicht aktiven Finisher, deren Bedarf gemaxt ist:
  * Tier 1 automatisch (kein Bauplan), Tier 2/3 nur mit besessenem Bauplan. Gibt die NEU geschmiedeten zurück.
