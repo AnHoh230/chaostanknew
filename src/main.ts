@@ -83,8 +83,15 @@ import {
 import { primaerPol, polKernKanal, archetyp, KOMMANDER_MODE, type Pol, type BuildFolge } from './build/buildModell';
 import { nachsetzenFaellig, spawnRundum, DEFAULT_NACHSETZ } from './build/nachsetzen';
 // — Permanente Evolution (Spec 0–7): Kompass-Konsole / Finisher / Spieler-Evolution / Fusion —
-import { createKompassState, kompassFreischalten, waehlePol, speiseImpuls } from './build/kompass';
-import { effektiverImpuls, IMPULS_MODUS, POL_MAX_LEVEL, POL_FUEL_CAP } from './build/evolutionTuning';
+import { createKompassState, kompassFreischalten, waehlePol, speiseImpuls, gemaxtePole } from './build/kompass';
+import { effektiverImpuls, IMPULS_MODUS, POL_MAX_LEVEL, POL_FUEL_CAP, AUTO_FIRE_EVALUATION_SECONDS } from './build/evolutionTuning';
+import {
+  createFinisherState, finisherDef, schmiede, feuere, istVerhaertet, naechsterAutoFinisher,
+  type GegnerBoard, type FinisherId,
+} from './build/finisher';
+import {
+  createBlueprintState, tickBlueprint, zieheBauplan, nimmBauplan, mussErstenErzwingen, mussRelevantenErzwingen,
+} from './build/blueprints';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
 import { createReticle } from './ui/reticle';
@@ -308,6 +315,11 @@ function boot(build: BuildFolge): void {
     if (istRaum) return raumSkill.ult !== null && RAUM_TALENTS.every((t) => raumSkill.ranks[t.id] >= RAUM_TALENT_MAX);
     return befehlSkill.ult !== null && BEFEHL_TALENTS.every((t) => befehlSkill.ranks[t.id] >= BEFEHL_TALENT_MAX);
   };
+  // — Finisher (Spec 2/5) + Baupläne (Spec 3) —
+  const finisher = createFinisherState();
+  const blueprint = createBlueprintState();
+  let finisherTick = 0; // 1-s-Dispatcher: Schmieden + Bauplan-Angebot + Auto-Feuer
+  let blueprintOfferTimer = 0;
   // Pol-Ult → Kanal des KOMMANDERS für diesen Pol. Eine RRR-Ult ist nur wählbar, wenn DIESER Pol
   // Impulse gesammelt hat (Stufe ≥ 1). Im reinen RRR-Build hat nur Raum (sniper_aoe_dot) Stufen →
   // nur Großfeld (Raum-Pol) wählbar; Umlagerung/Verseuchung brauchen B-/Z-Impulse (Mischbuild/Kompass).
@@ -529,7 +541,37 @@ function boot(build: BuildFolge): void {
       const key = p === 'befehl' ? '1' : p === 'raum' ? '2' : '3';
       html += `<div style="margin-top:3px;${aktiv ? 'color:#4dabf7' : 'opacity:.7'}">[${key}] ${POL_LABEL[p]} ${lvl}${fuel}</div>`;
     }
+    if (finisher.aktiv.length || blueprint.besessen.length) {
+      html += '<div style="margin-top:6px;opacity:.55;letter-spacing:1px;font-size:10px">FINISHER [F]</div>';
+      for (const id of finisher.aktiv) {
+        const hart = istVerhaertet(finisher, id);
+        html += `<div style="margin-top:2px;${hart ? 'color:#ffd166' : 'opacity:.7'}">${finisherDef(id).icon} ${finisherDef(id).name}${hart ? ' ⟳auto' : ''}</div>`;
+      }
+      if (blueprint.besessen.length) html += `<div style="margin-top:3px;opacity:.5;font-size:10px">📜 ${blueprint.besessen.join(' · ')}</div>`;
+    }
     kompassPanel.innerHTML = html;
+  };
+
+  // — Finisher-Effekt (Engine): liest den hergerichteten Board-State, entlädt power-skalierten Schaden —
+  const matchtZustand = (e: Enemy, liest: readonly ('mark' | 'feld' | 'gift')[]): boolean =>
+    (liest.includes('mark') && e.buffs.active().some((b) => b.id === 'markiert'))
+    || (liest.includes('feld') && (e.feld?.gefangen ?? false))
+    || (liest.includes('gift') && (e.gift ? reifeStufe(e.gift, gartenCfg) > 0 : !!e.dot));
+  const gegnerBoard = (): GegnerBoard[] => roster.filter((e) => e.combatant.alive && !e.haescher).map((e) => ({
+    mark: e.buffs.active().some((b) => b.id === 'markiert'),
+    feld: e.feld?.gefangen ?? false,
+    giftStacks: e.gift ? reifeStufe(e.gift, gartenCfg) : (e.dot ? 1 : 0),
+  }));
+  const zuendeFinisher = (id: FinisherId): boolean => {
+    const def = finisherDef(id);
+    const r = feuere(finisher, kompass, id, gegnerBoard());
+    if (!r.wirksam) return false;
+    for (const e of roster) {
+      if (!e.combatant.alive || e.haescher || !matchtZustand(e, def.liest)) continue;
+      damageEnemyTick(e, Math.round((e.combatant.hp * 0.5 + 60) * r.power), 'sonst'); // Entladung skaliert mit Readiness
+    }
+    showToast(`${def.icon} ${def.name.toUpperCase()} ×${r.power.toFixed(1)}`, '#ffd166');
+    return true;
   };
 
   // Run-Action-Log: pro Run nach logs/run-<NNN>.log (Schüsse, Bewegung, Shop …).
@@ -1452,6 +1494,14 @@ function boot(build: BuildFolge): void {
     updateKompassHud();
   });
 
+  // [F] — besten feuerbaren Finisher manuell zünden (Auswahl wie Auto, aber auch ungehärtete).
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'f' && ev.key !== 'F') return;
+    if (!finisher.aktiv.length) return;
+    const id = naechsterAutoFinisher(finisher, kompass, gegnerBoard(), false);
+    if (id) zuendeFinisher(id);
+  });
+
   // Toast: kurze Einblendung (Level-Up etc.).
   const toast = document.createElement('div');
   toast.id = 'loot-toast';
@@ -1728,6 +1778,25 @@ function boot(build: BuildFolge): void {
       o.mesh.position.x += (dx / d) * step;
       o.mesh.position.z += (dz / d) * step;
       o.mesh.position.y = 1 + Math.sin(runClock * 6 + i) * 0.12;
+    }
+
+    // Finisher/Blueprint-Takt (Spec 5): läuft erst ab Kompass-Freischaltung.
+    if (kompass.freigeschaltet) {
+      tickBlueprint(blueprint, simDt);
+      finisherTick -= simDt;
+      if (finisherTick <= 0) {
+        finisherTick = AUTO_FIRE_EVALUATION_SECONDS;
+        for (const id of schmiede(finisher, gemaxtePole(kompass), blueprint.besessen)) showToast(`🔨 Finisher bereit: ${finisherDef(id).name}`, '#ffd166');
+        blueprintOfferTimer += AUTO_FIRE_EVALUATION_SECONDS;
+        if (mussErstenErzwingen(blueprint) || mussRelevantenErzwingen(blueprint) || blueprintOfferTimer >= 25) {
+          blueprintOfferTimer = 0;
+          const lv = { befehl: kompass.pole.befehl.level, raum: kompass.pole.raum.level, zustand: kompass.pole.zustand.level };
+          const angebot = zieheBauplan(blueprint, lv, Math.random);
+          if (angebot && nimmBauplan(blueprint, angebot.id)) showToast(`📜 Bauplan gefunden: ${finisherDef(angebot.id).name}`, '#b794f4');
+        }
+        const auto = naechsterAutoFinisher(finisher, kompass, gegnerBoard(), true); // nur verhärtete
+        if (auto) zuendeFinisher(auto);
+      }
     }
 
     // Stil messen + Frontlage-Puls (P3). Echtes Tempo aus dem Positionsdelta.

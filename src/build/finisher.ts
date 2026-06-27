@@ -151,14 +151,22 @@ export function feuere(s: FinisherState, kompass: KompassState, id: FinisherId, 
  * Readiness, deterministischer Tiebreak (Tier → BoardScore → Schmiede-Reihenfolge → Id). Gibt den
  * gefeuerten Finisher zurück oder null.
  */
-export function dispatchAutoFeuer(s: FinisherState, kompass: KompassState, gegner: readonly GegnerBoard[]): FinisherId | null {
+/**
+ * Wählt den besten feuerbaren Finisher (Readiness → Tier → BoardScore → Schmiede-Reihenfolge → Id),
+ * OHNE zu feuern. `nurVerhaertet` true = Auto-Feuer (nur verhärtete), false = manuelle Wahl (alle aktiven).
+ * So kann der Aufrufer (Engine) den Effekt selbst anwenden. null, wenn keiner feuerbar ist.
+ */
+export function naechsterAutoFinisher(
+  s: FinisherState, kompass: KompassState, gegner: readonly GegnerBoard[], nurVerhaertet = true,
+): FinisherId | null {
   const readiness = (id: FinisherId): number => {
     const def = finisherDef(id);
     return boardScore(def, gegner) / minEffectiveBoardScore(def.tier);
   };
   const kandidaten = s.aktiv.filter((id) => {
     const def = finisherDef(id);
-    return istVerhaertet(s, id) && boardScore(def, gegner) >= minEffectiveBoardScore(def.tier) && kannTreibstoff(kompass, def.treibstoff);
+    if (nurVerhaertet && !istVerhaertet(s, id)) return false;
+    return boardScore(def, gegner) >= minEffectiveBoardScore(def.tier) && kannTreibstoff(kompass, def.treibstoff);
   });
   if (kandidaten.length === 0) return null;
 
@@ -173,8 +181,13 @@ export function dispatchAutoFeuer(s: FinisherState, kompass: KompassState, gegne
     if (ia !== ib) return ia - ib;
     return a < b ? -1 : a > b ? 1 : 0;
   });
+  return kandidaten[0]!;
+}
 
-  const ziel = kandidaten[0]!;
+/** Auto-Feuer-Dispatcher (Spec 5 §9): höchstens EIN verhärteter Finisher pro Tick. Feuert direkt. */
+export function dispatchAutoFeuer(s: FinisherState, kompass: KompassState, gegner: readonly GegnerBoard[]): FinisherId | null {
+  const ziel = naechsterAutoFinisher(s, kompass, gegner, true);
+  if (!ziel) return null;
   feuere(s, kompass, ziel, gegner);
   return ziel;
 }

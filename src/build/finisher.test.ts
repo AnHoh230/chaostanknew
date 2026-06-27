@@ -6,7 +6,7 @@ import {
 } from './evolutionTuning';
 import {
   createFinisherState, finisherDef, boardScore, powerMultiplier, schmiede, feuere,
-  istVerhaertet, dispatchAutoFeuer, type GegnerBoard,
+  istVerhaertet, dispatchAutoFeuer, naechsterAutoFinisher, type GegnerBoard,
 } from './finisher';
 
 // Kompass mit gemaxten Polen + Fuel direkt aufbauen (isoliert von der Ökonomie)
@@ -125,6 +125,15 @@ describe('finisher — Auto-Feuer-Dispatcher (Spec 5 §9)', () => {
     s.zuendungen.bombardement = FINISHER_EFFECTIVE_USES_TO_HARDEN;
     expect(dispatchAutoFeuer(s, createKompassState(), markFeld(3))).toBeNull(); // gesperrt + kein Fuel
     expect(dispatchAutoFeuer(s, kompassMit(['befehl', 'raum'], 99), markFeld(1))).toBeNull(); // Board zu klein
+  });
+
+  it('naechsterAutoFinisher: nurVerhaertet=false bezieht ungehärtete ein (manuelle Wahl)', () => {
+    const s = createFinisherState();
+    schmiede(s, ['befehl', 'raum'], ['bombardement']); // aktiv, NICHT verhärtet
+    const k = kompassMit(['befehl', 'raum'], 99);
+    expect(naechsterAutoFinisher(s, k, markFeld(3), true)).toBeNull(); // nichts verhärtet
+    expect(naechsterAutoFinisher(s, k, markFeld(3), false)).toBe('bombardement'); // manuell wählbar
+    expect(s.zuendungen.bombardement).toBe(0); // hat NICHT gefeuert (nur Auswahl)
   });
 
   it('wählt bei mehreren den mit höherer Readiness, feuert höchstens einen', () => {
