@@ -93,6 +93,7 @@ import {
   createBlueprintState, tickBlueprint, zieheBauplan, nimmBauplan, mussErstenErzwingen, mussRelevantenErzwingen,
 } from './build/blueprints';
 import { createEvolutionState as createSpielerEvo, evolviere, type GrundTyp } from './build/evolution';
+import { fusionStufe, createEdiktState, invoziere, tickEdikt, ediktOffen, type FusionStufe } from './build/fusion';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
 import { createReticle } from './ui/reticle';
@@ -326,6 +327,9 @@ function boot(build: BuildFolge): void {
   let grundTyp: GrundTyp = 'kommander';
   const GRUND_LABEL: Record<GrundTyp, string> = { kommander: 'Kommander', architekt: 'Architekt/Feldherr', alchemist: 'Alchemist/Verseucher', richter: 'Richter/Manipulator', systemform: 'Systemform' };
   const GRUND_FARBE: Record<GrundTyp, string> = { kommander: '#cfe3ee', architekt: '#4dabf7', alchemist: '#69db7c', richter: '#ffd166', systemform: '#ff6ec7' };
+  // — Fusion / Systemform (Spec 4/5 §11): 3-stufig + System-Edikt mit Puls-Budget —
+  const edikt = createEdiktState();
+  let fusionStufeNow: FusionStufe = 'keine';
   // Pol-Ult → Kanal des KOMMANDERS für diesen Pol. Eine RRR-Ult ist nur wählbar, wenn DIESER Pol
   // Impulse gesammelt hat (Stufe ≥ 1). Im reinen RRR-Build hat nur Raum (sniper_aoe_dot) Stufen →
   // nur Großfeld (Raum-Pol) wählbar; Umlagerung/Verseuchung brauchen B-/Z-Impulse (Mischbuild/Kompass).
@@ -1517,6 +1521,13 @@ function boot(build: BuildFolge): void {
     if (id) zuendeFinisher(id);
   });
 
+  // [E] — System-Edikt manuell auslösen (nur in der Systemform; sonst läuft es per Auto-Loop).
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'e' && ev.key !== 'E') return;
+    if (grundTyp !== 'systemform') return;
+    if (invoziere(edikt)) showToast('✷ SYSTEM-EDIKT', '#ff6ec7');
+  });
+
   // Toast: kurze Einblendung (Level-Up etc.).
   const toast = document.createElement('div');
   toast.id = 'loot-toast';
@@ -1814,6 +1825,23 @@ function boot(build: BuildFolge): void {
         // Spieler-Evolution: gemeistertes Pol-Paar → Grundtyp (sticky)
         const neuTyp = evolviere(spielerEvo, kompass, finisher, pol);
         if (neuTyp !== grundTyp) { grundTyp = neuTyp; showToast(`⭐ EVOLUTION — du bist jetzt ${GRUND_LABEL[neuTyp]}!`, GRUND_FARBE[neuTyp]); }
+        // Fusion/Systemform-Stufe (Spec 4/5 §11)
+        const fs = fusionStufe(spielerEvo, kompass, finisher);
+        if (fs !== fusionStufeNow) {
+          fusionStufeNow = fs;
+          if (fs === 'preview') showToast('🌀 Fusion beginnt — die Pole bluten ineinander', '#ff6ec7');
+          else if (fs === 'phase') showToast('🌀 Fusion-Phase — Hybrid-Verben', '#ff6ec7');
+          else if (fs === 'systemform') { grundTyp = 'systemform'; showToast('✷ SYSTEMFORM — du biegst die Regeln der Arena!', '#ff6ec7'); }
+        }
+      }
+      // System-Edikt (per Frame): in der Systemform Auto-Loop; je Puls eine Entladung (Spec 5 §11).
+      if (grundTyp === 'systemform' || ediktOffen(edikt)) {
+        const pulse = tickEdikt(edikt, simDt, grundTyp === 'systemform');
+        for (let p = 0; p < pulse; p++) {
+          const fired = naechsterAutoFinisher(finisher, kompass, gegnerBoard(), false);
+          if (fired) zuendeFinisher(fired);
+          else for (const e of roster) { if (e.combatant.alive && !e.haescher) damageEnemyTick(e, Math.round(e.combatant.hp * 0.6 + 80), 'sonst'); }
+        }
       }
     }
 
