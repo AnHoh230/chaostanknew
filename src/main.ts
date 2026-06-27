@@ -96,6 +96,10 @@ import { createEvolutionState as createSpielerEvo, evolviere, type GrundTyp } fr
 import { fusionStufe, createEdiktState, invoziere, tickEdikt, ediktOffen, type FusionStufe } from './build/fusion';
 import { createRunTelemetry, tickTelemetry, markMeilenstein, zaehleFinisher, avgBoardScore } from './build/telemetry';
 import { createPhasenState, verhaerte } from './build/phasen';
+import {
+  createMastery, buildGemeistert, naheKandidaten, besserReife,
+  MASTERY_MARKED_KILLS, MASTERY_FIELD_KILLS, MASTERY_MATURE_KILLS,
+} from './build/smartHaut';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
 import { createReticle } from './ui/reticle';
@@ -328,6 +332,10 @@ function boot(build: BuildFolge): void {
   const blueprint = createBlueprintState();
   let finisherTick = 0; // 1-s-Dispatcher: Schmieden + Bauplan-Angebot + Auto-Feuer
   let blueprintOfferTimer = 0;
+  // — Spec 7: Smart-Hautabschluss — Mastery-Messung + (weiches) Overflow-Gate —
+  const mastery = createMastery();
+  const MASTERY_GATE_HARD = false; // false = Mastery wird nur gemessen, blockt den Überlauf NICHT (Spec 7 §5)
+  let befehlsnetzAktiv = false; // Reentrancy-Guard gegen Befehlsnetz-Kaskade
   // — Spieler-Evolution (Spec 3/5): erstes gemeistertes Pol-Paar → neuer Grundtyp —
   const spielerEvo = createSpielerEvo();
   let grundTyp: GrundTyp = 'kommander';
@@ -365,6 +373,16 @@ function boot(build: BuildFolge): void {
     e.combatant.hp = 0; e.combatant.alive = false;
     e.harvested = GARTEN_HARVEST_TIME; e.gift = undefined; setEnemyGlow(e, GIFT_GREY);
     erntefieber += 1;
+    if (istZustand) {
+      mastery.matureKills += 1; // Spec 7 Gate 3: reifer Gift-Tod zählt zur Zustand-Meisterung
+      if (skillbaumVoll()) { // Talent-Signatur „Kritische Masse": reifer Tod springt auf nahe Gegner (max-Reife, nie Reset)
+        const kand = roster.filter((r) => r.combatant.alive && !r.haescher).map((r) => ({ id: r.id, x: r.combatant.x, z: r.combatant.z }));
+        for (const id of naheKandidaten(e.combatant.x, e.combatant.z, kand)) {
+          const t = roster.find((r) => r.id === id);
+          if (t) t.gift = { potency: besserReife(t.gift?.potency ?? 0, Math.round(gartenCfg.erntePot * 0.35)), tickCd: t.gift?.tickCd ?? gartenCfg.tickEvery };
+        }
+      }
+    }
     if (ultActive > 0 && skill.ult === 'naehrboden') // Zustand-Ult: Ernte heilt
       playerCombatant.hp = Math.min(playerCombatant.maxHp, playerCombatant.hp + HEAL_PRO_ERNTE);
     if (ultActive > 0 && skill.ult === 'ausbruch') { // Raum-Ult: Ernte steckt den Umkreis an
@@ -567,7 +585,8 @@ function boot(build: BuildFolge): void {
       + `Fusion ${s(m.fusionPreview)}/${s(m.fusionPhase)}/${s(m.systemform)}\n`
       + `Impuls/min ${telemetry.ewmaRaw.toFixed(0)} (${IMPULS_MODUS}) -> eff ${eff.toFixed(0)}\n`
       + `Finisher ${telemetry.finisherZuendungen} (${telemetry.finisherWirksam} wirksam)  OBoard ${avgBoardScore(telemetry).toFixed(1)}\n`
-      + `Overflow ${kompass.overflowWaste.toFixed(0)}`;
+      + `Overflow ${kompass.overflowWaste.toFixed(0)}`
+      + `\nMastery  B ${mastery.markedKills}/${MASTERY_MARKED_KILLS}  R ${mastery.fieldKills}/${MASTERY_FIELD_KILLS}  Z ${mastery.matureKills}/${MASTERY_MATURE_KILLS}`;
   };
 
   // — Finisher-Effekt (Engine): jeder Finisher entlädt SEINEN hergerichteten Zustand als Signaturaktion —
@@ -820,6 +839,17 @@ function boot(build: BuildFolge): void {
           onLevelUp(up.gained); // pro gewonnenem Level eine Boni-Auswahl (Welt pausiert)
         }
       }
+      // Spec 7 Gate 3 — Mastery + Talent-Signaturen am Spieler-Kill:
+      if (istBefehl && e.buffs.active().some((b) => b.id === 'markiert')) {
+        mastery.markedKills += 1;
+        if (skillbaumVoll() && !befehlsnetzAktiv) { // Befehlsnetz: Tod einer Marke → Druck auf nahe Marken (gebündelt, keine Endlos-Kaskade)
+          befehlsnetzAktiv = true;
+          const mark = roster.filter((r) => r.combatant.alive && !r.haescher && r.buffs.active().some((b) => b.id === 'markiert')).map((r) => ({ id: r.id, x: r.combatant.x, z: r.combatant.z }));
+          for (const id of naheKandidaten(e.combatant.x, e.combatant.z, mark)) { const t = roster.find((r) => r.id === id); if (t) damageEnemyTick(t, Math.round(playerStats().damage * 0.18), 'sonst'); }
+          befehlsnetzAktiv = false;
+        }
+      }
+      if (istRaum && e.feld?.gefangen) mastery.fieldKills += 1;
     }
     spawnTimes.delete(e.id);
     e.view.root.dispose();
@@ -1929,7 +1959,7 @@ function boot(build: BuildFolge): void {
           if (!kompass.freigeschaltet) { kompassFreischalten(kompass); markMeilenstein(telemetry, 'kompassFrei'); showToast('🧭 KOMPASS frei — lenke mit [1][2][3]', '#4dabf7'); }
           if (phasen.verhaertet.finisher) autoLenke(); // E: nach Phase 3 lenkt der Kompass selbst
           speiseImpuls(kompass, effektiverImpuls(o.points, telemetry.ewmaRaw, IMPULS_MODUS));
-        } else if (stufe3) {
+        } else if (stufe3 && (!MASTERY_GATE_HARD || buildGemeistert(pol, mastery))) {
           skillProgress += o.points;
           while (skillProgress >= PUNKT_KOSTEN) { skillProgress -= PUNKT_KOSTEN; (istZustand ? skill : istRaum ? raumSkill : befehlSkill).punkte += 1; showToast('✦ Skillpunkt frei — [T]'); }
         }
@@ -1945,6 +1975,7 @@ function boot(build: BuildFolge): void {
 
     // B (Spec 0 §4) — Verhärtung: gemeisterte Schichten gehen auf Autopilot (Hände wandern nach oben).
     if (evo.unlockedStagesByChannel[ACTIVE_CORE] >= 3 && verhaerte(phasen, 'build')) showToast('🤖 Build verhärtet — der Schuss läuft selbst', '#8bd5ff');
+    if (buildGemeistert(pol, mastery)) markMeilenstein(telemetry, 'buildMastery'); // Spec 7 Gate 8
     if (skillbaumVoll() && verhaerte(phasen, 'ult')) showToast('🤖 Ult verhärtet — Q zündet selbst', '#8bd5ff');
     if (phasen.verhaertet.ult && ultCd <= 0 && ultActive <= 0) ausloeseUlt(); // Q automatisch
     // Spec 7 §6 — Build-Verhärtung SICHER: Befehl hat KEIN Build-Auto-Feuer (nur die kommando-Ult feuert auto).

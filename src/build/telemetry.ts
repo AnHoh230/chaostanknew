@@ -7,11 +7,11 @@
 import { NORMALIZE_WINDOW_SECONDS } from './evolutionTuning';
 
 export type Meilenstein =
-  | 'kompassFrei' | 'polLvl5' | 'paarMax' | 'ersterBauplan' | 'ersterFinisher'
+  | 'buildMastery' | 'kompassFrei' | 'polLvl5' | 'paarMax' | 'ersterBauplan' | 'ersterFinisher'
   | 'finisherVerhaertet' | 'evolution' | 'fusionPreview' | 'fusionPhase' | 'systemform';
 
 const MEILENSTEINE: readonly Meilenstein[] = [
-  'kompassFrei', 'polLvl5', 'paarMax', 'ersterBauplan', 'ersterFinisher',
+  'buildMastery', 'kompassFrei', 'polLvl5', 'paarMax', 'ersterBauplan', 'ersterFinisher',
   'finisherVerhaertet', 'evolution', 'fusionPreview', 'fusionPhase', 'systemform',
 ];
 
