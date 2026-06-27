@@ -33,6 +33,11 @@ export function paarTyp(a: Pol, b: Pol): PaarTyp {
   return PAARE.find((p) => p.pole.includes(a) && p.pole.includes(b))!.typ;
 }
 
+/** Die zwei Pole eines Grundtyps (für Fusion: dritter Pol = der übrige). */
+export function paarPole(typ: PaarTyp): [Pol, Pol] {
+  return [...paarDef(typ).pole];
+}
+
 export interface EvolutionState {
   typ: GrundTyp; // Start 'kommander'
   gemeistertePaare: PaarTyp[];
