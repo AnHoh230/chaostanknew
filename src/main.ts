@@ -82,6 +82,9 @@ import {
 } from './build/raum';
 import { primaerPol, polKernKanal, archetyp, KOMMANDER_MODE, type Pol, type BuildFolge } from './build/buildModell';
 import { nachsetzenFaellig, spawnRundum, DEFAULT_NACHSETZ } from './build/nachsetzen';
+// — Permanente Evolution (Spec 0–7): Kompass-Konsole / Finisher / Spieler-Evolution / Fusion —
+import { createKompassState, kompassFreischalten, waehlePol, speiseImpuls } from './build/kompass';
+import { effektiverImpuls, IMPULS_MODUS, POL_MAX_LEVEL, POL_FUEL_CAP } from './build/evolutionTuning';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
 import { createReticle } from './ui/reticle';
@@ -295,6 +298,16 @@ function boot(build: BuildFolge): void {
   let ultActive = 0, ultCd = 0; // Ult-Timer: s noch aktiv / s noch Cooldown
   const befehlSkill = createBefehlSkillState(); // Ult/Talente werden im Skill-Panel (T) gewählt
   const raumSkill = createRaumSkillState(); // RRR: drei Pol-Ults (Umlagerung/Großfeld/Verseuchung), im Panel (T)
+  // — Late Game: Kompass-Konsole (Spec 1/5). Füllt sich aus dem Impuls-Überlauf NACH vollem Skillbaum. —
+  const kompass = createKompassState();
+  let kompassEwma = 30; // EWMA der Roh-Impulsrate (Telemetrie; im roh-Modus ungenutzt — Gate 8 verfeinert)
+  // Skillbaum komplett? (3. Build-Stufe + Ult gewählt + alle Talente auf Max) → schaltet den Kompass frei.
+  const skillbaumVoll = (): boolean => {
+    if (evo.unlockedStagesByChannel[ACTIVE_CORE] < 3) return false;
+    if (istZustand) return skill.ult !== null && TALENTS.every((t) => skill.ranks[t.id] >= TALENT_MAX);
+    if (istRaum) return raumSkill.ult !== null && RAUM_TALENTS.every((t) => raumSkill.ranks[t.id] >= RAUM_TALENT_MAX);
+    return befehlSkill.ult !== null && BEFEHL_TALENTS.every((t) => befehlSkill.ranks[t.id] >= BEFEHL_TALENT_MAX);
+  };
   // Pol-Ult → Kanal des KOMMANDERS für diesen Pol. Eine RRR-Ult ist nur wählbar, wenn DIESER Pol
   // Impulse gesammelt hat (Stufe ≥ 1). Im reinen RRR-Build hat nur Raum (sniper_aoe_dot) Stufen →
   // nur Großfeld (Raum-Pol) wählbar; Umlagerung/Verseuchung brauchen B-/Z-Impulse (Mischbuild/Kompass).
@@ -493,6 +506,30 @@ function boot(build: BuildFolge): void {
       (thrNext != null ? ` &nbsp;${bar} ${Math.round(pct * 100)}%` : ' &nbsp;max') + '</div>' +
       `<div style="margin-top:5px;opacity:.65;font-size:10px">Befehl ${Math.round(w.sniper * 100)} · Raum ${Math.round(w.aoe * 100)} · Zustand ${Math.round(w.dot * 100)}</div>`;
     renderCompassDot();
+  };
+
+  // Kompass-Konsole (Late Game): erscheint nach vollem Skillbaum; lenkt den Impuls-Überlauf via [1][2][3].
+  const POL_TASTE: Record<string, Pol> = { '1': 'befehl', '2': 'raum', '3': 'zustand' };
+  const POL_LABEL: Record<Pol, string> = { befehl: 'Befehl', raum: 'Raum', zustand: 'Zustand' };
+  const kompassPanel = document.createElement('div');
+  kompassPanel.className = 'hud-br';
+  kompassPanel.style.cssText =
+    'position:fixed;right:12px;bottom:calc(118px * var(--ui-scale));z-index:40;width:212px;background:#0d1a24dd;border:1px solid #2a4a5a;' +
+    'border-radius:8px;padding:9px 11px;font:600 11px system-ui,sans-serif;color:#cfe3ee;pointer-events:none;display:none;';
+  document.body.appendChild(kompassPanel);
+  const updateKompassHud = (): void => {
+    if (!kompass.freigeschaltet) { kompassPanel.style.display = 'none'; return; }
+    kompassPanel.style.display = 'block';
+    let html = '<div style="opacity:.55;letter-spacing:1px;font-size:10px">🧭 KOMPASS-KONSOLE</div>';
+    for (const p of ['befehl', 'raum', 'zustand'] as Pol[]) {
+      const ps = kompass.pole[p];
+      const aktiv = kompass.aktiverPol === p;
+      const lvl = '●'.repeat(ps.level) + '○'.repeat(POL_MAX_LEVEL - ps.level);
+      const fuel = ps.reachedMax ? ' ⛽' + '▮'.repeat(ps.fuel) + '▯'.repeat(POL_FUEL_CAP - ps.fuel) : '';
+      const key = p === 'befehl' ? '1' : p === 'raum' ? '2' : '3';
+      html += `<div style="margin-top:3px;${aktiv ? 'color:#4dabf7' : 'opacity:.7'}">[${key}] ${POL_LABEL[p]} ${lvl}${fuel}</div>`;
+    }
+    kompassPanel.innerHTML = html;
   };
 
   // Run-Action-Log: pro Run nach logs/run-<NNN>.log (Schüsse, Bewegung, Shop …).
@@ -1407,6 +1444,14 @@ function boot(build: BuildFolge): void {
     }
   });
 
+  // [1]/[2]/[3] — Kompass-Pol wählen (Impuls-Überlauf lenken), nur wenn freigeschaltet.
+  window.addEventListener('keydown', (ev) => {
+    const p = POL_TASTE[ev.key];
+    if (!p || !kompass.freigeschaltet) return;
+    waehlePol(kompass, p);
+    updateKompassHud();
+  });
+
   // Toast: kurze Einblendung (Level-Up etc.).
   const toast = document.createElement('div');
   toast.id = 'loot-toast';
@@ -1657,7 +1702,7 @@ function boot(build: BuildFolge): void {
       }
     }
     frontHudCd -= simDt;
-    if (frontHudCd <= 0) { frontHudCd = 0.1; updateFrontHud(); }
+    if (frontHudCd <= 0) { frontHudCd = 0.1; updateFrontHud(); updateKompassHud(); }
 
     // Impuls-Orbs fliegen zum Spieler (kein Hinfahren nötig) und geben beim Einsammeln Fortschritt
     // in ihrer Drop-Richtung (Farbe). Schnell genug, um den fahrenden Spieler einzuholen.
@@ -1669,7 +1714,11 @@ function boot(build: BuildFolge): void {
         gainProgress(evo, o.channel, o.points, currentTuningProfile);
         // 3. Build-Stufe erreicht (Garten ZZZ / Befehl BBB) → Impuls-Überschuss wird zu Skillpunkten.
         const stufe3 = evo.unlockedStagesByChannel[ACTIVE_CORE] >= 3; // 3. Build-Stufe (BBB/ZZZ/RRR) erreicht
-        if (stufe3) {
+        if (stufe3 && skillbaumVoll()) {
+          // Skillbaum komplett → der Überlauf speist die Kompass-Konsole (Spec 0 Verdauungskette).
+          if (!kompass.freigeschaltet) { kompassFreischalten(kompass); showToast('🧭 KOMPASS frei — lenke mit [1][2][3]', '#4dabf7'); }
+          speiseImpuls(kompass, effektiverImpuls(o.points, kompassEwma, IMPULS_MODUS));
+        } else if (stufe3) {
           skillProgress += o.points;
           while (skillProgress >= PUNKT_KOSTEN) { skillProgress -= PUNKT_KOSTEN; (istZustand ? skill : istRaum ? raumSkill : befehlSkill).punkte += 1; showToast('✦ Skillpunkt frei — [T]'); }
         }
