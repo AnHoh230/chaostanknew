@@ -92,6 +92,7 @@ import {
 import {
   createBlueprintState, tickBlueprint, zieheBauplan, nimmBauplan, mussErstenErzwingen, mussRelevantenErzwingen,
 } from './build/blueprints';
+import { createEvolutionState as createSpielerEvo, evolviere, type GrundTyp } from './build/evolution';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
 import { createReticle } from './ui/reticle';
@@ -320,6 +321,11 @@ function boot(build: BuildFolge): void {
   const blueprint = createBlueprintState();
   let finisherTick = 0; // 1-s-Dispatcher: Schmieden + Bauplan-Angebot + Auto-Feuer
   let blueprintOfferTimer = 0;
+  // — Spieler-Evolution (Spec 3/5): erstes gemeistertes Pol-Paar → neuer Grundtyp —
+  const spielerEvo = createSpielerEvo();
+  let grundTyp: GrundTyp = 'kommander';
+  const GRUND_LABEL: Record<GrundTyp, string> = { kommander: 'Kommander', architekt: 'Architekt/Feldherr', alchemist: 'Alchemist/Verseucher', richter: 'Richter/Manipulator', systemform: 'Systemform' };
+  const GRUND_FARBE: Record<GrundTyp, string> = { kommander: '#cfe3ee', architekt: '#4dabf7', alchemist: '#69db7c', richter: '#ffd166', systemform: '#ff6ec7' };
   // Pol-Ult → Kanal des KOMMANDERS für diesen Pol. Eine RRR-Ult ist nur wählbar, wenn DIESER Pol
   // Impulse gesammelt hat (Stufe ≥ 1). Im reinen RRR-Build hat nur Raum (sniper_aoe_dot) Stufen →
   // nur Großfeld (Raum-Pol) wählbar; Umlagerung/Verseuchung brauchen B-/Z-Impulse (Mischbuild/Kompass).
@@ -532,7 +538,8 @@ function boot(build: BuildFolge): void {
   const updateKompassHud = (): void => {
     if (!kompass.freigeschaltet) { kompassPanel.style.display = 'none'; return; }
     kompassPanel.style.display = 'block';
-    let html = '<div style="opacity:.55;letter-spacing:1px;font-size:10px">🧭 KOMPASS-KONSOLE</div>';
+    let html = grundTyp !== 'kommander' ? `<div style="color:${GRUND_FARBE[grundTyp]};font-size:13px;margin-bottom:4px">⭐ ${GRUND_LABEL[grundTyp]}</div>` : '';
+    html += '<div style="opacity:.55;letter-spacing:1px;font-size:10px">🧭 KOMPASS-KONSOLE</div>';
     for (const p of ['befehl', 'raum', 'zustand'] as Pol[]) {
       const ps = kompass.pole[p];
       const aktiv = kompass.aktiverPol === p;
@@ -566,9 +573,17 @@ function boot(build: BuildFolge): void {
     const def = finisherDef(id);
     const r = feuere(finisher, kompass, id, gegnerBoard());
     if (!r.wirksam) return false;
+    // Grundtyp färbt die Entladung qualitativ (Spec 5 Regel 3 — nicht nur ×Schaden):
+    //  Architekt = fokussierte Wucht · Alchemist/Systemform = Seuche greift auch Unvorbereitete ·
+    //  Richter/Systemform = hergerichtete Überlebende werden vollstreckt.
+    const grundMul = grundTyp === 'architekt' ? 1.5 : grundTyp === 'alchemist' || grundTyp === 'richter' ? 1.3 : 1;
     for (const e of roster) {
-      if (!e.combatant.alive || e.haescher || !matchtZustand(e, def.liest)) continue;
-      damageEnemyTick(e, Math.round((e.combatant.hp * 0.5 + 60) * r.power), 'sonst'); // Entladung skaliert mit Readiness
+      if (!e.combatant.alive || e.haescher) continue;
+      const getroffen = matchtZustand(e, def.liest);
+      const faktor = getroffen ? 1 : (grundTyp === 'alchemist' || grundTyp === 'systemform' ? 0.4 : 0);
+      if (faktor === 0) continue;
+      damageEnemyTick(e, Math.round((e.combatant.hp * 0.5 + 60) * r.power * grundMul * faktor), 'sonst');
+      if (getroffen && (grundTyp === 'richter' || grundTyp === 'systemform') && e.combatant.alive) damageEnemyTick(e, e.combatant.hp + 1, 'sonst');
     }
     showToast(`${def.icon} ${def.name.toUpperCase()} ×${r.power.toFixed(1)}`, '#ffd166');
     return true;
@@ -1796,6 +1811,9 @@ function boot(build: BuildFolge): void {
         }
         const auto = naechsterAutoFinisher(finisher, kompass, gegnerBoard(), true); // nur verhärtete
         if (auto) zuendeFinisher(auto);
+        // Spieler-Evolution: gemeistertes Pol-Paar → Grundtyp (sticky)
+        const neuTyp = evolviere(spielerEvo, kompass, finisher, pol);
+        if (neuTyp !== grundTyp) { grundTyp = neuTyp; showToast(`⭐ EVOLUTION — du bist jetzt ${GRUND_LABEL[neuTyp]}!`, GRUND_FARBE[neuTyp]); }
       }
     }
 
