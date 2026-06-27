@@ -86,7 +86,7 @@ import { nachsetzenFaellig, spawnRundum, DEFAULT_NACHSETZ } from './build/nachse
 import { createKompassState, kompassFreischalten, waehlePol, speiseImpuls, gemaxtePole } from './build/kompass';
 import { effektiverImpuls, IMPULS_MODUS, POL_MAX_LEVEL, POL_FUEL_CAP, AUTO_FIRE_EVALUATION_SECONDS } from './build/evolutionTuning';
 import {
-  createFinisherState, finisherDef, schmiede, feuere, istVerhaertet, naechsterAutoFinisher,
+  createFinisherState, finisherDef, schmiede, feuere, istVerhaertet, naechsterAutoFinisher, boardScore,
   type GegnerBoard, type FinisherId,
 } from './build/finisher';
 import {
@@ -94,6 +94,7 @@ import {
 } from './build/blueprints';
 import { createEvolutionState as createSpielerEvo, evolviere, type GrundTyp } from './build/evolution';
 import { fusionStufe, createEdiktState, invoziere, tickEdikt, ediktOffen, type FusionStufe } from './build/fusion';
+import { createRunTelemetry, tickTelemetry, markMeilenstein, zaehleFinisher, avgBoardScore } from './build/telemetry';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
 import { createReticle } from './ui/reticle';
@@ -309,7 +310,7 @@ function boot(build: BuildFolge): void {
   const raumSkill = createRaumSkillState(); // RRR: drei Pol-Ults (Umlagerung/Großfeld/Verseuchung), im Panel (T)
   // — Late Game: Kompass-Konsole (Spec 1/5). Füllt sich aus dem Impuls-Überlauf NACH vollem Skillbaum. —
   const kompass = createKompassState();
-  let kompassEwma = 30; // EWMA der Roh-Impulsrate (Telemetrie; im roh-Modus ungenutzt — Gate 8 verfeinert)
+  const telemetry = createRunTelemetry(); // Gate 8: Run-Telemetrie + live EWMA (füttert den normalisiert-Modus)
   // Skillbaum komplett? (3. Build-Stufe + Ult gewählt + alle Talente auf Max) → schaltet den Kompass frei.
   const skillbaumVoll = (): boolean => {
     if (evo.unlockedStagesByChannel[ACTIVE_CORE] < 3) return false;
@@ -563,6 +564,30 @@ function boot(build: BuildFolge): void {
     kompassPanel.innerHTML = html;
   };
 
+  // Telemetrie-Panel (Gate 8) — Taste [0] ein/aus. Liest die Run-Metriken + den Overflow.
+  let metricsOpen = false;
+  const metricsPanel = document.createElement('div');
+  metricsPanel.style.cssText =
+    'position:fixed;left:12px;top:12px;z-index:60;min-width:240px;background:#0d141cee;border:1px solid #2a3a4a;' +
+    'border-radius:8px;padding:9px 11px;font:600 11px ui-monospace,monospace;color:#cfe3ee;pointer-events:none;display:none;white-space:pre';
+  document.body.appendChild(metricsPanel);
+  const updateMetricsHud = (): void => {
+    if (!metricsOpen) { metricsPanel.style.display = 'none'; return; }
+    metricsPanel.style.display = 'block';
+    const m = telemetry.meilenstein;
+    const s = (v: number | null): string => (v === null ? '—' : v.toFixed(0) + 's');
+    const eff = effektiverImpuls(telemetry.ewmaRaw, telemetry.ewmaRaw, IMPULS_MODUS);
+    metricsPanel.textContent =
+      'TELEMETRIE  [0]\n'
+      + `Kompass ${s(m.kompassFrei)}  Pol5 ${s(m.polLvl5)}  Paar ${s(m.paarMax)}\n`
+      + `1.Bauplan ${s(m.ersterBauplan)}  1.Finisher ${s(m.ersterFinisher)}\n`
+      + `verhaertet ${s(m.finisherVerhaertet)}  Evolution ${s(m.evolution)}\n`
+      + `Fusion ${s(m.fusionPreview)}/${s(m.fusionPhase)}/${s(m.systemform)}\n`
+      + `Impuls/min ${telemetry.ewmaRaw.toFixed(0)} (${IMPULS_MODUS}) -> eff ${eff.toFixed(0)}\n`
+      + `Finisher ${telemetry.finisherZuendungen} (${telemetry.finisherWirksam} wirksam)  OBoard ${avgBoardScore(telemetry).toFixed(1)}\n`
+      + `Overflow ${kompass.overflowWaste.toFixed(0)}`;
+  };
+
   // — Finisher-Effekt (Engine): liest den hergerichteten Board-State, entlädt power-skalierten Schaden —
   const matchtZustand = (e: Enemy, liest: readonly ('mark' | 'feld' | 'gift')[]): boolean =>
     (liest.includes('mark') && e.buffs.active().some((b) => b.id === 'markiert'))
@@ -575,7 +600,9 @@ function boot(build: BuildFolge): void {
   }));
   const zuendeFinisher = (id: FinisherId): boolean => {
     const def = finisherDef(id);
-    const r = feuere(finisher, kompass, id, gegnerBoard());
+    const board = gegnerBoard();
+    const r = feuere(finisher, kompass, id, board);
+    zaehleFinisher(telemetry, r.wirksam, boardScore(def, board)); // Gate 8
     if (!r.wirksam) return false;
     // Grundtyp färbt die Entladung qualitativ (Spec 5 Regel 3 — nicht nur ×Schaden):
     //  Architekt = fokussierte Wucht · Alchemist/Systemform = Seuche greift auch Unvorbereitete ·
@@ -1528,6 +1555,13 @@ function boot(build: BuildFolge): void {
     if (invoziere(edikt)) showToast('✷ SYSTEM-EDIKT', '#ff6ec7');
   });
 
+  // [0] — Telemetrie-Panel ein/aus (Gate 8).
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key !== '0') return;
+    metricsOpen = !metricsOpen;
+    updateMetricsHud();
+  });
+
   // Toast: kurze Einblendung (Level-Up etc.).
   const toast = document.createElement('div');
   toast.id = 'loot-toast';
@@ -1778,22 +1812,24 @@ function boot(build: BuildFolge): void {
       }
     }
     frontHudCd -= simDt;
-    if (frontHudCd <= 0) { frontHudCd = 0.1; updateFrontHud(); updateKompassHud(); }
+    if (frontHudCd <= 0) { frontHudCd = 0.1; updateFrontHud(); updateKompassHud(); if (metricsOpen) updateMetricsHud(); }
 
     // Impuls-Orbs fliegen zum Spieler (kein Hinfahren nötig) und geben beim Einsammeln Fortschritt
     // in ihrer Drop-Richtung (Farbe). Schnell genug, um den fahrenden Spieler einzuholen.
+    let frameImpuls = 0; // Roh-Impulse dieses Frames (Telemetrie/EWMA)
     for (let i = orbs.length - 1; i >= 0; i--) {
       const o = orbs[i]!;
       const dx = px - o.mesh.position.x, dz = pz - o.mesh.position.z;
       const d = Math.hypot(dx, dz) || 1;
       if (d < 1.8) {
+        frameImpuls += o.points;
         gainProgress(evo, o.channel, o.points, currentTuningProfile);
         // 3. Build-Stufe erreicht (Garten ZZZ / Befehl BBB) → Impuls-Überschuss wird zu Skillpunkten.
         const stufe3 = evo.unlockedStagesByChannel[ACTIVE_CORE] >= 3; // 3. Build-Stufe (BBB/ZZZ/RRR) erreicht
         if (stufe3 && skillbaumVoll()) {
           // Skillbaum komplett → der Überlauf speist die Kompass-Konsole (Spec 0 Verdauungskette).
-          if (!kompass.freigeschaltet) { kompassFreischalten(kompass); showToast('🧭 KOMPASS frei — lenke mit [1][2][3]', '#4dabf7'); }
-          speiseImpuls(kompass, effektiverImpuls(o.points, kompassEwma, IMPULS_MODUS));
+          if (!kompass.freigeschaltet) { kompassFreischalten(kompass); markMeilenstein(telemetry, 'kompassFrei'); showToast('🧭 KOMPASS frei — lenke mit [1][2][3]', '#4dabf7'); }
+          speiseImpuls(kompass, effektiverImpuls(o.points, telemetry.ewmaRaw, IMPULS_MODUS));
         } else if (stufe3) {
           skillProgress += o.points;
           while (skillProgress >= PUNKT_KOSTEN) { skillProgress -= PUNKT_KOSTEN; (istZustand ? skill : istRaum ? raumSkill : befehlSkill).punkte += 1; showToast('✦ Skillpunkt frei — [T]'); }
@@ -1805,6 +1841,7 @@ function boot(build: BuildFolge): void {
       o.mesh.position.z += (dz / d) * step;
       o.mesh.position.y = 1 + Math.sin(runClock * 6 + i) * 0.12;
     }
+    tickTelemetry(telemetry, simDt, frameImpuls); // Gate 8: Zeit + EWMA der Roh-Impulsrate
 
     // Finisher/Blueprint-Takt (Spec 5): läuft erst ab Kompass-Freischaltung.
     if (kompass.freigeschaltet) {
@@ -1812,26 +1849,32 @@ function boot(build: BuildFolge): void {
       finisherTick -= simDt;
       if (finisherTick <= 0) {
         finisherTick = AUTO_FIRE_EVALUATION_SECONDS;
-        for (const id of schmiede(finisher, gemaxtePole(kompass), blueprint.besessen)) showToast(`🔨 Finisher bereit: ${finisherDef(id).name}`, '#ffd166');
+        const neuGeschmiedet = schmiede(finisher, gemaxtePole(kompass), blueprint.besessen);
+        for (const id of neuGeschmiedet) showToast(`🔨 Finisher bereit: ${finisherDef(id).name}`, '#ffd166');
+        if (neuGeschmiedet.length) markMeilenstein(telemetry, 'ersterFinisher');
+        const gm = gemaxtePole(kompass);
+        if (gm.length >= 1) markMeilenstein(telemetry, 'polLvl5');
+        if (gm.length >= 2) markMeilenstein(telemetry, 'paarMax');
+        if (finisher.aktiv.some((id) => istVerhaertet(finisher, id))) markMeilenstein(telemetry, 'finisherVerhaertet');
         blueprintOfferTimer += AUTO_FIRE_EVALUATION_SECONDS;
         if (mussErstenErzwingen(blueprint) || mussRelevantenErzwingen(blueprint) || blueprintOfferTimer >= 25) {
           blueprintOfferTimer = 0;
           const lv = { befehl: kompass.pole.befehl.level, raum: kompass.pole.raum.level, zustand: kompass.pole.zustand.level };
           const angebot = zieheBauplan(blueprint, lv, Math.random);
-          if (angebot && nimmBauplan(blueprint, angebot.id)) showToast(`📜 Bauplan gefunden: ${finisherDef(angebot.id).name}`, '#b794f4');
+          if (angebot && nimmBauplan(blueprint, angebot.id)) { markMeilenstein(telemetry, 'ersterBauplan'); showToast(`📜 Bauplan gefunden: ${finisherDef(angebot.id).name}`, '#b794f4'); }
         }
         const auto = naechsterAutoFinisher(finisher, kompass, gegnerBoard(), true); // nur verhärtete
         if (auto) zuendeFinisher(auto);
         // Spieler-Evolution: gemeistertes Pol-Paar → Grundtyp (sticky)
         const neuTyp = evolviere(spielerEvo, kompass, finisher, pol);
-        if (neuTyp !== grundTyp) { grundTyp = neuTyp; showToast(`⭐ EVOLUTION — du bist jetzt ${GRUND_LABEL[neuTyp]}!`, GRUND_FARBE[neuTyp]); }
+        if (neuTyp !== grundTyp) { grundTyp = neuTyp; markMeilenstein(telemetry, 'evolution'); showToast(`⭐ EVOLUTION — du bist jetzt ${GRUND_LABEL[neuTyp]}!`, GRUND_FARBE[neuTyp]); }
         // Fusion/Systemform-Stufe (Spec 4/5 §11)
         const fs = fusionStufe(spielerEvo, kompass, finisher);
         if (fs !== fusionStufeNow) {
           fusionStufeNow = fs;
-          if (fs === 'preview') showToast('🌀 Fusion beginnt — die Pole bluten ineinander', '#ff6ec7');
-          else if (fs === 'phase') showToast('🌀 Fusion-Phase — Hybrid-Verben', '#ff6ec7');
-          else if (fs === 'systemform') { grundTyp = 'systemform'; showToast('✷ SYSTEMFORM — du biegst die Regeln der Arena!', '#ff6ec7'); }
+          if (fs === 'preview') { markMeilenstein(telemetry, 'fusionPreview'); showToast('🌀 Fusion beginnt — die Pole bluten ineinander', '#ff6ec7'); }
+          else if (fs === 'phase') { markMeilenstein(telemetry, 'fusionPhase'); showToast('🌀 Fusion-Phase — Hybrid-Verben', '#ff6ec7'); }
+          else if (fs === 'systemform') { markMeilenstein(telemetry, 'systemform'); grundTyp = 'systemform'; showToast('✷ SYSTEMFORM — du biegst die Regeln der Arena!', '#ff6ec7'); }
         }
       }
       // System-Edikt (per Frame): in der Systemform Auto-Loop; je Puls eine Entladung (Spec 5 §11).
