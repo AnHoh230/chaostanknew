@@ -71,7 +71,6 @@ import {
 import { thresholdForStage, maxStage, type TuningProfile } from './evolution/profiles';
 import { CHANNEL_DISPLAY, type BaseMode, type EvolutionChannelId } from './evolution/channels';
 import { createEvolutionState, gainProgress, tryTriggerEvolution } from './evolution/evolution';
-import { createCompassState, baryWeights } from './evolution/compass';
 import { createProgression } from './progression/progression';
 import {
   createPlayerBoni, waehleBoni, randomBoniAuswahl, rollCrit, boniDef, type BoniId,
@@ -454,7 +453,6 @@ function boot(build: BuildFolge): void {
   // — Schicht 2: Kompass (Absicht) + Evolution (Fortschritt je Kanal) —
   const baseMode: BaseMode = KOMMANDER_MODE; // eine Klasse: immer der Kommander ('sniper')
   const evo = createEvolutionState(baseMode);
-  const compass = createCompassState();
   const evoMinFirst = 20, evoMinBetween = 25; // Mindestzeiten fürs Evolutions-Fenster (LOOP_TEST-Debug)
   // (Kompass-basierter Live-Kanal entfällt im fest-Build-Modus — alles lenkt ACTIVE_CORE in den
   // festen Kern. Kehrt mit dem späteren Multi-Build-Kompass zurück: emergingChannel(evo, compass.raw).)
@@ -478,37 +476,8 @@ function boot(build: BuildFolge): void {
     orbs.push({ mesh: orb, channel, points });
   };
 
-  // — Sichtbarer Kompass: Dreieck mit ZIEHBAREM Punkt (oben Kern, unten-links Raum, -rechts Zustand) —
-  const KERN = { x: 80, y: 20 }, RAUMP = { x: 24, y: 116 }, ZUSTP = { x: 136, y: 116 };
-  const compassBox = document.createElement('div');
-  compassBox.className = 'hud-br'; // UI-Scale: unten-rechts-Stapel mit frontHud; bottom mitskaliert
-  compassBox.style.cssText = 'position:fixed;right:12px;bottom:calc(120px * var(--ui-scale));z-index:41;width:160px;height:140px;cursor:grab;touch-action:none;user-select:none;';
-  compassBox.innerHTML =
-    '<svg width="160" height="140" style="overflow:visible">' +
-    `<polygon points="${KERN.x},${KERN.y} ${RAUMP.x},${RAUMP.y} ${ZUSTP.x},${ZUSTP.y}" fill="#10151cdd" stroke="#3a4a5a" stroke-width="1.5"/>` +
-    `<text x="${KERN.x}" y="${KERN.y - 6}" fill="#4dabf7" font-size="11" font-family="system-ui" text-anchor="middle" font-weight="700">Befehl</text>` +
-    `<text x="${RAUMP.x - 4}" y="${RAUMP.y + 15}" fill="#c77dff" font-size="11" font-family="system-ui" text-anchor="middle">Raum</text>` +
-    `<text x="${ZUSTP.x + 4}" y="${ZUSTP.y + 15}" fill="#69db7c" font-size="11" font-family="system-ui" text-anchor="middle">Zustand</text>` +
-    `<circle data-dot cx="${KERN.x}" cy="${KERN.y}" r="8" fill="#fff" stroke="#10151c" stroke-width="2"/>` +
-    '</svg>';
-  document.body.appendChild(compassBox);
-  const compassDot = compassBox.querySelector('[data-dot]')!;
-  const renderCompassDot = (): void => {
-    const w = compass.raw;
-    compassDot.setAttribute('cx', String(w.sniper * KERN.x + w.aoe * RAUMP.x + w.dot * ZUSTP.x));
-    compassDot.setAttribute('cy', String(w.sniper * KERN.y + w.aoe * RAUMP.y + w.dot * ZUSTP.y));
-  };
-  const compassFromEvent = (ev: PointerEvent): void => {
-    const r = compassBox.getBoundingClientRect();
-    const s = r.width / 160 || 1; // CSS-UI-Scale herausrechnen (Box ist 160px breit · --ui-scale)
-    const b = baryWeights({ x: (ev.clientX - r.left) / s, y: (ev.clientY - r.top) / s }, KERN, RAUMP, ZUSTP);
-    compass.raw = { sniper: b.wa, aoe: b.wb, dot: b.wc };
-    renderCompassDot();
-  };
-  let compassDragging = false;
-  compassBox.addEventListener('pointerdown', (ev) => { compassDragging = true; compassFromEvent(ev); ev.preventDefault(); ev.stopPropagation(); });
-  window.addEventListener('pointermove', (ev) => { if (compassDragging) compassFromEvent(ev); });
-  window.addEventListener('pointerup', () => { compassDragging = false; });
+  // (Alter Barycentric-Kompass „alles dazwischen" gelöscht — der Kompass ist jetzt das diskrete
+  //  3-Pol-Pop-up, das per Mittelklick groß aufzoomt; aufgebaut bei kompassPanel weiter unten.)
 
   // Frontformung-HUD (unten rechts unter dem Kompass): entstehende Form + Stufe/Fortschritt.
   const frontHud = document.createElement('div');
@@ -527,30 +496,36 @@ function boot(build: BuildFolge): void {
     const pct = thrNext != null ? Math.max(0, Math.min(1, (prog - prevThr) / (thrNext - prevThr))) : 1;
     const n = Math.round(pct * 10);
     const bar = '█'.repeat(n) + '░'.repeat(10 - n);
-    const w = compass.raw;
     frontHud.innerHTML =
       '<div style="opacity:.55;letter-spacing:1px;font-size:10px">FRONTFORMUNG</div>' +
       `<div style="margin-top:3px;font-size:13px;color:#9be36b">${CHANNEL_DISPLAY[ch].displayName}</div>` +
       `<div style="margin-top:2px;opacity:.85">Stufe ${stage}/${maxStage(currentTuningProfile)}` +
-      (thrNext != null ? ` &nbsp;${bar} ${Math.round(pct * 100)}%` : ' &nbsp;max') + '</div>' +
-      `<div style="margin-top:5px;opacity:.65;font-size:10px">Befehl ${Math.round(w.sniper * 100)} · Raum ${Math.round(w.aoe * 100)} · Zustand ${Math.round(w.dot * 100)}</div>`;
-    renderCompassDot();
+      (thrNext != null ? ` &nbsp;${bar} ${Math.round(pct * 100)}%` : ' &nbsp;max') + '</div>';
   };
 
-  // Kompass-Konsole (Late Game): erscheint nach vollem Skillbaum; lenkt den Impuls-Überlauf via [1][2][3].
+  // Kompass-Konsole (Late Game): KEIN festes HUD — Mittelklick (MMB) zoomt sie groß auf. 3 diskrete Pole, [1][2][3].
   const POL_TASTE: Record<string, Pol> = { '1': 'befehl', '2': 'raum', '3': 'zustand' };
   const POL_LABEL: Record<Pol, string> = { befehl: 'Befehl', raum: 'Raum', zustand: 'Zustand' };
+  let kompassOpen = false;
   const kompassPanel = document.createElement('div');
-  kompassPanel.className = 'hud-br';
   kompassPanel.style.cssText =
-    'position:fixed;right:12px;bottom:calc(118px * var(--ui-scale));z-index:40;width:212px;background:#0d1a24dd;border:1px solid #2a4a5a;' +
-    'border-radius:8px;padding:9px 11px;font:600 11px system-ui,sans-serif;color:#cfe3ee;pointer-events:none;display:none;';
+    'position:fixed;left:50%;top:50%;z-index:60;width:300px;background:#0d1a24f2;border:1px solid #3a5a6a;' +
+    'border-radius:14px;padding:18px 22px;font:600 15px system-ui,sans-serif;color:#cfe3ee;pointer-events:none;' +
+    'transform:translate(-50%,-50%) scale(0.12);transform-origin:center;opacity:0;transition:transform .2s cubic-bezier(.2,1.5,.4,1),opacity .2s;';
   document.body.appendChild(kompassPanel);
+  const kompassPop = (auf: boolean): void => {
+    if (auf && !kompass.freigeschaltet) return; // erst nach Freischaltung
+    kompassOpen = auf;
+    kompassPanel.style.transform = auf ? 'translate(-50%,-50%) scale(1)' : 'translate(-50%,-50%) scale(0.12)';
+    kompassPanel.style.opacity = auf ? '1' : '0';
+    if (auf) updateKompassHud();
+  };
+  // Mittlere Maustaste: gedrückt halten = Kompass ploppt groß auf, loslassen = wieder klein.
+  window.addEventListener('mousedown', (ev) => { if (ev.button === 1) { ev.preventDefault(); kompassPop(true); } });
+  window.addEventListener('mouseup', (ev) => { if (ev.button === 1) kompassPop(false); });
   const updateKompassHud = (): void => {
-    if (!kompass.freigeschaltet) { kompassPanel.style.display = 'none'; return; }
-    kompassPanel.style.display = 'block';
-    let html = grundTyp !== 'kommander' ? `<div style="color:${GRUND_FARBE[grundTyp]};font-size:13px;margin-bottom:4px">⭐ ${GRUND_LABEL[grundTyp]}</div>` : '';
-    html += '<div style="opacity:.55;letter-spacing:1px;font-size:10px">🧭 KOMPASS-KONSOLE</div>';
+    let html = grundTyp !== 'kommander' ? `<div style="color:${GRUND_FARBE[grundTyp]};font-size:18px;margin-bottom:6px">⭐ ${GRUND_LABEL[grundTyp]}</div>` : '';
+    html += '<div style="opacity:.55;letter-spacing:1px;font-size:11px">🧭 KOMPASS · 3 Pole · [1][2][3]</div>';
     for (const p of ['befehl', 'raum', 'zustand'] as Pol[]) {
       const ps = kompass.pole[p];
       const aktiv = kompass.aktiverPol === p;
@@ -1624,7 +1599,7 @@ function boot(build: BuildFolge): void {
     const p = POL_TASTE[ev.key];
     if (!p || !kompass.freigeschaltet) return;
     waehlePol(kompass, p);
-    updateKompassHud();
+    if (kompassOpen) updateKompassHud();
   });
 
   // [F] — besten feuerbaren Finisher manuell zünden (Auswahl wie Auto, aber auch ungehärtete).
@@ -1915,7 +1890,7 @@ function boot(build: BuildFolge): void {
       }
     }
     frontHudCd -= simDt;
-    if (frontHudCd <= 0) { frontHudCd = 0.1; updateFrontHud(); updateKompassHud(); if (metricsOpen) updateMetricsHud(); }
+    if (frontHudCd <= 0) { frontHudCd = 0.1; updateFrontHud(); if (kompassOpen) updateKompassHud(); if (metricsOpen) updateMetricsHud(); }
 
     // Impuls-Orbs fliegen zum Spieler (kein Hinfahren nötig) und geben beim Einsammeln Fortschritt
     // in ihrer Drop-Richtung (Farbe). Schnell genug, um den fahrenden Spieler einzuholen.
