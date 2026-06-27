@@ -608,8 +608,8 @@ function boot(build: BuildFolge): void {
     }
     // c) Build färbt den Finisher (Spec 2c): die Textur des Haupt-Builds am Wirkungsort.
     if (letzter) {
-      if (istRaum) placeAoeField(letzter.combatant.x, letzter.combatant.z);
-      else if (istZustand) herrichte(letzter, false, false, true);
+      if (istRaum) { if (raum.felder.length < maxAmmo()) placeAoeField(letzter.combatant.x, letzter.combatant.z); } // Spec 7 §9.3: kein Feld über Cap
+      else if (istZustand) { if (!istInfiziert(letzter)) herrichte(letzter, false, false, true); } // nur Neue
       else herrichte(letzter, true, false, false);
     }
     screenFlash(FINISHER_FLASH[id]);
@@ -631,6 +631,26 @@ function boot(build: BuildFolge): void {
     if (mark && !e.buffs.active().some((b) => b.id === 'markiert')) e.buffs.add({ id: 'markiert', icon: '🎯', label: 'markiert', speedMul: MARK_SLOW, duration: MARK_BUFF_DUR });
     if (trap) { e.feld ??= { tickCd: 0, gefangen: false }; e.feld.gefangen = true; }
     if (infect) e.gift = saeGift(e.gift, gartenCfg);
+  };
+  // Smart-Ziele (Spec 7 §6/§10): nur UNINFIZIERTE anstecken (sonst kein Reifen) / nur UNGEDECKTE belegen (kein Spam).
+  const istInfiziert = (e: Enemy): boolean => !!e.gift && e.gift.potency > 0;
+  const naechsterUninfizierter = (cx: number, cz: number, range: number): Enemy | null => {
+    let best: Enemy | null = null, bd = range * range;
+    for (const e of roster) {
+      if (!e.combatant.alive || e.haescher || istInfiziert(e)) continue;
+      const d = (e.combatant.x - cx) ** 2 + (e.combatant.z - cz) ** 2;
+      if (d <= bd) { bd = d; best = e; }
+    }
+    return best;
+  };
+  const naechsterUngedeckt = (cx: number, cz: number, range: number): Enemy | null => {
+    let best: Enemy | null = null, bd = range * range;
+    for (const e of roster) {
+      if (!e.combatant.alive || e.haescher || feldAn(raum, e.combatant.x, e.combatant.z, RAUM_CFG, raumSizeMul())) continue;
+      const d = (e.combatant.x - cx) ** 2 + (e.combatant.z - cz) ** 2;
+      if (d <= bd) { bd = d; best = e; }
+    }
+    return best;
   };
   // Grundtyp-Verb [V]: die manuelle Phase-4-Schicht, je Typ qualitativ anders (Spec 3 §4). Systemform = alle drei.
   const GRUND_VERB_CD = 6;
@@ -1927,21 +1947,17 @@ function boot(build: BuildFolge): void {
     if (evo.unlockedStagesByChannel[ACTIVE_CORE] >= 3 && verhaerte(phasen, 'build')) showToast('🤖 Build verhärtet — der Schuss läuft selbst', '#8bd5ff');
     if (skillbaumVoll() && verhaerte(phasen, 'ult')) showToast('🤖 Ult verhärtet — Q zündet selbst', '#8bd5ff');
     if (phasen.verhaertet.ult && ultCd <= 0 && ultActive <= 0) ausloeseUlt(); // Q automatisch
-    if (phasen.verhaertet.build && playerCombatant.alive && reloadCd <= 0) {
-      const m0 = befehl.marks[0];
-      if (istBefehl) {
-        if (m0) befehlSchuss(m0.id); // selbst-getaktet über fireCd; Auto-Mark läuft schon ab BB
-      } else if (ammo <= 0) {
-        reloadCd = RELOAD_TIME; // leer → nachladen (Loop füllt ammo bei reload-Ende)
+    // Spec 7 §6 — Build-Verhärtung SICHER: Befehl hat KEIN Build-Auto-Feuer (nur die kommando-Ult feuert auto).
+    if (phasen.verhaertet.build && playerCombatant.alive && reloadCd <= 0 && !istBefehl) {
+      if (ammo <= 0) {
+        reloadCd = RELOAD_TIME; // leer → nachladen
       } else if (fireCd <= 0) {
-        const stage = evo.unlockedStagesByChannel[ACTIVE_CORE];
-        const ziel = pickTargets(1, stage, px, pz, sniperRange);
-        const e0 = ziel.length ? roster.find((r) => r.id === ziel[0] && r.combatant.alive) : null;
-        if (e0) {
-          if (istZustand) fireVolley([e0.id]);
-          else placeAoeField(e0.combatant.x, e0.combatant.z);
-          ammo = Math.max(0, ammo - 1);
-          fireCd = GARTEN_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
+        if (istZustand) {
+          const e0 = naechsterUninfizierter(px, pz, sniperRange); // nur Neue → jeder Herd reift bis erntePot
+          if (e0) { fireVolley([e0.id]); ammo = Math.max(0, ammo - 1); fireCd = GARTEN_FIRE_BASE / playerBuffs.aggregate().fireRateMul; }
+        } else if (raum.felder.length < maxAmmo()) {
+          const e0 = naechsterUngedeckt(px, pz, sniperRange); // nur ungedeckte Cluster, unter Cap → kein Feld-Spam
+          if (e0) { placeAoeField(e0.combatant.x, e0.combatant.z); ammo = Math.max(0, ammo - 1); fireCd = GARTEN_FIRE_BASE / playerBuffs.aggregate().fireRateMul; }
         }
       }
     }
@@ -1979,12 +1995,13 @@ function boot(build: BuildFolge): void {
           else if (fs === 'phase') { markMeilenstein(telemetry, 'fusionPhase'); showToast('🌀 Fusion-Phase — Hybrid-Verben', '#ff6ec7'); }
           else if (fs === 'systemform') { markMeilenstein(telemetry, 'systemform'); grundTyp = 'systemform'; setGrundVisual('systemform'); showToast('✷ SYSTEMFORM — du biegst die Regeln der Arena!', '#ff6ec7'); }
         }
-        // C (Spec 4 §2) — Fusion: die Pole bluten ineinander. Gefangene/Markierte werden cross-hergerichtet.
+        // C (Spec 4 §2 / Spec 7 §10) — Fusion: Pole bluten ineinander, Seuche aber nur auf UNINFIZIERTE (kein Reset).
         if (fusionStufeNow !== 'keine') {
           for (const e of roster) {
             if (!e.combatant.alive || e.haescher) continue;
-            if (e.feld?.gefangen) herrichte(e, true, false, true); // Feld → +Marke +Seuche
-            else if (e.buffs.active().some((b) => b.id === 'markiert')) herrichte(e, false, false, true); // Marke → +Seuche
+            const neu = !istInfiziert(e);
+            if (e.feld?.gefangen) herrichte(e, true, false, neu); // Feld → +Marke, Seuche nur wenn neu
+            else if (e.buffs.active().some((b) => b.id === 'markiert') && neu) herrichte(e, false, false, true);
           }
         }
       }
@@ -1992,7 +2009,7 @@ function boot(build: BuildFolge): void {
       if (grundTyp === 'systemform' || ediktOffen(edikt)) {
         const pulse = tickEdikt(edikt, simDt, grundTyp === 'systemform');
         for (let p = 0; p < pulse; p++) {
-          for (const e of roster) if (e.combatant.alive && !e.haescher) herrichte(e, true, true, true); // Edikt: Auto-Herrichten (Spec 4 §4.1)
+          for (const e of roster) { if (!e.combatant.alive || e.haescher) continue; herrichte(e, true, true, !istInfiziert(e)); } // Edikt: Auto-Herrichten (Seuche nur auf Neue)
           const fired = naechsterAutoFinisher(finisher, kompass, gegnerBoard(), false);
           if (fired) zuendeFinisher(fired);
           else for (const e of roster) { if (e.combatant.alive && !e.haescher) damageEnemyTick(e, Math.round(e.combatant.hp * 0.6 + 80), 'sonst'); }
