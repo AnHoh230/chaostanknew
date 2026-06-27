@@ -95,6 +95,7 @@ import {
 import { createEvolutionState as createSpielerEvo, evolviere, type GrundTyp } from './build/evolution';
 import { fusionStufe, createEdiktState, invoziere, tickEdikt, ediktOffen, type FusionStufe } from './build/fusion';
 import { createRunTelemetry, tickTelemetry, markMeilenstein, zaehleFinisher, avgBoardScore } from './build/telemetry';
+import { createPhasenState, verhaerte } from './build/phasen';
 import { startLoop } from './core/loop';
 import { createAimDebug } from './debug/aimDebug';
 import { createReticle } from './ui/reticle';
@@ -311,6 +312,7 @@ function boot(build: BuildFolge): void {
   // — Late Game: Kompass-Konsole (Spec 1/5). Füllt sich aus dem Impuls-Überlauf NACH vollem Skillbaum. —
   const kompass = createKompassState();
   const telemetry = createRunTelemetry(); // Gate 8: Run-Telemetrie + live EWMA (füttert den normalisiert-Modus)
+  const phasen = createPhasenState(); // B: Häutungs-Zustand — verhärtete Schichten gehen auf Autopilot
   // Skillbaum komplett? (3. Build-Stufe + Ult gewählt + alle Talente auf Max) → schaltet den Kompass frei.
   const skillbaumVoll = (): boolean => {
     if (evo.unlockedStagesByChannel[ACTIVE_CORE] < 3) return false;
@@ -1220,8 +1222,7 @@ function boot(build: BuildFolge): void {
   });
 
   // Pol-Ult auslösen (Q): drücken → dauer s aktiv → cd s Cooldown. Nur wenn gewählt + bereit.
-  window.addEventListener('keydown', (ev) => {
-    if (ev.key !== 'q' && ev.key !== 'Q') return;
+  const ausloeseUlt = (): void => {
     if (ultActive > 0 || ultCd > 0 || !playerCombatant.alive) return;
     if (istRaum) { // Raum: eine der drei Pol-Ults (Umlagerung/Großfeld/Verseuchung)
       if (!raumSkill.ult) return;
@@ -1239,7 +1240,8 @@ function boot(build: BuildFolge): void {
       ultActive = u.dauer;
       alog.log('ult', { id: u.id, t: +runClock.toFixed(1) });
     }
-  });
+  };
+  window.addEventListener('keydown', (ev) => { if (ev.key === 'q' || ev.key === 'Q') ausloeseUlt(); });
 
   // OS-Mauszeiger über dem Canvas ausblenden — das Spiel zeichnet sein eigenes
   // Fadenkreuz, das frame-synchron mit dem Turm läuft (kein Render-Weg-Versatz).
@@ -1842,6 +1844,29 @@ function boot(build: BuildFolge): void {
       o.mesh.position.y = 1 + Math.sin(runClock * 6 + i) * 0.12;
     }
     tickTelemetry(telemetry, simDt, frameImpuls); // Gate 8: Zeit + EWMA der Roh-Impulsrate
+
+    // B (Spec 0 §4) — Verhärtung: gemeisterte Schichten gehen auf Autopilot (Hände wandern nach oben).
+    if (evo.unlockedStagesByChannel[ACTIVE_CORE] >= 3 && verhaerte(phasen, 'build')) showToast('🤖 Build verhärtet — der Schuss läuft selbst', '#8bd5ff');
+    if (skillbaumVoll() && verhaerte(phasen, 'ult')) showToast('🤖 Ult verhärtet — Q zündet selbst', '#8bd5ff');
+    if (phasen.verhaertet.ult && ultCd <= 0 && ultActive <= 0) ausloeseUlt(); // Q automatisch
+    if (phasen.verhaertet.build && playerCombatant.alive && reloadCd <= 0) {
+      const m0 = befehl.marks[0];
+      if (istBefehl) {
+        if (m0) befehlSchuss(m0.id); // selbst-getaktet über fireCd; Auto-Mark läuft schon ab BB
+      } else if (ammo <= 0) {
+        reloadCd = RELOAD_TIME; // leer → nachladen (Loop füllt ammo bei reload-Ende)
+      } else if (fireCd <= 0) {
+        const stage = evo.unlockedStagesByChannel[ACTIVE_CORE];
+        const ziel = pickTargets(1, stage, px, pz, sniperRange);
+        const e0 = ziel.length ? roster.find((r) => r.id === ziel[0] && r.combatant.alive) : null;
+        if (e0) {
+          if (istZustand) fireVolley([e0.id]);
+          else placeAoeField(e0.combatant.x, e0.combatant.z);
+          ammo = Math.max(0, ammo - 1);
+          fireCd = GARTEN_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
+        }
+      }
+    }
 
     // Finisher/Blueprint-Takt (Spec 5): läuft erst ab Kompass-Freischaltung.
     if (kompass.freigeschaltet) {
