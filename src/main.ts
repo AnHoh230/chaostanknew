@@ -938,7 +938,7 @@ function boot(build: BuildFolge): void {
   // Raum: ein Feld FREI am Cursor-Punkt ablegen (im Scope-Blick, KEINE Wurfweiten-Klemme um den Spieler).
   // Bleibt liegen, FIFO max 3 — ein neues Feld schiebt das älteste weg (Logik + Disc synchron).
   function placeAoeField(gx: number, gz: number): void {
-    const weg = legeFeld(raum, gx, gz, RAUM_CFG); // FIFO über maxFelder
+    const weg = legeFeld(raum, gx, gz, RAUM_CFG, maxAmmo()); // FIFO-Cap = Magazingröße: pro Munition ein Feld (Vorrat-Talent → mehr Felder)
     const disc = MeshBuilder.CreateCylinder('fx_aoe', { diameter: RAUM_CFG.radius * 2, height: 0.3, tessellation: 32 }, scene);
     disc.position.set(gx, 0.18, gz);
     disc.isPickable = false;

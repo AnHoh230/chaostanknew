@@ -26,6 +26,15 @@ describe('Raum-Build (Felder)', () => {
       expect(s.felder.some((f) => f.x === 1 && f.z === 1)).toBe(false);
       expect(s.felder.some((f) => f.x === 99 && f.z === 99)).toBe(true);
     });
+
+    it('maxFelder-Override gilt statt cfg.maxFelder (mehr Munition = mehr Felder)', () => {
+      const s = createRaumState();
+      for (let i = 0; i < 5; i++) expect(legeFeld(s, i, 0, C, 5)).toBeNull(); // Override 5 → kein Verdrängen bis 5
+      expect(s.felder.length).toBe(5);
+      const weg = legeFeld(s, 99, 0, C, 5); // das 6. verdrängt FIFO das älteste
+      expect(weg).toEqual({ x: 0, z: 0 });
+      expect(s.felder.length).toBe(5);
+    });
   });
 
   describe('feldSchaden (Kalibrierung aufs ANFANGS-Leben)', () => {

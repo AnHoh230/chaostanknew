@@ -55,9 +55,9 @@ export const DEFAULT_RAUM: RaumConfig = {
 };
 
 /** Legt ein Feld an (x,z). FIFO: liegt schon das Maximum, wird das ÄLTESTE umgelagert (entfernt + zurückgegeben). */
-export function legeFeld(s: RaumState, x: number, z: number, cfg: RaumConfig = DEFAULT_RAUM): Feld | null {
+export function legeFeld(s: RaumState, x: number, z: number, cfg: RaumConfig = DEFAULT_RAUM, maxFelder = cfg.maxFelder): Feld | null {
   s.felder.push({ x, z });
-  if (s.felder.length > cfg.maxFelder) return s.felder.shift() ?? null;
+  if (s.felder.length > maxFelder) return s.felder.shift() ?? null; // maxFelder koppelbar an die Munition (mehr Vorrat = mehr Felder)
   return null;
 }
 
