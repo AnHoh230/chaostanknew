@@ -698,6 +698,14 @@ function boot(build: BuildFolge): void {
     finisherFlashEl.style.opacity = '1';
     requestAnimationFrame(() => { finisherFlashEl.style.transition = 'opacity .5s'; finisherFlashEl.style.opacity = '0'; });
   };
+  // E (Spec 1 §7) — Kompass-Verhärtung: nach Phase 3 lenkt die Konsole selbst (zieht den niedrigsten offenen Pol hoch).
+  const autoLenke = (): void => {
+    const offen = (['befehl', 'raum', 'zustand'] as Pol[]).filter((p) => !kompass.pole[p].reachedMax);
+    if (offen.length === 0) return; // alles gemaxt → aktiver Pol bleibt (sammelt Fuel)
+    let ziel = offen[0]!;
+    for (const p of offen) if (kompass.pole[p].level < kompass.pole[ziel].level) ziel = p;
+    waehlePol(kompass, ziel);
+  };
 
   // Run-Action-Log: pro Run nach logs/run-<NNN>.log (Schüsse, Bewegung, Shop …).
   const alog = createActionLog();
@@ -1924,6 +1932,7 @@ function boot(build: BuildFolge): void {
         if (stufe3 && skillbaumVoll()) {
           // Skillbaum komplett → der Überlauf speist die Kompass-Konsole (Spec 0 Verdauungskette).
           if (!kompass.freigeschaltet) { kompassFreischalten(kompass); markMeilenstein(telemetry, 'kompassFrei'); showToast('🧭 KOMPASS frei — lenke mit [1][2][3]', '#4dabf7'); }
+          if (phasen.verhaertet.finisher) autoLenke(); // E: nach Phase 3 lenkt der Kompass selbst
           speiseImpuls(kompass, effektiverImpuls(o.points, telemetry.ewmaRaw, IMPULS_MODUS));
         } else if (stufe3) {
           skillProgress += o.points;
@@ -1974,7 +1983,7 @@ function boot(build: BuildFolge): void {
         const gm = gemaxtePole(kompass);
         if (gm.length >= 1) markMeilenstein(telemetry, 'polLvl5');
         if (gm.length >= 2) markMeilenstein(telemetry, 'paarMax');
-        if (finisher.aktiv.some((id) => istVerhaertet(finisher, id))) markMeilenstein(telemetry, 'finisherVerhaertet');
+        if (finisher.aktiv.some((id) => istVerhaertet(finisher, id))) { markMeilenstein(telemetry, 'finisherVerhaertet'); if (verhaerte(phasen, 'finisher')) showToast('🧭 Kompass lenkt jetzt selbst', '#4dabf7'); }
         blueprintOfferTimer += AUTO_FIRE_EVALUATION_SECONDS;
         if (!pendingBauplan && (mussErstenErzwingen(blueprint) || mussRelevantenErzwingen(blueprint) || blueprintOfferTimer >= 25)) {
           blueprintOfferTimer = 0;
