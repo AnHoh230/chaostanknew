@@ -336,6 +336,7 @@ function boot(build: BuildFolge): void {
   const mastery = createMastery();
   const MASTERY_GATE_HARD = false; // false = Mastery wird nur gemessen, blockt den Überlauf NICHT (Spec 7 §5)
   let befehlsnetzAktiv = false; // Reentrancy-Guard gegen Befehlsnetz-Kaskade
+  let raumSigTimer = 4; // Spec 7 §6.2: Feldanker-Puls (bestehende Felder stärken statt neue spammen)
   // — Spieler-Evolution (Spec 3/5): erstes gemeistertes Pol-Paar → neuer Grundtyp —
   const spielerEvo = createSpielerEvo();
   let grundTyp: GrundTyp = 'kommander';
@@ -1991,6 +1992,12 @@ function boot(build: BuildFolge): void {
           if (e0) { placeAoeField(e0.combatant.x, e0.combatant.z); ammo = Math.max(0, ammo - 1); fireCd = GARTEN_FIRE_BASE / playerBuffs.aggregate().fireRateMul; }
         }
       }
+    }
+
+    // Spec 7 §6.2 — Raum-Feldanker: bestehende Felder periodisch stärken (raum.buff↑, gecappt), KEINE neuen.
+    if (istRaum && phasen.verhaertet.build && raum.felder.length > 0) {
+      raumSigTimer -= simDt;
+      if (raumSigTimer <= 0) { raumSigTimer = 4; if (raum.buff < RAUM_CFG.wachstumCap) raum.buff += 1; }
     }
 
     // Finisher/Blueprint-Takt (Spec 5): läuft erst ab Kompass-Freischaltung.
