@@ -1975,9 +1975,11 @@ function boot(build: BuildFolge): void {
     if (vCd > 0) vCd -= simDt; // C: Grundtyp-Verb-Cooldown
 
     // B (Spec 0 §4) — Verhärtung: gemeisterte Schichten gehen auf Autopilot (Hände wandern nach oben).
-    if (evo.unlockedStagesByChannel[ACTIVE_CORE] >= 3 && verhaerte(phasen, 'build')) showToast('🤖 Build verhärtet — der Schuss läuft selbst', '#8bd5ff');
+    // Häutung 1 = Build + Skillbaum (Ult + Talente) als EINE Haut: verhärtet erst bei skillbaumVoll(),
+    // sonst hat man beim Skillpunkte-Sammeln nichts zu tun. Befehl bekommt KEIN Build-Auto-Feuer — seine
+    // Auto-Schuss-Schicht IST die kommando-Ult (Spec 7 §6/§8). Bei Verhärtung: Build-Verb (Raum/Zustand) + Ult auto.
+    if (skillbaumVoll() && verhaerte(phasen, 'build')) { verhaerte(phasen, 'ult'); showToast('🤖 Haut verhärtet — Build + Ult laufen selbst', '#8bd5ff'); }
     if (buildGemeistert(pol, mastery)) markMeilenstein(telemetry, 'buildMastery'); // Spec 7 Gate 8
-    if (skillbaumVoll() && verhaerte(phasen, 'ult')) showToast('🤖 Ult verhärtet — Q zündet selbst', '#8bd5ff');
     if (phasen.verhaertet.ult && ultCd <= 0 && ultActive <= 0) ausloeseUlt(); // Q automatisch
     // Spec 7 §6 — Build-Verhärtung SICHER: Befehl hat KEIN Build-Auto-Feuer (nur die kommando-Ult feuert auto).
     if (phasen.verhaertet.build && playerCombatant.alive && reloadCd <= 0 && !istBefehl) {

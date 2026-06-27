@@ -37,9 +37,10 @@ Begründung steht in §0: blindes Auto-Ausführen müllt Raum zu, streut Zustand
 
 | Schicht | Code-Realität | Abschluss wird zu |
 |---:|---|---|
-| 1 | **Build-Kern** — Stufe 0→3 auf `ACTIVE_CORE` (Impuls-Orbs) | Build-Signatur |
-| 2 | **Skillbaum** — gewählte Pol-Ult **+** 5 Talente×3 (`skillbaumVoll`) | Talent-Schärfung **+** Ult-Protokoll (eine Schicht, zwei Aspekte) |
-| 3 | **Finisher** — `finisher.ts` (schmieden/feuern/`boardScore`/Verhärtung) | Board-State-Entladung mit Auto-Gate |
+| 1 | **Build + Skillbaum** — Stufe 0→3 (`ACTIVE_CORE`) **UND** gewählte Pol-Ult + 5 Talente×3 = **EINE Haut** (`skillbaumVoll`). Verhärtet erst, wenn ALLES voll ist — sonst tote Zeit beim Skillpunkte-Sammeln. | Build- + Talent-Signatur **+** Ult läuft selbst (bei Befehl: `kommando` = Auto-Schuss) |
+| 2 | **Finisher** — `finisher.ts` (schmieden/feuern/`boardScore`/Verhärtung) | Board-State-Entladung mit Auto-Gate |
+
+> **Wichtig (Nutzer-Korrektur):** Build und Skillbaum verhärten **gemeinsam** bei `skillbaumVoll()`, nicht der Build schon bei Stufe 3 — sonst läuft der Build auf Autopilot, während man noch Skillpunkte für die Ult sammelt = nichts zu tun. Und: der **Befehl-Build bekommt KEINEN eigenen Auto-Schuss**, weil die `kommando`-Ult genau das schon ist.
 
 Kompass / Spieler-Evolution / Fusion bleiben die späteren Systeme (schon gebaut). Diese Spec sorgt für lesbare Zustände: **markiert** (`buffs 'markiert'`), **im Feld** (`e.feld.gefangen`), **verseucht/reif** (`e.gift.potency` ≷ `erntePot`).
 
