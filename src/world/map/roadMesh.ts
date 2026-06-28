@@ -21,6 +21,10 @@ import { ROAD_TILE } from './tileAssets';
 
 const BASIS_ROT = 0; // globale Korrektur-Drehung (0..3)
 const FLIP_V = false; // Textur-V spiegeln
+// Pro-Tile Dreh-Korrektur: wenn ein geliefertes Tile relativ zur BASIS-Annahme verdreht gezeichnet
+// ist, hier ausgleichen (statt global, das wuerde die anderen verdrehen). Im Spiel verifiziert:
+// road_kurve.png ist +3 gegen die BASIS-Kurve [0,1] gedreht -> Ecken schliessen sonst falsch an.
+const KIND_ROT: Record<RoadKind, number> = { gerade: 0, kurve: 3, t: 0, kreuz: 0, ende: 0 };
 const QUAD = 1.08; // Tile-Quad als Vielfaches der Zelle (leichte Überlappung kaschiert Nähte)
 const Y = 0.06; // über Modul-Boden (0.03), unter Decals (0.15)
 
@@ -46,7 +50,7 @@ export function createRoadMesh(
     const { kind, rot } = tileFuer(maskeFuer(set, col, row));
     const tile = MeshBuilder.CreateGround('rt', { width: cellSize * QUAD, height: cellSize * QUAD }, scene);
     tile.position.set(col * cellSize - halfX, Y, row * cellSize - halfZ);
-    tile.rotation.y = ((rot + BASIS_ROT) % 4) * (Math.PI / 2);
+    tile.rotation.y = ((rot + BASIS_ROT + KIND_ROT[kind]) % 4) * (Math.PI / 2);
     tile.isPickable = false;
     proArt[kind].push(tile);
   }
