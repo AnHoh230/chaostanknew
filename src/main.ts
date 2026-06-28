@@ -194,7 +194,7 @@ function boot(build: BuildFolge): void {
   const canvas = getCanvas();
   const engine = new Engine(canvas, true);
   const scene = new Scene(engine);
-  scene.clearColor = new Color4(0.05, 0.06, 0.07, 1);
+  scene.clearColor = new Color4(0.09, 0.1, 0.12, 1); // Hintergrund leicht angehoben (war fast schwarz)
 
   // Kerndienste
   const clock = createClock();
@@ -203,11 +203,12 @@ function boot(build: BuildFolge): void {
 
   // Licht
   const light = new HemisphericLight('sun', new Vector3(0.3, 1, 0.2), scene);
-  light.intensity = 0.95;
+  light.intensity = 1.25; // global heller (war 0.95 — Szene wirkte zu dunkel)
+  light.groundColor = new Color3(0.44, 0.42, 0.4); // Fülllicht von unten: hebt dunkle Unterseiten/Schatten
 
   // Biom 'steppe' ist beim Modulladen registriert; defensiv sicherstellen.
-  // Schrottplatz-Boden: dunkle, ölige Erde statt grüner Schachbrettwiese.
-  registerBiome({ id: BIOME_ID, groundColor: [0.17, 0.155, 0.14] });
+  // Schrottplatz-Boden: ölige Erde (heller als zuvor, war zu dunkel) statt grüner Schachbrettwiese.
+  registerBiome({ id: BIOME_ID, groundColor: [0.26, 0.235, 0.21] });
   const biome = getBiome(BIOME_ID);
   log.debug('biome resolved', { id: biome.id, groundColor: biome.groundColor });
 
@@ -1543,6 +1544,7 @@ function boot(build: BuildFolge): void {
   tunables.add({ label: 'Fahrgeschwindigkeit ×', category: 'Kampf', value: playerSpeedMul, min: 0.2, max: 4, step: 0.1, onChange: (v) => { playerSpeedMul = v; } });
   tunables.add({ label: 'Dash-Distanz', category: 'Fähigkeiten', value: dashDist, min: 4, max: 40, step: 1, onChange: (v) => { dashDist = v; } });
   tunables.add({ label: 'Dash-Cooldown s', category: 'Fähigkeiten', value: dashCdMax, min: 1, max: 15, step: 0.5, onChange: (v) => { dashCdMax = v; } });
+  tunables.add({ label: 'Helligkeit', category: 'Stile', value: light.intensity, min: 0.5, max: 2.2, step: 0.05, onChange: (v) => { light.intensity = v; } });
   tunables.add({ label: 'Sniper-Reichweite', category: 'Stile', value: sniperRange, min: 40, max: 200, step: 5, onChange: (v) => { sniperRange = v; } });
   tunables.add({ label: 'Sniper-Schadensfaktor', category: 'Stile', value: sniperDmgMul, min: 1, max: 5, step: 0.5, onChange: (v) => { sniperDmgMul = v; } });
   // Zielnetz-Route
