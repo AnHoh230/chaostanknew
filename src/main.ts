@@ -12,6 +12,7 @@ import { getRezept } from './world/map/recipe';
 import { ladeKarte } from './world/map/loader';
 import { treffeBreakable, breakableLoot, hazardSchaden, hazardAktiv, sammleCollectible } from './world/map/mapEntities';
 import { createNest, pruefeEntdeckung, nestGegnerGefallen, nestGeraeumt, lebenDropAnzahl } from './world/map/dormantNest';
+import { rampeAusgeloest, sprungBogen, sprungFertig } from './world/map/secret';
 import { MAP_TUNING } from './world/map/mapTuning';
 import { createCameraRig } from './camera/cameraRig';
 import { createTankView } from './tank/tankFactory';
@@ -222,6 +223,19 @@ function boot(build: BuildFolge): void {
     .map((e) => ({ id: e.id, pos: e.pos, state: createNest(Number(e.params?.gegner ?? 3)), belohnt: false }));
   const nestGegnerVon = new Map<string, string>(); // EnemyId → NestId (Tag: droppt Leben statt Impuls)
   let nestSeq = 0;
+
+  // Secret-Rampe → Bonus-Insel (Phase 6): Insel mit Funden + einem Toy bestücken; Sprung-Zustand.
+  const rampe = karte.entities.find((e) => e.kind === 'secretRamp');
+  const insel = karte.entities.find((e) => e.kind === 'bonusIsland');
+  if (insel) {
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2;
+      mapHandle.spawnCollectible(insel.pos.x + Math.cos(a) * 5, insel.pos.z + Math.sin(a) * 5, i === 0 ? 'toy' : 'heal');
+    }
+  }
+  let sprungT = -1; // <0 = kein Sprung aktiv
+  let sprungStart = { x: 0, z: 0 };
+  let sprungZiel = { x: 0, z: 0 };
 
   // Kamera auf den Panzer-Root
   const camera = createCameraRig(scene, tank.view.root);
@@ -2039,6 +2053,27 @@ function boot(build: BuildFolge): void {
           roster.push(g); spawnTimes.set(g.id, runClock);
         }
         showToast('⚠ Nest geweckt!', '#ff9f43');
+      }
+    }
+
+    // Secret-Rampe (Phase 6): mit genug Tempo drauffahren → Sprung-Bogen auf die Bonus-Insel.
+    if (sprungT < 0 && rampe && insel && playerCombatant.alive) {
+      const dR = Math.hypot(px - rampe.pos.x, pz - rampe.pos.z);
+      if (dR < 5 && rampeAusgeloest(Math.hypot(playerVelX, playerVelZ))) {
+        sprungT = 0; sprungStart = { x: px, z: pz }; sprungZiel = { x: insel.pos.x, z: insel.pos.z };
+        showToast('🚀 Absprung!', '#e8b53a');
+      }
+    }
+    if (sprungT >= 0) {
+      sprungT += simDt;
+      const sp = sprungBogen(sprungT, MAP_TUNING.rampenSprungDauer, sprungStart, sprungZiel, MAP_TUNING.rampenSprungHoehe);
+      tank.view.root.position.set(sp.x, sp.y, sp.z);
+      playerCombatant.x = sp.x; playerCombatant.z = sp.z;
+      if (sprungFertig(sprungT, MAP_TUNING.rampenSprungDauer)) {
+        sprungT = -1;
+        tank.view.root.position.set(sprungZiel.x, 0, sprungZiel.z);
+        playerCombatant.x = sprungZiel.x; playerCombatant.z = sprungZiel.z;
+        showToast('🏝️ Bonus-Insel erreicht!', '#ffe08a');
       }
     }
 

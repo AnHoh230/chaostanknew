@@ -28,4 +28,6 @@ export const MAP_TUNING = {
   nestLebenAnzahl: [2, 3] as [number, number],
   collectibleHeal: 18, // Schrott-Huhn
   rampenSchubSchwelle: 12, // Mindest-Geschwindigkeit für die Sprungrampe
+  rampenSprungDauer: 1.1, // s Flugzeit des Sprung-Bogens
+  rampenSprungHoehe: 14, // Scheitelhöhe des Sprungs
 } as const;
