@@ -7,6 +7,9 @@ import { createLogger, logConfig } from './core/log';
 import { createRng } from './core/rng';
 import { registerBiome, getBiome } from './world/biomeRegistry';
 import { createEndlessGround } from './world/ground';
+import { generiere } from './world/map/generator';
+import { getRezept } from './world/map/recipe';
+import { ladeKarte } from './world/map/loader';
 import { createCameraRig } from './camera/cameraRig';
 import { createTankView } from './tank/tankFactory';
 import { createTank } from './tank/tank';
@@ -203,6 +206,12 @@ function boot(build: BuildFolge): void {
 
   // Endlos-Boden folgt dem Panzer-Root
   const ground = createEndlessGround(scene, tank.view.root, BIOME_ID);
+
+  // Schrott-Spielplatz-Karte (Map-Builder): generieren + laden. Seed vorerst = SEED;
+  // kuratierte Karten-Auswahl folgt in Phase 7.
+  const karte = generiere(getRezept('schrottfeld'), SEED);
+  const mapHandle = ladeKarte(scene, karte);
+  log.info('map geladen', { rezept: karte.rezeptId, seed: karte.seed, entities: karte.entities.length, valid: karte.valid });
 
   // Kamera auf den Panzer-Root
   const camera = createCameraRig(scene, tank.view.root);
@@ -2416,6 +2425,7 @@ function boot(build: BuildFolge): void {
     }
 
     ground.update();
+    mapHandle.update();
     projectileView.sync();
     aimDebug.update();
 
