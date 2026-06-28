@@ -10,6 +10,7 @@ import { createEndlessGround } from './world/ground';
 import { generiere } from './world/map/generator';
 import { getRezept } from './world/map/recipe';
 import { ladeKarte } from './world/map/loader';
+import { treffeBreakable, breakableLoot, hazardSchaden, hazardAktiv, sammleCollectible } from './world/map/mapEntities';
 import { createCameraRig } from './camera/cameraRig';
 import { createTankView } from './tank/tankFactory';
 import { createTank } from './tank/tank';
@@ -1933,6 +1934,46 @@ function boot(build: BuildFolge): void {
 
     const px = tank.view.root.position.x;
     const pz = tank.view.root.position.z;
+
+    // — Map-Gameplay (Phase 4): Breakables beschießbar, Hazards schaden dem Spieler, Collectibles heilen.
+    //   Invariante: KEIN Impuls — nur Heilung/Toys/Schaden. —
+    for (const ge of mapHandle.entities) {
+      if (!ge.aktiv) continue;
+      const ex = ge.entity.pos.x, ez = ge.entity.pos.z;
+      if (ge.entity.kind === 'breakable') {
+        pool.forEachActive((p) => {
+          if (!ge.aktiv || p.team !== 'player') return;
+          if (Math.hypot(p.x - ex, p.z - ez) > ge.radius) return;
+          pool.deactivate(p);
+          const r = treffeBreakable({ hp: ge.hp }, Math.max(1, p.damage || 1));
+          ge.hp = r.state.hp;
+          if (r.zerstoert) {
+            ge.aktiv = false; ge.mesh.setEnabled(false);
+            const loot = breakableLoot(rng);
+            if (loot.art === 'heal') mapHandle.spawnCollectible(ex, ez, 'heal');
+            else if (loot.art === 'toy') showToast('🔧 ' + loot.toy, '#e8b53a');
+          }
+        });
+      } else if (ge.entity.kind === 'hazard') {
+        ge.kontaktCd -= simDt;
+        if (playerCombatant.alive && Math.hypot(px - ex, pz - ez) < ge.radius
+          && hazardAktiv(ge.dmgKey, ge.getaktet, runClock) && ge.kontaktCd <= 0) {
+          ge.kontaktCd = 0.6;
+          const dmg = hazardSchaden(ge.dmgKey);
+          playerCombatant.hp = Math.max(0, playerCombatant.hp - dmg);
+          floatNums.spawn(px, pz, -dmg, '#ff6b6b');
+        }
+      } else if (ge.entity.kind === 'collectible') {
+        if (Math.hypot(px - ex, pz - ez) < ge.radius) {
+          ge.aktiv = false; ge.mesh.setEnabled(false);
+          const eff = sammleCollectible(ge.effekt);
+          if (eff.art === 'heal') {
+            playerCombatant.hp = Math.min(playerCombatant.maxHp, playerCombatant.hp + eff.menge);
+            floatNums.spawn(px, pz, eff.menge, '#9be36b');
+          } else showToast('🔧 ' + eff.toy, '#e8b53a');
+        }
+      }
+    }
 
     // Schicht 2: vorgemerkte Evolution im sicheren Fenster freischalten. Im GARTEN levelt sie den
     // ZUSTAND (dot_core) — egal was der Kompass zeigt (alle Impulse fließen dorthin, siehe Orb-Drop).
