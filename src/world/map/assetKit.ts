@@ -5,7 +5,7 @@
  */
 import type { AssetId, ZoneTheme, Vec3 } from './mapTypes';
 
-export type AssetCategory = 'ground' | 'obstacle' | 'breakable' | 'hazard' | 'setpiece' | 'decor';
+export type AssetCategory = 'ground' | 'obstacle' | 'breakable' | 'hazard' | 'setpiece' | 'decor' | 'pickup';
 
 export interface AssetDef {
   id: AssetId;
@@ -80,4 +80,8 @@ function def(
   def('verkehrskegel', 'decor', 0.5, ALLE, 'cone', { x: 0.7, y: 1, z: 0.7 }, [0.85, 0.4, 0.12]),
   def('truemmer', 'decor', 0.8, ALLE, 'box', { x: 1.2, y: 0.5, z: 1 }, [0.34, 0.32, 0.3]),
   def('pfuetze', 'decor', 1, ['wrackCluster', 'pressWerk'], 'box', { x: 2, y: 0.05, z: 2 }, [0.2, 0.22, 0.24]),
+  // pickup (Funde — Heilung/Toy; nie Impulse). Eigene Kategorie, vom Scatter als Collectible gestreut.
+  def('fund_huhn', 'pickup', 0.8, ALLE, 'sphere', { x: 0.9, y: 0.9, z: 0.9 }, [0.9, 0.8, 0.5], { effekt: 'heal' }),
+  def('fund_schraube', 'pickup', 0.6, ALLE, 'box', { x: 0.6, y: 0.6, z: 0.6 }, [0.85, 0.7, 0.2], { effekt: 'toy' }),
+  def('fund_kanister', 'pickup', 0.7, ALLE, 'cylinder', { x: 0.7, y: 1, z: 0.7 }, [0.3, 0.7, 0.85], { effekt: 'toy' }),
 ].forEach(registerAsset);
