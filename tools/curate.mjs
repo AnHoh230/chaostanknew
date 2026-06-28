@@ -23,6 +23,11 @@ const PICKS = [
   ['boden_rissig', 8, 50],
   ['boden_dreck', 8, 91],
   ['boden_kies', 8, 82],
+  // Oedland-Pool fuer den Hauptboden (mehr erdige Varianten -> weniger Wiederholung im Bake)
+  ['boden_erde', 8, 90],
+  ['boden_schutt', 8, 96],
+  ['boden_grus', 8, 84],
+  ['boden_teer', 8, 64],
   // Strassen (Sheet 7) — Topologie-Kit (Orientierung einzeln verifiziert)
   ['road_gerade', 7, 3], // N-S
   ['road_kurve', 7, 12], // N+O

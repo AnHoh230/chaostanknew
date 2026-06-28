@@ -12,7 +12,7 @@ import type { Scene, Mesh } from '@babylonjs/core';
 import type { BlockRect } from './cityGen';
 import { bodenFuerTheme } from './tileAssets';
 
-const TILE_WORLD = 12; // Welt-Größe einer Boden-Kachel (Tiling-Periode)
+const TILE_WORLD = 90; // Welt-Periode der gebackenen Theme-Textur (groß -> meist 1x pro Modul = kein Raster)
 const Y = 0.03; // über Basis-Boden (0), unter Straßen (0.06)
 
 export interface GroundTilesHandle {

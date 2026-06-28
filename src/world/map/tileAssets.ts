@@ -5,16 +5,17 @@
  */
 import type { RoadKind } from './roadTopology';
 
+// Nahtlos gebackene Theme-Böden (tools/bakeGround.mjs) — kein Vierecke-Raster mehr.
 const BODEN_THEME_TILE: Record<string, string> = {
-  checkpoint: '/tiles/boden_beton.png',
-  depot: '/tiles/boden_beton.png',
-  industrieHof: '/tiles/boden_asphalt.png',
-  schlammOede: '/tiles/boden_dreck.png',
-  kraterFeld: '/tiles/boden_rissig.png',
-  ruinenLos: '/tiles/boden_moos.png',
-  any: '/tiles/boden_kies.png',
+  checkpoint: '/tiles/boden_t_beton.png',
+  depot: '/tiles/boden_t_beton.png',
+  industrieHof: '/tiles/boden_t_asphalt.png',
+  schlammOede: '/tiles/boden_t_dreck.png',
+  kraterFeld: '/tiles/boden_t_rissig.png',
+  ruinenLos: '/tiles/boden_t_moos.png',
+  any: '/tiles/boden_t_kies.png',
 };
-const BODEN_DEFAULT = '/tiles/boden_kies.png';
+const BODEN_DEFAULT = '/tiles/boden_basis.png';
 
 export function bodenFuerTheme(theme: string): string {
   return BODEN_THEME_TILE[theme] ?? BODEN_DEFAULT;
