@@ -22,9 +22,10 @@ import { ROAD_TILE } from './tileAssets';
 const BASIS_ROT = 0; // globale Korrektur-Drehung (0..3)
 const FLIP_V = false; // Textur-V spiegeln
 // Pro-Tile Dreh-Korrektur: wenn ein geliefertes Tile relativ zur BASIS-Annahme verdreht gezeichnet
-// ist, hier ausgleichen (statt global, das wuerde die anderen verdrehen). Im Spiel verifiziert:
-// road_kurve.png ist +3 gegen die BASIS-Kurve [0,1] gedreht -> Ecken schliessen sonst falsch an.
-const KIND_ROT: Record<RoadKind, number> = { gerade: 0, kurve: 3, t: 0, kreuz: 0, ende: 0 };
+// ist, hier ausgleichen (statt global, das wuerde gerade/T mitverdrehen). Per Pixel-Kantenanalyse
+// verifiziert: road_kurve.png verbindet S+W {2,3}, die BASIS-Kurve nimmt aber N+O {0,1} an -> +2.
+// (gerade verbindet N+S = BASIS [0,2], T verbindet O+S+W zu-nach-N = BASIS [1,2,3] -> beide ohne Korrektur.)
+const KIND_ROT: Record<RoadKind, number> = { gerade: 0, kurve: 2, t: 0, kreuz: 0, ende: 0 };
 const QUAD = 1.08; // Tile-Quad als Vielfaches der Zelle (leichte Überlappung kaschiert Nähte)
 const Y = 0.06; // über Modul-Boden (0.03), unter Decals (0.15)
 
