@@ -1,5 +1,6 @@
 import { projectBlip } from './minimapMath';
 import { nearestToPointer, type ScreenBlip } from '../inspect/enemyPick';
+import { createFog } from '../world/map/fogOfWar';
 
 export interface MapBlip {
   id?: string; // nur Panzer (für Hover); Shop-Felder ohne id
@@ -16,6 +17,8 @@ export interface OverviewMap {
   toggle(): void;
   isOpen(): boolean;
   update(playerX: number, playerZ: number, blips: readonly MapBlip[], pointerX: number, pointerY: number): void;
+  revealAt(x: number, z: number, radius: number): void; // Kriegsnebel um die Spielerposition lüften
+  resetFog(): void; // neue Karte = wieder alles verhüllt
 }
 
 const SIZE = 520; // Pixel-Kantenlänge der großen Karte
@@ -30,6 +33,7 @@ const SIZE = 520; // Pixel-Kantenlänge der großen Karte
  */
 export function createOverviewMap(range = 150, extentX = 0, extentZ = 0): OverviewMap {
   const RANGE = range;
+  const fog = createFog(RANGE, RANGE, 16); // Kriegsnebel-Raster über das ganze Kartenbild
   let open = false;
 
   const cv = document.createElement('canvas');
@@ -69,6 +73,18 @@ export function createOverviewMap(range = 150, extentX = 0, extentZ = 0): Overvi
     if (!open || !ctx) return;
     ctx.clearRect(0, 0, SIZE, SIZE);
 
+    // Kriegsnebel: erkundete Zellen heller einfärben; Unerkundetes bleibt der dunkle Hintergrund.
+    const cellPx = (fog.cellSize / RANGE) * (SIZE / 2);
+    ctx.fillStyle = 'rgba(120,150,130,0.13)';
+    for (let c = 0; c < fog.cols; c++) {
+      for (let r = 0; r < fog.rows; r++) {
+        if (!fog.istZelleEnthuellt(c, r)) continue;
+        const zc = fog.zelleZentrum(c, r);
+        const p = projectBlip(0, 0, zc.x, zc.z, RANGE, SIZE);
+        ctx.fillRect(p.x - cellPx / 2, p.y - cellPx / 2, cellPx + 1, cellPx + 1);
+      }
+    }
+
     // Fadenkreuz
     ctx.strokeStyle = 'rgba(140,160,150,0.18)';
     ctx.lineWidth = 1;
@@ -92,6 +108,7 @@ export function createOverviewMap(range = 150, extentX = 0, extentZ = 0): Overvi
     const rect = cv.getBoundingClientRect();
     const screenBlips: ScreenBlip[] = [];
     for (const b of blips) {
+      if (!fog.istEnthuellt(b.x, b.z)) continue; // noch im Nebel → verborgen
       const p = projectBlip(0, 0, b.x, b.z, RANGE, SIZE);
       if (!p.inRange) continue;
       dot(p.x, p.y, b.r ?? 4, b.color);
@@ -133,5 +150,11 @@ export function createOverviewMap(range = 150, extentX = 0, extentZ = 0): Overvi
     if (!open) tip.style.display = 'none';
   }
 
-  return { toggle, isOpen: () => open, update };
+  return {
+    toggle,
+    isOpen: () => open,
+    update,
+    revealAt: (x, z, radius) => fog.reveal(x, z, radius),
+    resetFog: () => fog.reset(),
+  };
 }

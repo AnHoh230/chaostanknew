@@ -259,6 +259,7 @@ function boot(build: BuildFolge): void {
     karte = generiere(getRezept(mapsmith.rezeptId), mapsmith.seed);
     mapHandle = ladeKarte(scene, karte);
     bestueckeKarte();
+    overviewMap.resetFog(); // neue Karte = wieder unerforscht
     log.info('map neu geladen', { rezept: karte.rezeptId, seed: karte.seed, entities: karte.entities.length, valid: karte.valid });
   }
   bestueckeKarte();
@@ -3001,6 +3002,8 @@ function boot(build: BuildFolge): void {
     } else {
       inspectPrompt.style.display = 'none';
     }
+    // Kriegsnebel laufend um den Spieler lüften (auch bei geschlossener Karte) — im Scope sieht man weiter.
+    overviewMap.revealAt(playerCombatant.x, playerCombatant.z, scopeActive ? sniperRange : 60);
     if (overviewMap.isOpen()) {
       const mapBlips: MapBlip[] = [
         // Schrottplatz-Layout: alle Props farbcodiert (so sieht man WO was ist).
