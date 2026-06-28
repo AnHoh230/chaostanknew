@@ -22,7 +22,7 @@ export function createEndlessGround(
     scene,
   );
 
-  const tex = new Texture('/tiles/boden_basis.png', scene);
+  const tex = new Texture('tiles/boden_basis.png', scene); // relativ (kein '/') -> GitHub-Pages-Unterpfad-fest
   tex.wrapU = Texture.WRAP_ADDRESSMODE;
   tex.wrapV = Texture.WRAP_ADDRESSMODE;
   tex.uScale = GROUND_SIZE / TILE_WORLD;

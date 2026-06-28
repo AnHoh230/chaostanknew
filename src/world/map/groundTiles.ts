@@ -40,7 +40,7 @@ export function createGroundTiles(scene: Scene, blocks: readonly BlockRect[]): G
     m.diffuseTexture = t;
 
     // Organische Kanten-Maske -> kein hartes Rechteck, sondern ein weicher ausgefranster Fleck.
-    const maske = new Texture(`/tiles/mask_${i % ANZ_MASKEN}.png`, scene);
+    const maske = new Texture(`tiles/mask_${i % ANZ_MASKEN}.png`, scene); // relativ (kein '/') -> Pages-Unterpfad-fest
     maske.getAlphaFromRGB = true;
     maske.wrapU = Texture.CLAMP_ADDRESSMODE;
     maske.wrapV = Texture.CLAMP_ADDRESSMODE;
