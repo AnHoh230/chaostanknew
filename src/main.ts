@@ -2636,10 +2636,22 @@ function boot(build: BuildFolge): void {
       level: progression.level,
       mk: progression.unlockedMk(),
     });
+    // Karten-Entities als Minimap-Blips (Phase 8). Fog-of-War = die 150er-Range der Minimap blendet Fernes aus.
+    const mapBlips = mapHandle.entities
+      .filter((ge) => ge.aktiv && (ge.entity.kind === 'landmark' || ge.entity.kind === 'hazard'
+        || ge.entity.kind === 'secretRamp' || ge.entity.kind === 'collectible' || ge.entity.kind === 'dormantNest'))
+      .map((ge) => {
+        const k = ge.entity.kind;
+        const color = k === 'landmark' ? '#9fb0c4' : k === 'hazard' ? '#d2483f'
+          : k === 'secretRamp' ? '#e8b53a' : k === 'dormantNest' ? '#c77dff' : '#9be36b';
+        const r = k === 'landmark' || k === 'secretRamp' || k === 'dormantNest' ? 4 : 2.5;
+        return { x: ge.entity.pos.x, z: ge.entity.pos.z, color, r };
+      });
     minimap.update(playerCombatant.x, playerCombatant.z, [
       ...roster
         .filter((e) => e.combatant.alive)
         .map((e) => ({ x: e.combatant.x, z: e.combatant.z, color: '#e8a23c' })),
+      ...mapBlips,
     ]);
     if (ARENA_MODE) {
       const mag = `${'●'.repeat(ammo)}${'○'.repeat(Math.max(0, maxAmmo() - ammo))}`;
