@@ -10,6 +10,7 @@ import { createEndlessGround } from './world/ground';
 import { createArenaBoundary, type ArenaBoundary } from './world/arenaBoundary';
 import { ladeKarte } from './world/map/loader';
 import { generiereStadt, type StadtOpt, type BlockRect } from './world/map/cityGen';
+import { STANDARD_CAPS } from './world/map/moduleCaps';
 import { MODUL_KATALOG } from './world/map/moduleKatalog';
 import { createRoadMesh, type RoadMeshHandle } from './world/map/roadMesh';
 import { createGroundTiles, type GroundTilesHandle } from './world/map/groundTiles';
@@ -50,6 +51,7 @@ import { createEnemyBars } from './ui/enemyBars';
 import { createFloatingNumbers } from './ui/floatingNumbers';
 import { createSwarmHud } from './ui/swarmHud';
 import { createHeatHud } from './ui/heatHud';
+import { createSurvivalHud } from './ui/survivalHud';
 import { createOverviewMap, type MapBlip, type Waypoint } from './ui/overviewMap';
 import { createWaypointMarker } from './ui/waypointMarker';
 import { createInspectCard } from './ui/inspectCard';
@@ -242,6 +244,9 @@ function boot(build: BuildFolge): void {
   const STADT_OPT: StadtOpt = {
     extents: { halfX: 400, halfZ: 320 }, cellSize: 6, module: MODUL_KATALOG,
     clearanceCells: 2, roadBreiteZellen: 1, spawnFreiRadius: 34, biomeId: BIOME_ID,
+    // Spawnende Obstacles (Nester) bewusst RAR halten: je Nest feuert genau 1× bei Entdeckung
+    // (one-shot), aber zu viele über die Karte verteilt wirken wie Dauer-Spawn -> Deckel runter.
+    caps: { ...STANDARD_CAPS, maxNester: 3 },
   };
   let aktuelleRoadZellen: string[] = [];
   let aktuelleBlockRects: BlockRect[] = [];
@@ -973,6 +978,9 @@ function boot(build: BuildFolge): void {
   // Gegner-Tod (von Projektil-Treffer ODER Tick-Schaden aus DoT/AoE): XP + entfernen.
   function killEnemy(e: Enemy, killerTeam: string): void {
     bus.emit('tank.died', { tankId: e.id });
+    // Survival-Score: jeder Spieler-Kill zählt (Nest-Wachen/Häscher inklusive), zähere Gegner mehr.
+    // Reiner Meta-Zähler — KEIN Impuls/Skillpunkt, rührt die Build-Ökonomie nicht an.
+    if (killerTeam === 'player') score += 10 + Math.round((e.combatant.lootValue ?? 0.4) * 40);
     // Phase 5: Nest-Gegner droppen LEBEN (HP) statt Impuls; bei Räumung Belohnung streuen.
     const nestId = nestGegnerVon.get(e.id);
     if (nestId) {
@@ -1101,7 +1109,8 @@ function boot(build: BuildFolge): void {
   let simTime = 0; // Sekunden seit Boot (Sim-Uhr), in der Loop akkumuliert
   let frame = 0;
   let snapCd = 0; // Diagnose-Snapshot-Takt (s); Default/Regler unten
-  let runClock = 0; // Laufzeit-Uhr (Summe simDt) für Gegner-Lebensdauer
+  let runClock = 0; // Laufzeit-Uhr (Summe simDt) für Gegner-Lebensdauer = Überlebenszeit (HUD)
+  let score = 0; // Überlebens-Score (sichtbar im HUD); zählt pro Spieler-Kill, gewichtet nach Gegner-Wert
   const spawnTimes = new Map<string, number>(); // Gegner-ID → Spawn-Zeitpunkt (für Ø-Lebensdauer)
   // Idle-Erkennung: kein Fahren + kein manuelles Feuern + keine Zielbewegung = „Hände weg"
   // (Spieler tippt/will Analyse). idleFor wird in Snapshots + Tode gestempelt → Analyse ignoriert idle.
@@ -1578,6 +1587,7 @@ function boot(build: BuildFolge): void {
   const minimap = createMinimap(168, 150); // Reichweite 150 (Spawn-Ring reicht bis 130 — sonst fallen Gegner von der Karte)
   const enemyBars = createEnemyBars(scene, camera, engine); // HP-Balken über den Gegnern
   const floatNums = createFloatingNumbers(scene, camera, engine); // schwebende Schadenszahlen
+  const survivalHud = createSurvivalHud(); // oben mittig: Überlebenszeit (Systemuhr) + Score, immer sichtbar
   const swarmHud = createSwarmHud(); // Schwarm-Lage: Anzahl je Typ + Zieldichte
   const heatHud = ARENA_MODE ? null : createHeatHud(); // Garten: Heat-Lage ist interne Mechanik, NICHT angezeigt // Heat je Stil-Richtung (warum dieser Mix)
   // Spielernahe Namen der Richtungen (was den Heat treibt). Bunker entfernt (s. doctrineConfig).
@@ -1988,7 +1998,7 @@ function boot(build: BuildFolge): void {
       'background:#06080cee;color:#e8e0c8;font-family:system-ui,sans-serif;text-align:center;';
     ov.innerHTML =
       '<div style="font-size:44px;font-weight:800;letter-spacing:4px;color:#ff6b6b">GEFALLEN</div>' +
-      `<div style="margin-top:10px;opacity:.85;font-size:15px">Zeit überlebt: ${Math.round(runClock)}s · Level ${progression.level}</div>` +
+      `<div style="margin-top:10px;opacity:.85;font-size:15px">Zeit überlebt: ${Math.round(runClock)}s · Score ${score.toLocaleString('de-DE')} · Level ${progression.level}</div>` +
       '<div style="margin-top:6px;opacity:.5;font-size:13px">tot heißt tot — alles auf Anfang</div>';
     const btn = document.createElement('button');
     btn.textContent = 'Neu starten';
@@ -2913,6 +2923,7 @@ function boot(build: BuildFolge): void {
       heatHud?.update(director.states().map((s) => ({
         label: STYLE_LABEL[s.id] ?? s.id, heat: Math.round(s.heat), stufe: s.stufe,
       })));
+      survivalHud.update(runClock, score); // Überlebenszeit + Score sichtbar hochzählen
     }
 
     // P0: Hover-Pick (Gegner unter dem Mauszeiger) + Übersichtskarte (M).
