@@ -5,7 +5,7 @@
  * Der Endlos-Boden (world/ground.ts) bleibt unberührt.
  */
 import { TransformNode, Vector3 } from '@babylonjs/core';
-import type { Scene, Mesh } from '@babylonjs/core';
+import type { Scene, Mesh, StandardMaterial } from '@babylonjs/core';
 import type { KartenDaten, MapEntity } from './mapTypes';
 import { getAsset } from './assetKit';
 import { baueAssetMesh } from './mapMesh';
@@ -36,16 +36,19 @@ export interface MapHandle {
 export function ladeKarte(scene: Scene, daten: KartenDaten): MapHandle {
   const root = new TransformNode('mapRoot', scene);
   const geladen: GeladeneEntity[] = [];
+  const matCache = new Map<string, StandardMaterial>(); // gleichfarbige Teile teilen ein Material
   let lootN = 0;
 
   function platziere(e: MapEntity): void {
     const def = getAsset(e.asset);
-    const mesh = baueAssetMesh(scene, def, 'map_' + e.id);
+    const mesh = baueAssetMesh(scene, def, 'map_' + e.id, matCache);
     mesh.parent = root;
     mesh.position = new Vector3(e.pos.x, (def.mesh.size.y / 2) * e.scale, e.pos.z);
     mesh.rotation.y = e.rotY;
     mesh.scaling.setAll(e.scale);
     mesh.metadata = { entityId: e.id, kind: e.kind };
+    // Statische Props: Welt-Matrix einfrieren (CPU-Ersparnis). Funde bewegen sich (schweben) -> nicht einfrieren.
+    if (e.kind !== 'collectible') mesh.freezeWorldMatrix();
     geladen.push({
       entity: e,
       mesh,

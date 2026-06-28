@@ -1244,6 +1244,29 @@ function boot(build: BuildFolge): void {
   };
 
   function fire(): void {
+    // Build-übergreifend: zeigt das (grün eingerastete) Cursor-Ziel auf ein zerstörbares Prop,
+    // triff DAS — egal welcher Build. Alle Builds feuern über den Scope aufs Cursor-Ziel.
+    if (ARENA_MODE && scopeActive && fireCd <= 0 && ammo > 0 && sniperTargets.length) {
+      const ge = mapHandle.entities.find((g) => g.aktiv && g.entity.kind === 'breakable' && g.entity.id === sniperTargets[0]);
+      if (ge) {
+        const dmg = Math.max(1, Math.round(playerStats().damage * sniperDmgMul));
+        const o = tank.view.root.getAbsolutePosition();
+        spawnLaser(o.x, o.z, ge.entity.pos.x, ge.entity.pos.z);
+        const tr = treffeBreakable({ hp: ge.hp }, dmg);
+        ge.hp = tr.state.hp;
+        ammo = Math.max(0, ammo - 1);
+        fireCd = GARTEN_FIRE_BASE / playerBuffs.aggregate().fireRateMul;
+        lastFireClock = runClock;
+        metrics.onShot();
+        if (tr.zerstoert) {
+          ge.aktiv = false; ge.mesh.setEnabled(false);
+          const loot = breakableLoot(rng);
+          if (loot.art === 'heal') mapHandle.spawnCollectible(ge.entity.pos.x, ge.entity.pos.z, 'heal');
+          else if (loot.art === 'toy') showToast('🔧 ' + loot.toy, '#e8b53a');
+        }
+        return;
+      }
+    }
     // Eine Klasse (Kommander): was der Schuss tut, entscheidet der Build-Pol weiter unten.
     if (istBefehl) {
       if (fireCd > 0) return; // nach einem Schuss kurz nachladen
@@ -2423,6 +2446,12 @@ function boot(build: BuildFolge): void {
       });
     }
 
+    // Solide Props einmal pro Frame sammeln — Gegner werden davon GENAUSO geblockt wie der Spieler.
+    const solidProps: Kreis[] = [];
+    for (const ge of mapHandle.entities) {
+      if (ge.aktiv && ge.solide) solidProps.push({ x: ge.entity.pos.x, z: ge.entity.pos.z, r: ge.koerperRadius });
+    }
+
     // Gegner-Verhalten (R2): jeder Typ steuert nach seinem Muster auf einen Zielpunkt zu,
     // hält bei seinem Standoff und feuert in Schussweite. Konter = Verhalten, nicht Stats.
     // Wegfahr-Exploit: KEIN Rubberband mehr — wer zu lange untätig ist, wird in den Fahrtweg gesetzt (s. u.).
@@ -2496,6 +2525,11 @@ function boot(build: BuildFolge): void {
           er.position.x += zug.dx * RAUM_CFG.zugStaerke * simDt;
           er.position.z += zug.dz * RAUM_CFG.zugStaerke * simDt;
         }
+      }
+      // Körper-Kollision: aus massiven Props herausschieben (kein Durchfahren) — nach der Bewegung.
+      if (solidProps.length) {
+        const fix = loeseKollision(er.position.x, er.position.z, e.combatant.radius, solidProps, 2);
+        er.position.x = fix.x; er.position.z = fix.z;
       }
       e.combatant.x = er.position.x;
       e.combatant.z = er.position.z;
@@ -2796,6 +2830,19 @@ function boot(build: BuildFolge): void {
         camera.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight()),
       );
       if (s.z > 0 && s.z < 1) screenBlips.push({ id: e.id, sx: s.x, sy: s.y });
+    }
+    // Zerstörbare Props sind ebenfalls anvisierbar: ins Cursor-Targeting aufnehmen, damit das
+    // Fadenkreuz darauf einrastet (grün = beschießbar) und fire() sie in JEDEM Build treffen kann.
+    for (const ge of mapHandle.entities) {
+      if (!ge.aktiv || ge.entity.kind !== 'breakable') continue;
+      if (Math.hypot(px - ge.entity.pos.x, pz - ge.entity.pos.z) > sniperRange) continue;
+      const s = Vector3.Project(
+        new Vector3(ge.entity.pos.x, 1.2, ge.entity.pos.z),
+        Matrix.IdentityReadOnly,
+        scene.getTransformMatrix(),
+        camera.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight()),
+      );
+      if (s.z > 0 && s.z < 1) screenBlips.push({ id: ge.entity.id, sx: s.x, sy: s.y });
     }
     // Befehl-Ult-Effekte (während aktiv): kommando = Auto-Exekution (eins nach dem anderen),
     // streuung/seuche = Flächen-Markierung aller sichtbaren Ziele (kein Counter); seuche zusätzlich DoT.
