@@ -24,6 +24,10 @@ interface SocketRuntime {
 function makeMaterial(scene: Scene, name: string, rgb: [number, number, number]): StandardMaterial {
   const mat = new StandardMaterial(name, scene);
   mat.diffuseColor = new Color3(rgb[0], rgb[1], rgb[2]);
+  // Matt halten (wie die Map-Props): der StandardMaterial-Default ist WEISSES Specular (Power 64),
+  // das unter dem hellen Licht einen breiten weißen Schleier über den Panzer legt → flach/„weiße
+  // Fläche". Niedriges Specular gibt die Flächen-Schattierung (Kontrast) zurück.
+  mat.specularColor = new Color3(0.06, 0.06, 0.07);
   return mat;
 }
 
@@ -34,7 +38,8 @@ function buildVariantMesh(scene: Scene, socket: SocketName, variantId: string): 
       const dims = variantId === 'c_wide'
         ? { width: 2.4, height: 0.6, depth: 3.0 }
         : { width: 1.6, height: 0.8, depth: 2.6 }; // c_box (default)
-      const rgb: [number, number, number] = variantId === 'c_wide' ? [0.35, 0.30, 0.20] : [0.45, 0.40, 0.28];
+      // Tiefere Körpertöne → klare Schattierung gegen den hellen Schrottplatz (war zu blass/weiß).
+      const rgb: [number, number, number] = variantId === 'c_wide' ? [0.28, 0.24, 0.16] : [0.36, 0.31, 0.21];
       mesh = MeshBuilder.CreateBox('chassis_mesh', dims, scene);
       mesh.material = makeMaterial(scene, 'chassis_mat', rgb);
       mesh.position = new Vector3(0, 0.4, 0);
@@ -63,11 +68,11 @@ function buildVariantMesh(scene: Scene, socket: SocketName, variantId: string): 
     case 'turret':
       if (variantId === 't_big') {
         mesh = MeshBuilder.CreateBox('turret_mesh', { width: 1.4, height: 0.7, depth: 1.4 }, scene);
-        mesh.material = makeMaterial(scene, 'turret_mat', [0.55, 0.50, 0.35]);
+        mesh.material = makeMaterial(scene, 'turret_mat', [0.42, 0.37, 0.25]);
       } else {
         // t_small (default)
         mesh = MeshBuilder.CreateBox('turret_mesh', { width: 1.0, height: 0.5, depth: 1.0 }, scene);
-        mesh.material = makeMaterial(scene, 'turret_mat', [0.60, 0.55, 0.40]);
+        mesh.material = makeMaterial(scene, 'turret_mat', [0.46, 0.41, 0.28]);
       }
       mesh.position = new Vector3(0, 0.25, 0);
       break;
