@@ -33,7 +33,9 @@ const NACH_KIND: Record<string, string> = {
   dormantNest: '💤 Nest',
 };
 
-/** Lesbarer Name eines Props; bevorzugt das konkrete Asset, sonst die Kind-Kategorie. */
+/** Lesbarer Name eines Props; bevorzugt das konkrete Asset, sonst die Kind-Kategorie.
+ *  Ausnahme: dormantNest nutzt das 'container'-Asset als Hülle → Kind hat Vorrang (sonst "Container"). */
 export function entityBeschriftung(asset: string, kind: string): string {
+  if (kind === 'dormantNest') return NACH_KIND.dormantNest;
   return NACH_ASSET[asset] ?? NACH_KIND[kind] ?? asset;
 }

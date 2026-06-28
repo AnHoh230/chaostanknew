@@ -19,14 +19,17 @@ export interface OverviewMap {
 }
 
 const SIZE = 520; // Pixel-Kantenlänge der großen Karte
-const RANGE = 150; // Welteinheiten Radius (≈ 2,5× Eck-Minimap)
 
 /**
- * Große Echtzeit-Übersichtskarte (Taste M). Welt läuft weiter; Panzer bewegen
- * sich live. Maus über einen Panzer → kondensiertes Tooltip-Menü am Cursor.
- * Keine Pause. Canvas (kein DOM pro Punkt).
+ * Große Echtzeit-Übersichtskarte (Taste M) — zeigt das GANZE Feld (ursprungszentriert):
+ * Schrottplatz-Props, Gegner und der Spieler als wandernder Marker, plus die Feld-Grenze.
+ * Welt läuft weiter; Maus über einen Blip → Tooltip. Keine Pause. Canvas (kein DOM pro Punkt).
+ *
+ * @param range  Welt-Radius, der ins Bild passt (auf die Karten-Extents abgestimmt).
+ * @param extentX/extentZ  halbe Feldgröße → zeichnet die Grenze (wo der Schrottplatz endet).
  */
-export function createOverviewMap(): OverviewMap {
+export function createOverviewMap(range = 150, extentX = 0, extentZ = 0): OverviewMap {
+  const RANGE = range;
   let open = false;
 
   const cv = document.createElement('canvas');
@@ -76,18 +79,33 @@ export function createOverviewMap(): OverviewMap {
     ctx.lineTo(SIZE - 14, SIZE / 2);
     ctx.stroke();
 
-    // Blips + Bildschirm-Positionen für Hover sammeln (nur Panzer mit id)
+    // Feld-Grenze: wo der Schrottplatz endet (ursprungszentriert).
+    if (extentX > 0 && extentZ > 0) {
+      const tl = projectBlip(0, 0, -extentX, extentZ, RANGE, SIZE);
+      const br = projectBlip(0, 0, extentX, -extentZ, RANGE, SIZE);
+      ctx.strokeStyle = 'rgba(150,180,160,0.32)';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+    }
+
+    // Alle Blips ursprungszentriert (ganzes Feld sichtbar) + Screen-Positionen für Hover.
     const rect = cv.getBoundingClientRect();
     const screenBlips: ScreenBlip[] = [];
     for (const b of blips) {
-      const p = projectBlip(px, pz, b.x, b.z, RANGE, SIZE);
+      const p = projectBlip(0, 0, b.x, b.z, RANGE, SIZE);
       if (!p.inRange) continue;
       dot(p.x, p.y, b.r ?? 4, b.color);
       if (b.id) screenBlips.push({ id: b.id, sx: rect.left + p.x, sy: rect.top + p.y });
     }
 
-    // Spieler (Mitte, oben drauf)
-    dot(SIZE / 2, SIZE / 2, 5, '#dfeede');
+    // Spieler-Marker an seiner echten Feld-Position (am Rand geklemmt, falls außerhalb).
+    {
+      const pp = projectBlip(0, 0, px, pz, RANGE, SIZE);
+      const cx = Math.max(8, Math.min(SIZE - 8, pp.x));
+      const cy = Math.max(8, Math.min(SIZE - 8, pp.y));
+      dot(cx, cy, 6, '#dfeede');
+      if (ctx) { ctx.strokeStyle = '#0b0f0d'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI * 2); ctx.stroke(); }
+    }
 
     // Hover-Tooltip am Cursor
     const hoveredId = nearestToPointer(pointerX, pointerY, screenBlips, 16);

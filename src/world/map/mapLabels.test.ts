@@ -17,4 +17,8 @@ describe('entityBeschriftung', () => {
   it('fällt bei unbekanntem Asset UND Kind auf die Asset-Id zurück', () => {
     expect(entityBeschriftung('voellig_neu', 'rakete')).toBe('voellig_neu');
   });
+
+  it('benennt dormantNest als Nest, NICHT als Container (Hüll-Asset)', () => {
+    expect(entityBeschriftung('container', 'dormantNest')).toContain('Nest');
+  });
 });

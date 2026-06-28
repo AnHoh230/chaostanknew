@@ -1567,7 +1567,19 @@ function boot(build: BuildFolge): void {
   createTuningPanel(tunables, { onChange: (label, value) => alog.log('regler', { label, value }) });
 
   // Inspizier-System (P0): M = Echtzeit-Übersichtskarte, I = modaler Tiefblick (Pause).
-  const overviewMap = createOverviewMap();
+  // Übersichtskarte zeigt das ganze Feld: Range ~1.2× Extent (Insel/Rampe liegen am Rand jenseits).
+  const overviewMap = createOverviewMap(Math.round(karte.extents.halfX * 1.2), karte.extents.halfX, karte.extents.halfZ);
+  // Farb-/Größen-Code der Map-Props auf der Übersichtskarte (notable = mit Hover-Namen).
+  const OVERVIEW_KIND: Record<string, { color: string; r: number; notable?: boolean }> = {
+    landmark: { color: '#9fb0c4', r: 6, notable: true },
+    secretRamp: { color: '#e8b53a', r: 5, notable: true },
+    bonusIsland: { color: '#ffd166', r: 6, notable: true },
+    dormantNest: { color: '#c77dff', r: 5, notable: true },
+    hazard: { color: '#d2483f', r: 4, notable: true },
+    collectible: { color: '#9be36b', r: 3 },
+    breakable: { color: '#c9a06a', r: 3 },
+    obstacle: { color: '#8b94a0', r: 3 },
+  };
   const inspectCard = createInspectCard();
   let prevSimSpeed = 1; // gespeicherter Zeitfaktor während Inspizieren (Pausen-Vertrag)
   let inspecting = false;
@@ -2150,7 +2162,7 @@ function boot(build: BuildFolge): void {
       for (const ge of mapHandle.entities) {
         if (!ge.aktiv) continue;
         const k = ge.entity.kind;
-        if (k === 'obstacle' || k === 'decor' || k === 'bonusIsland') continue; // selbsterklärend / uninteressant
+        if (k === 'obstacle' || k === 'decor' || k === 'bonusIsland' || k === 'dormantNest') continue; // selbsterklärend / via nester-Schleife
         const d = Math.hypot(px - ge.entity.pos.x, pz - ge.entity.pos.z);
         if (d < bestD) {
           bestD = d;
@@ -2991,6 +3003,15 @@ function boot(build: BuildFolge): void {
     }
     if (overviewMap.isOpen()) {
       const mapBlips: MapBlip[] = [
+        // Schrottplatz-Layout: alle Props farbcodiert (so sieht man WO was ist).
+        ...mapHandle.entities
+          .filter((g) => g.aktiv && OVERVIEW_KIND[g.entity.kind])
+          .map((g) => {
+            const k = OVERVIEW_KIND[g.entity.kind]!;
+            const blip: MapBlip = { x: g.entity.pos.x, z: g.entity.pos.z, color: k.color, r: k.r };
+            if (k.notable) { blip.id = 'me_' + g.entity.id; blip.name = entityBeschriftung(g.entity.asset, g.entity.kind); }
+            return blip;
+          }),
         ...roster
           .filter((e) => e.combatant.alive)
           .map((e) => ({
