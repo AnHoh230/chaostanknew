@@ -3,3 +3,7 @@ dist
 *.log
 .DS_Store
 tsconfig.tsbuildinfo
+# Tile-Extraktion: regenerierbar via tools/extractTiles.mjs (gross, ~35 MB)
+docs/superpowers/assets/extracted/
+# Fremd-Backup
+ChaosTankNew.zip

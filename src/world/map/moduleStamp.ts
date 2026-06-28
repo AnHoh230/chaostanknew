@@ -21,7 +21,7 @@ const DEFAULT_ASSETS: AufloesungMap = {
   fokus: ['funkturm'],
   nest: ['container'],
   pickup: ['fund_huhn', 'fund_schraube', 'fund_kanister'],
-  deko: ['truemmer', 'reifenstapel', 'verkehrskegel', 'pfuetze'],
+  deko: ['truemmer', 'reifenstapel', 'verkehrskegel', 'pfuetze', 'decal_krater', 'decal_schutt'],
   baum: ['truemmer'],
 };
 

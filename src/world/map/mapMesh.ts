@@ -13,7 +13,7 @@
  * Lokale Konvention: Inhalt vertikal um y=0 zentriert (Spanne ~[-size.y/2, +size.y/2]),
  * damit der Loader es per y=(size.y/2)*scale auf den Boden stellt. Deterministisch.
  */
-import { MeshBuilder, StandardMaterial, Color3, Mesh } from '@babylonjs/core';
+import { MeshBuilder, StandardMaterial, Color3, Mesh, Texture } from '@babylonjs/core';
 import type { Scene } from '@babylonjs/core';
 import type { AssetDef } from './assetKit';
 
@@ -216,10 +216,34 @@ const BAUART: Record<string, (c: Ctx) => void> = {
 };
 
 /**
+ * Flaches Decal-Tile: liegende, texturierte Platte (echte Sheet-Textur mit Alpha) statt Primitiv.
+ * Material wird über den Cache je Textur-URL geteilt (ein Material, viele Instanzen).
+ */
+function baueDecalMesh(scene: Scene, def: AssetDef, name: string, cache: MatCache): Mesh {
+  const g = MeshBuilder.CreateGround(name, { width: def.mesh.size.x, height: def.mesh.size.z }, scene);
+  const key = 'decal:' + def.textur;
+  let m = cache.get(key);
+  if (!m) {
+    m = new StandardMaterial('decal' + cache.size, scene);
+    const t = new Texture(def.textur!, scene);
+    t.hasAlpha = true;
+    m.diffuseTexture = t;
+    m.useAlphaFromDiffuseTexture = true;
+    m.specularColor = new Color3(0, 0, 0);
+    m.backFaceCulling = false;
+    cache.set(key, m);
+  }
+  g.material = m;
+  g.isPickable = false;
+  return g;
+}
+
+/**
  * Baut das (gemergte) Prop-Mesh. matCache wird vom Loader pro Kartenladung geteilt,
  * damit gleichfarbige Teile dasselbe Material nutzen (wenig Shader-Wechsel).
  */
 export function baueAssetMesh(scene: Scene, def: AssetDef, name: string, matCache: MatCache = new Map()): Mesh {
+  if (def.textur) return baueDecalMesh(scene, def, name, matCache);
   const parts: Mesh[] = [];
   const ctx: Ctx = {
     base: def.mesh.color,

@@ -9,9 +9,10 @@ import { registerBiome, getBiome } from './world/biomeRegistry';
 import { createEndlessGround } from './world/ground';
 import { createArenaBoundary, type ArenaBoundary } from './world/arenaBoundary';
 import { ladeKarte } from './world/map/loader';
-import { generiereStadt, type StadtOpt } from './world/map/cityGen';
+import { generiereStadt, type StadtOpt, type BlockRect } from './world/map/cityGen';
 import { MODUL_KATALOG } from './world/map/moduleKatalog';
 import { createRoadMesh, type RoadMeshHandle } from './world/map/roadMesh';
+import { createGroundTiles, type GroundTilesHandle } from './world/map/groundTiles';
 import type { KartenDaten } from './world/map/mapTypes';
 import { treffeBreakable, breakableLoot, hazardSchaden, hazardAktiv, sammleCollectible } from './world/map/mapEntities';
 import { createNest, pruefeEntdeckung, nestGegnerGefallen, nestGeraeumt, lebenDropAnzahl, type NestState } from './world/map/dormantNest';
@@ -240,12 +241,14 @@ function boot(build: BuildFolge): void {
   // verbinden -> zu Entities stempeln -> KartenDaten. Ursprung bleibt modulfrei (Spawn).
   const STADT_OPT: StadtOpt = {
     extents: { halfX: 400, halfZ: 320 }, cellSize: 6, module: MODUL_KATALOG,
-    clearanceCells: 2, roadBreiteZellen: 2, spawnFreiRadius: 34, biomeId: BIOME_ID,
+    clearanceCells: 2, roadBreiteZellen: 1, spawnFreiRadius: 34, biomeId: BIOME_ID,
   };
   let aktuelleRoadZellen: string[] = [];
+  let aktuelleBlockRects: BlockRect[] = [];
   function baueStadtKarte(seed: number): KartenDaten {
     const stadt = generiereStadt(STADT_OPT, seed);
     aktuelleRoadZellen = stadt.roadZellen;
+    aktuelleBlockRects = stadt.blockRects;
     return stadt;
   }
   let karte: KartenDaten = baueStadtKarte(mapsmith.seed);
@@ -254,6 +257,11 @@ function boot(build: BuildFolge): void {
   function baueRoads(): void {
     roadHandle?.dispose();
     roadHandle = createRoadMesh(scene, aktuelleRoadZellen, STADT_OPT.cellSize, karte.extents.halfX, karte.extents.halfZ);
+  }
+  let groundHandle: GroundTilesHandle | null = null;
+  function baueGroundTiles(): void {
+    groundHandle?.dispose();
+    groundHandle = createGroundTiles(scene, aktuelleBlockRects);
   }
   let nester: { id: string; pos: { x: number; z: number }; state: NestState; belohnt: boolean }[] = [];
   const nestGegnerVon = new Map<string, string>(); // EnemyId → NestId (Tag: droppt Leben statt Impuls)
@@ -301,6 +309,7 @@ function boot(build: BuildFolge): void {
     bestueckeKarte();
     baueArenaWand(); // Wand passend zur neuen Karte/Rampe
     baueRoads(); // Straßen-Mesh passend zur neuen Karte
+    baueGroundTiles(); // Modul-Böden passend zur neuen Karte
     waypoint = null; // altes Ziel gilt nicht mehr
     overviewMap.setWaypoint(null);
     waypointMarker.verstecke();
@@ -310,6 +319,7 @@ function boot(build: BuildFolge): void {
   bestueckeKarte();
   baueArenaWand();
   baueRoads();
+  baueGroundTiles();
   log.info('map geladen', { rezept: karte.rezeptId, seed: karte.seed, entities: karte.entities.length, valid: karte.valid });
 
   // In-Welt-Nameplate (benennt das nächste interagierbare Prop beim Annähern)
