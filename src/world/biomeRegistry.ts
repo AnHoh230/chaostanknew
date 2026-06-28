@@ -20,3 +20,5 @@ export function getBiome(id: string): Biome {
 
 // Default-Biom beim Modulladen registrieren (Single Source).
 registerBiome({ id: 'steppe', groundColor: [0.36, 0.4, 0.24] });
+// Schrott-Spielplatz-Biom (Map-Builder) — staubiges Schrott-Braun.
+registerBiome({ id: 'schrottfeld', groundColor: [0.28, 0.26, 0.24] });
