@@ -23,6 +23,7 @@ export interface PlatzierOpt {
   cellSize: number;
   clearanceCells?: number; // Luft rings ums Modul (Default 2)
   maxTries?: number; // Versuche je Modul (Default 60)
+  spawnFreiRadius?: number; // hält einen Bereich um den Ursprung (Spawn) modulfrei
 }
 
 interface AABB { minX: number; maxX: number; minZ: number; maxZ: number; }
@@ -56,6 +57,12 @@ export function platziere(module: ModulDef[], seed: number, opt: PlatzierOpt): P
   const rng = createRng(seed);
   const platziert: Platzierung[] = [];
   const belegt: AABB[] = [];
+
+  // Spawn-Zone um den Ursprung freihalten -> Panzer startet nicht in einem Modul.
+  if (opt.spawnFreiRadius && opt.spawnFreiRadius > 0) {
+    const r = opt.spawnFreiRadius;
+    belegt.push({ minX: -r, maxX: r, minZ: -r, maxZ: r });
+  }
 
   for (const def of module) {
     let gesetzt = false;

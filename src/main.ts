@@ -8,9 +8,11 @@ import { createRng } from './core/rng';
 import { registerBiome, getBiome } from './world/biomeRegistry';
 import { createEndlessGround } from './world/ground';
 import { createArenaBoundary, type ArenaBoundary } from './world/arenaBoundary';
-import { generiere } from './world/map/generator';
-import { getRezept } from './world/map/recipe';
 import { ladeKarte } from './world/map/loader';
+import { generiereStadt, type StadtOpt } from './world/map/cityGen';
+import { MODUL_KATALOG } from './world/map/moduleKatalog';
+import { createRoadMesh, type RoadMeshHandle } from './world/map/roadMesh';
+import type { KartenDaten } from './world/map/mapTypes';
 import { treffeBreakable, breakableLoot, hazardSchaden, hazardAktiv, sammleCollectible } from './world/map/mapEntities';
 import { createNest, pruefeEntdeckung, nestGegnerGefallen, nestGeraeumt, lebenDropAnzahl, type NestState } from './world/map/dormantNest';
 import { rampeAusgeloest, sprungBogen, sprungFertig } from './world/map/secret';
@@ -232,10 +234,27 @@ function boot(build: BuildFolge): void {
   // Schrott-Spielplatz-Karte (Map-Builder): generieren + laden. Seed vorerst = SEED;
   // kuratierte Karten-Auswahl folgt in Phase 7.
   // — Schrott-Spielplatz-Karte (Map-Builder), live neu ladbar für den Mapsmith-Debugmodus (Phase 7/8) —
-  const startKarte = waehleKarte(0); // kuratierte Bibliothek statt Runtime-Zufall
+  const startKarte = waehleKarte(0); // Seed-Quelle für den Mapsmith (G = reroll)
   const mapsmith = createMapsmith(startKarte.rezeptId, startKarte.seed);
-  let karte = generiere(getRezept(mapsmith.rezeptId), mapsmith.seed);
+  // Modul-Generator (roads-first): seed -> Module SEED-abhängig platzieren -> mit Straßen
+  // verbinden -> zu Entities stempeln -> KartenDaten. Ursprung bleibt modulfrei (Spawn).
+  const STADT_OPT: StadtOpt = {
+    extents: { halfX: 400, halfZ: 320 }, cellSize: 6, module: MODUL_KATALOG,
+    clearanceCells: 2, roadBreiteZellen: 2, spawnFreiRadius: 34, biomeId: BIOME_ID,
+  };
+  let aktuelleRoadZellen: string[] = [];
+  function baueStadtKarte(seed: number): KartenDaten {
+    const stadt = generiereStadt(STADT_OPT, seed);
+    aktuelleRoadZellen = stadt.roadZellen;
+    return stadt;
+  }
+  let karte: KartenDaten = baueStadtKarte(mapsmith.seed);
   let mapHandle = ladeKarte(scene, karte);
+  let roadHandle: RoadMeshHandle | null = null;
+  function baueRoads(): void {
+    roadHandle?.dispose();
+    roadHandle = createRoadMesh(scene, aktuelleRoadZellen, STADT_OPT.cellSize, karte.extents.halfX, karte.extents.halfZ);
+  }
   let nester: { id: string; pos: { x: number; z: number }; state: NestState; belohnt: boolean }[] = [];
   const nestGegnerVon = new Map<string, string>(); // EnemyId → NestId (Tag: droppt Leben statt Impuls)
   let nestSeq = 0;
@@ -277,10 +296,11 @@ function boot(build: BuildFolge): void {
     mapHandle.dispose();
     nestGegnerVon.clear();
     sprungT = -1;
-    karte = generiere(getRezept(mapsmith.rezeptId), mapsmith.seed);
+    karte = baueStadtKarte(mapsmith.seed);
     mapHandle = ladeKarte(scene, karte);
     bestueckeKarte();
     baueArenaWand(); // Wand passend zur neuen Karte/Rampe
+    baueRoads(); // Straßen-Mesh passend zur neuen Karte
     waypoint = null; // altes Ziel gilt nicht mehr
     overviewMap.setWaypoint(null);
     waypointMarker.verstecke();
@@ -289,6 +309,7 @@ function boot(build: BuildFolge): void {
   }
   bestueckeKarte();
   baueArenaWand();
+  baueRoads();
   log.info('map geladen', { rezept: karte.rezeptId, seed: karte.seed, entities: karte.entities.length, valid: karte.valid });
 
   // In-Welt-Nameplate (benennt das nächste interagierbare Prop beim Annähern)

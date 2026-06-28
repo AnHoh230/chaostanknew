@@ -32,12 +32,14 @@ export interface StadtOpt {
   clearanceCells?: number;
   roadBreiteZellen?: number;
   biomeId?: string;
+  spawnFreiRadius?: number;
 }
 
 export function generiereStadt(opt: StadtOpt, seed: number): StadtKarte {
   const cs = opt.cellSize;
   const placements: Platzierung[] = platziere(opt.module, seed, {
     extents: opt.extents, cellSize: cs, clearanceCells: opt.clearanceCells,
+    spawnFreiRadius: opt.spawnFreiRadius,
   });
   const netz = verbinde(placements, {
     extents: opt.extents, cellSize: cs, breiteZellen: opt.roadBreiteZellen,
