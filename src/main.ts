@@ -13,6 +13,11 @@ import { ladeKarte } from './world/map/loader';
 import { treffeBreakable, breakableLoot, hazardSchaden, hazardAktiv, sammleCollectible } from './world/map/mapEntities';
 import { createNest, pruefeEntdeckung, nestGegnerGefallen, nestGeraeumt, lebenDropAnzahl, type NestState } from './world/map/dormantNest';
 import { rampeAusgeloest, sprungBogen, sprungFertig } from './world/map/secret';
+import { loeseKollision, type Kreis } from './world/map/collision';
+import { getAsset } from './world/map/assetKit';
+import { entityBeschriftung } from './world/map/mapLabels';
+import { createNameplate } from './ui/nameplate';
+import { createMapLegend } from './ui/mapLegend';
 import { waehleKarte } from './world/map/curatedMaps';
 import { createMapsmith, naechsterSeed, kuratierteZeile } from './world/map/mapsmith';
 import { createMapsmithHud } from './ui/mapsmithHud';
@@ -201,7 +206,8 @@ function boot(build: BuildFolge): void {
   light.intensity = 0.95;
 
   // Biom 'steppe' ist beim Modulladen registriert; defensiv sicherstellen.
-  registerBiome({ id: BIOME_ID, groundColor: [0.36, 0.4, 0.24] });
+  // Schrottplatz-Boden: dunkle, ölige Erde statt grüner Schachbrettwiese.
+  registerBiome({ id: BIOME_ID, groundColor: [0.17, 0.155, 0.14] });
   const biome = getBiome(BIOME_ID);
   log.debug('biome resolved', { id: biome.id, groundColor: biome.groundColor });
 
@@ -256,6 +262,11 @@ function boot(build: BuildFolge): void {
   }
   bestueckeKarte();
   log.info('map geladen', { rezept: karte.rezeptId, seed: karte.seed, entities: karte.entities.length, valid: karte.valid });
+
+  // In-Welt-Nameplate (benennt das nächste interagierbare Prop beim Annähern)
+  // + immer sichtbare Karten-Legende (Farb-/Symbol-Code passend zur Minimap).
+  const nameplate = createNameplate(scene);
+  createMapLegend();
 
   // Mapsmith-Debug-HUD + Tasten: M Toggle, G reroll (neuer Seed), C speichern (Zeile für curatedMaps.ts).
   const mapsmithHud = createMapsmithHud();
@@ -2043,6 +2054,23 @@ function boot(build: BuildFolge): void {
     pool.update(simDt);
     updateFx(simDt); // Laser/Rauch-Effekte altern lassen
 
+    // — Körper-Kollision: massive Props (Wracks/Fässer/Wahrzeichen) blocken den Panzer.
+    //   Hazards/Funde/Rampe/Insel/Nester bleiben absichtlich befahrbar; im Sprung-Bogen aus. —
+    if (sprungT < 0) {
+      const ppos = tank.view.root.position;
+      const blocker: Kreis[] = [];
+      for (const ge of mapHandle.entities) {
+        if (!ge.aktiv || !ge.solide) continue;
+        if (Math.abs(ppos.x - ge.entity.pos.x) > 14 || Math.abs(ppos.z - ge.entity.pos.z) > 14) continue;
+        blocker.push({ x: ge.entity.pos.x, z: ge.entity.pos.z, r: ge.koerperRadius });
+      }
+      if (blocker.length) {
+        const fix = loeseKollision(ppos.x, ppos.z, TANK_RADIUS, blocker);
+        ppos.x = fix.x; ppos.z = fix.z;
+        playerCombatant.x = fix.x; playerCombatant.z = fix.z;
+      }
+    }
+
     const px = tank.view.root.position.x;
     const pz = tank.view.root.position.z;
 
@@ -2075,6 +2103,9 @@ function boot(build: BuildFolge): void {
           floatNums.spawn(px, pz, -dmg, '#ff6b6b');
         }
       } else if (ge.entity.kind === 'collectible') {
+        // Funde drehen + schweben -> als „einsammelbar" lesbar (lebendige Welt).
+        ge.mesh.rotation.y += simDt * 1.6;
+        ge.mesh.position.y = 0.9 + Math.sin(runClock * 3 + ex) * 0.18;
         if (Math.hypot(px - ex, pz - ez) < ge.radius) {
           ge.aktiv = false; ge.mesh.setEnabled(false);
           const eff = sammleCollectible(ge.effekt);
@@ -2084,6 +2115,31 @@ function boot(build: BuildFolge): void {
           } else showToast('🔧 ' + eff.toy, '#e8b53a');
         }
       }
+    }
+
+    // Nameplate: benennt das nächste interagierbare Prop, sobald man nah genug heranfährt.
+    {
+      const REICH = 22;
+      let bestD = REICH;
+      let bx = 0, bz = 0, by = 0, btxt = '';
+      for (const ge of mapHandle.entities) {
+        if (!ge.aktiv) continue;
+        const k = ge.entity.kind;
+        if (k === 'obstacle' || k === 'decor' || k === 'bonusIsland') continue; // selbsterklärend / uninteressant
+        const d = Math.hypot(px - ge.entity.pos.x, pz - ge.entity.pos.z);
+        if (d < bestD) {
+          bestD = d;
+          bx = ge.entity.pos.x; bz = ge.entity.pos.z;
+          by = Math.max(getAsset(ge.entity.asset).mesh.size.y * ge.entity.scale, 2.2) + 1.4;
+          btxt = entityBeschriftung(ge.entity.asset, k);
+        }
+      }
+      for (const nest of nester) {
+        if (nest.state.wach || nest.state.rest <= 0) continue;
+        const d = Math.hypot(px - nest.pos.x, pz - nest.pos.z);
+        if (d < bestD) { bestD = d; bx = nest.pos.x; bz = nest.pos.z; by = 3; btxt = '💤 Schlafendes Nest'; }
+      }
+      if (btxt) nameplate.zeige(bx, by, bz, btxt); else nameplate.verstecke();
     }
 
     // Schlafende Nester (Phase 5): bei Entdeckung erwachen + Wachen spawnen (Leben-Drop bei Räumung).

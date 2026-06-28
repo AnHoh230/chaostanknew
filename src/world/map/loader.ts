@@ -21,6 +21,8 @@ export interface GeladeneEntity {
   dmgKey: string; // hazard
   getaktet: boolean; // hazard
   effekt: string; // collectible
+  solide: boolean; // massiv -> blockt Panzer-Bewegung (Wrack/Fass/Wahrzeichen)
+  koerperRadius: number; // physischer Block-Radius (inkl. scale)
 }
 
 export interface MapHandle {
@@ -54,6 +56,10 @@ export function ladeKarte(scene: Scene, daten: KartenDaten): MapHandle {
       dmgKey: String(e.params?.dmgKey ?? e.asset),
       getaktet: def.defaultParams?.getaktet === true,
       effekt: String(e.params?.effekt ?? 'heal'),
+      // Massiv = blockt Bewegung: Hindernisse, (intakte) Breakables, Wahrzeichen.
+      // NICHT: Hazards (absichtlich befahrbar), Pickups, Rampe, Insel, Nest, Deko.
+      solide: e.kind === 'obstacle' || e.kind === 'breakable' || e.kind === 'landmark',
+      koerperRadius: def.footprint * e.scale,
     });
   }
 
