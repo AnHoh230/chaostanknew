@@ -36,7 +36,7 @@ export function createCameraRig(scene: Scene, target: TransformNode): Camera {
   };
   refreshFov();
   cam.minZ = 0.1;
-  cam.maxZ = 2000;
+  cam.maxZ = 700; // Ferngrenze bewusst knapp: nichts jenseits des Nebels rendern (main.ts stellt live nach)
   cam.setTarget(target.position.clone());
 
   scene.onBeforeRenderObservable.add(() => {

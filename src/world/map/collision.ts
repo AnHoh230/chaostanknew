@@ -47,3 +47,27 @@ export function loeseKollision(
   }
   return { x, z };
 }
+
+/**
+ * Hält einen Körper (Radius r) innerhalb der rechteckigen Arena ±(halfX, halfZ): der
+ * Mittelpunkt wird so geklemmt, dass die Hülle die Wand am Feldrand gerade berührt, nicht
+ * überschreitet. So „kann man nicht aus der Welt fahren" — die sichtbare Wand am Rand und
+ * diese Klemmung beschreiben dieselbe Grenze. Rein, separat getestet.
+ *
+ * Hinweis: Das Geheim-Ziel (Bonus-Insel) liegt ABSICHTLICH jenseits der Wand; der Aufrufer
+ * setzt die Klemmung dort aus (Sprung-Bogen + Insel-Freiraum), nicht diese Funktion.
+ */
+export function klemmeInArena(
+  x: number,
+  z: number,
+  r: number,
+  halfX: number,
+  halfZ: number,
+): { x: number; z: number } {
+  const gx = Math.max(0, halfX - r);
+  const gz = Math.max(0, halfZ - r);
+  return {
+    x: Math.max(-gx, Math.min(gx, x)),
+    z: Math.max(-gz, Math.min(gz, z)),
+  };
+}

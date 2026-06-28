@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { loeseKollision } from './collision';
+import { loeseKollision, klemmeInArena } from './collision';
 
 describe('loeseKollision', () => {
   it('lässt freie Position unverändert', () => {
@@ -36,5 +36,31 @@ describe('loeseKollision', () => {
     const r = loeseKollision(0, 0.1, 1.5, h);
     expect(Math.hypot(r.x - -2, r.z - 0)).toBeGreaterThanOrEqual(4.5 - 1e-3);
     expect(Math.hypot(r.x - 2, r.z - 0)).toBeGreaterThanOrEqual(4.5 - 1e-3);
+  });
+});
+
+describe('klemmeInArena', () => {
+  it('lässt eine Position weit innerhalb des Feldes unverändert', () => {
+    const r = klemmeInArena(40, -120, 1.5, 320, 320);
+    expect(r.x).toBeCloseTo(40);
+    expect(r.z).toBeCloseTo(-120);
+  });
+
+  it('klemmt am Rand so, dass die Hülle die Wand gerade berührt (nicht überschreitet)', () => {
+    const r = klemmeInArena(999, -999, 1.5, 320, 320);
+    expect(r.x).toBeCloseTo(320 - 1.5); // Mittelpunkt + Radius = Wand
+    expect(r.z).toBeCloseTo(-(320 - 1.5));
+  });
+
+  it('klemmt jede Achse einzeln (X außerhalb, Z innen)', () => {
+    const r = klemmeInArena(400, 10, 2, 320, 200);
+    expect(r.x).toBeCloseTo(320 - 2);
+    expect(r.z).toBeCloseTo(10); // Z bleibt
+  });
+
+  it('verkraftet einen Körper größer als das Feld (kein negativer Rand)', () => {
+    const r = klemmeInArena(50, 50, 999, 320, 320);
+    expect(r.x).toBeCloseTo(0);
+    expect(r.z).toBeCloseTo(0);
   });
 });

@@ -7,13 +7,14 @@ import { createLogger, logConfig } from './core/log';
 import { createRng } from './core/rng';
 import { registerBiome, getBiome } from './world/biomeRegistry';
 import { createEndlessGround } from './world/ground';
+import { createArenaBoundary, type ArenaBoundary } from './world/arenaBoundary';
 import { generiere } from './world/map/generator';
 import { getRezept } from './world/map/recipe';
 import { ladeKarte } from './world/map/loader';
 import { treffeBreakable, breakableLoot, hazardSchaden, hazardAktiv, sammleCollectible } from './world/map/mapEntities';
 import { createNest, pruefeEntdeckung, nestGegnerGefallen, nestGeraeumt, lebenDropAnzahl, type NestState } from './world/map/dormantNest';
 import { rampeAusgeloest, sprungBogen, sprungFertig } from './world/map/secret';
-import { loeseKollision, type Kreis } from './world/map/collision';
+import { loeseKollision, klemmeInArena, type Kreis } from './world/map/collision';
 import { getAsset } from './world/map/assetKit';
 import { entityBeschriftung } from './world/map/mapLabels';
 import { createNameplate } from './ui/nameplate';
@@ -46,7 +47,8 @@ import { createEnemyBars } from './ui/enemyBars';
 import { createFloatingNumbers } from './ui/floatingNumbers';
 import { createSwarmHud } from './ui/swarmHud';
 import { createHeatHud } from './ui/heatHud';
-import { createOverviewMap, type MapBlip } from './ui/overviewMap';
+import { createOverviewMap, type MapBlip, type Waypoint } from './ui/overviewMap';
+import { createWaypointMarker } from './ui/waypointMarker';
 import { createInspectCard } from './ui/inspectCard';
 import { buildEnemyInfo } from './inspect/enemyInfo';
 import { nearestToPointer, type ScreenBlip } from './inspect/enemyPick';
@@ -195,6 +197,12 @@ function boot(build: BuildFolge): void {
   const engine = new Engine(canvas, true);
   const scene = new Scene(engine);
   scene.clearColor = new Color4(0.09, 0.1, 0.12, 1); // Hintergrund leicht angehoben (war fast schwarz)
+  // Szene-Nebel in Hintergrundfarbe: die Welt verschwimmt dort, wo der Karteninhalt endet —
+  // statt einer unendlich wirkenden leeren Ebene. So passt die SICHTWEITE zur Karte (±320).
+  scene.fogMode = Scene.FOGMODE_LINEAR;
+  scene.fogColor = new Color3(0.09, 0.1, 0.12);
+  scene.fogStart = 170; // ab hier beginnt das Ausblenden
+  scene.fogEnd = 460; // ab hier voll verhangen (knapp jenseits der Feld-Diagonale)
 
   // Kerndienste
   const clock = createClock();
@@ -236,6 +244,8 @@ function boot(build: BuildFolge): void {
   let sprungT = -1; // <0 = kein Sprung aktiv
   let sprungStart = { x: 0, z: 0 };
   let sprungZiel = { x: 0, z: 0 };
+  let arenaWall: ArenaBoundary | null = null; // sichtbare Feld-Grenze (Schrott-Ring), pro Karte neu
+  let waypoint: Waypoint | null = null; // auf der M-Karte gewähltes Ziel (in-Welt-Pfeil + Linie)
 
   // Gameplay-Zustand aus der aktuellen Karte aufbauen (Nester/Rampe/Insel + Insel-Funde).
   function bestueckeKarte(): void {
@@ -251,6 +261,17 @@ function boot(build: BuildFolge): void {
       }
     }
   }
+  // Sichtbare Arena-Grenze (Schrott-Ring) am Feldrand aufbauen — mit Öffnung an der Geheim-Rampe,
+  // weil die Bonus-Insel ABSICHTLICH jenseits der Wand liegt. Pro Karte neu (Extents/Rampe ändern sich).
+  function baueArenaWand(): void {
+    arenaWall?.dispose();
+    arenaWall = createArenaBoundary(
+      scene,
+      karte.extents.halfX,
+      karte.extents.halfZ,
+      rampe ? { x: rampe.pos.x, z: rampe.pos.z } : undefined,
+    );
+  }
   // Mapsmith-Reroll: alte Karte verwerfen, mit dem aktuellen Seed neu generieren + bestücken.
   function ladeKarteNeu(): void {
     mapHandle.dispose();
@@ -259,10 +280,15 @@ function boot(build: BuildFolge): void {
     karte = generiere(getRezept(mapsmith.rezeptId), mapsmith.seed);
     mapHandle = ladeKarte(scene, karte);
     bestueckeKarte();
+    baueArenaWand(); // Wand passend zur neuen Karte/Rampe
+    waypoint = null; // altes Ziel gilt nicht mehr
+    overviewMap.setWaypoint(null);
+    waypointMarker.verstecke();
     overviewMap.resetFog(); // neue Karte = wieder unerforscht
     log.info('map neu geladen', { rezept: karte.rezeptId, seed: karte.seed, entities: karte.entities.length, valid: karte.valid });
   }
   bestueckeKarte();
+  baueArenaWand();
   log.info('map geladen', { rezept: karte.rezeptId, seed: karte.seed, entities: karte.entities.length, valid: karte.valid });
 
   // In-Welt-Nameplate (benennt das nächste interagierbare Prop beim Annähern)
@@ -1539,6 +1565,11 @@ function boot(build: BuildFolge): void {
   tunables.add({ label: 'Höhe', category: 'Kamera', value: camH, min: 8, max: 60, step: 1, onChange: (v) => { camH = v; applyCam(); } });
   tunables.add({ label: 'Distanz', category: 'Kamera', value: camB, min: 5, max: 80, step: 1, onChange: (v) => { camB = v; applyCam(); } });
   tunables.add({ label: 'Zoom (FOV)', category: 'Kamera', value: camF, min: 0.3, max: 1.0, step: 0.01, onChange: (v) => { camF = v; applyCam(); } });
+  // Sicht: Nebel blendet die Welt dort aus, wo der Karteninhalt endet; Ferngrenze knapp dahinter.
+  camera.maxZ = 600;
+  tunables.add({ label: 'Nebel-Start', category: 'Sicht', value: scene.fogStart, min: 40, max: 400, step: 10, onChange: (v) => { scene.fogStart = v; } });
+  tunables.add({ label: 'Nebel-Ende (Sichtweite)', category: 'Sicht', value: scene.fogEnd, min: 120, max: 900, step: 20, onChange: (v) => { scene.fogEnd = v; } });
+  tunables.add({ label: 'Kamera-Ferngrenze', category: 'Sicht', value: camera.maxZ, min: 200, max: 1500, step: 50, onChange: (v) => { camera.maxZ = v; } });
   tunables.add({ label: 'Schussweite', category: 'Kampf', value: shotRange, min: 8, max: 120, step: 1, onChange: (v) => { shotRange = v; } });
   tunables.add({ label: 'Gegner-Reichweite', category: 'Kampf', value: enemyShotRange, min: 8, max: 120, step: 1, onChange: (v) => { enemyShotRange = v; } });
   tunables.add({ label: 'Spieler-Projektiltempo', category: 'Kampf', value: playerProjSpeed, min: 20, max: 120, step: 5, onChange: (v) => { playerProjSpeed = v; } });
@@ -1570,6 +1601,14 @@ function boot(build: BuildFolge): void {
   // Inspizier-System (P0): M = Echtzeit-Übersichtskarte, I = modaler Tiefblick (Pause).
   // Übersichtskarte zeigt das ganze Feld: Range ~1.2× Extent (Insel/Rampe liegen am Rand jenseits).
   const overviewMap = createOverviewMap(Math.round(karte.extents.halfX * 1.2), karte.extents.halfX, karte.extents.halfZ);
+  // In-Welt-Wegpunkt: auf der M-Karte ein Ziel anklicken → Pfeil/Ring + Distanz beim Fahren.
+  const waypointMarker = createWaypointMarker();
+  overviewMap.onWaypointPick((wp) => {
+    waypoint = wp;
+    overviewMap.setWaypoint(wp);
+    if (!wp) waypointMarker.verstecke();
+    else showToast('🎯 Ziel: ' + wp.name, '#ffe08a');
+  });
   // Farb-/Größen-Code der Map-Props auf der Übersichtskarte (notable = mit Hover-Namen).
   const OVERVIEW_KIND: Record<string, { color: string; r: number; notable?: boolean }> = {
     landmark: { color: '#9fb0c4', r: 6, notable: true },
@@ -2107,6 +2146,14 @@ function boot(build: BuildFolge): void {
         ppos.x = fix.x; ppos.z = fix.z;
         playerCombatant.x = fix.x; playerCombatant.z = fix.z;
       }
+      // Arena-Grenze: an der sichtbaren Wand stoppen — AUSSER auf der Bonus-Insel (Geheim-Ziel
+      // jenseits der Wand, per Sprung erreicht). So „fährt man nicht aus der Welt".
+      const aufInsel = insel != null && Math.hypot(ppos.x - insel.pos.x, ppos.z - insel.pos.z) < 20;
+      if (!aufInsel) {
+        const k = klemmeInArena(ppos.x, ppos.z, TANK_RADIUS, karte.extents.halfX, karte.extents.halfZ);
+        ppos.x = k.x; ppos.z = k.z;
+        playerCombatant.x = k.x; playerCombatant.z = k.z;
+      }
     }
 
     const px = tank.view.root.position.x;
@@ -2546,6 +2593,9 @@ function boot(build: BuildFolge): void {
         const fix = loeseKollision(er.position.x, er.position.z, e.combatant.radius, solidProps, 2);
         er.position.x = fix.x; er.position.z = fix.z;
       }
+      // Arena-Grenze: auch Gegner bleiben im Feld (kein Davonfahren in die Leere/durch die Wand).
+      const kg = klemmeInArena(er.position.x, er.position.z, e.combatant.radius, karte.extents.halfX, karte.extents.halfZ);
+      er.position.x = kg.x; er.position.z = kg.z;
       e.combatant.x = er.position.x;
       e.combatant.z = er.position.z;
     }
@@ -3004,6 +3054,41 @@ function boot(build: BuildFolge): void {
     }
     // Kriegsnebel laufend um den Spieler lüften (auch bei geschlossener Karte) — im Scope sieht man weiter.
     overviewMap.revealAt(playerCombatant.x, playerCombatant.z, scopeActive ? sniperRange : 60);
+
+    // In-Welt-Wegpunkt (jeden Frame, auch bei geschlossener Karte): Ziel projizieren → Ring im Bild
+    // bzw. Pfeil am Bildschirmrand, der dorthin weist, + Live-Distanz. Bei Ankunft löschen.
+    if (waypoint) {
+      const wdist = Math.hypot(waypoint.x - playerCombatant.x, waypoint.z - playerCombatant.z);
+      if (wdist < 10) {
+        showToast('🎯 Ziel erreicht', '#ffe08a');
+        waypoint = null; overviewMap.setWaypoint(null); waypointMarker.verstecke();
+      } else {
+        const rw = engine.getRenderWidth(), rh = engine.getRenderHeight();
+        const s = Vector3.Project(
+          new Vector3(waypoint.x, 1.2, waypoint.z),
+          Matrix.IdentityReadOnly,
+          scene.getTransformMatrix(),
+          camera.viewport.toGlobal(rw, rh),
+        );
+        const imBild = s.z > 0 && s.z < 1 && s.x >= 0 && s.x <= rw && s.y >= 0 && s.y <= rh;
+        if (imBild) {
+          waypointMarker.zeige({ sx: s.x, sy: s.y, onScreen: true, dirRad: 0, distanz: wdist, name: waypoint.name });
+        } else {
+          // Außerhalb (oder hinter der Kamera, s.z≤0/≥1): Richtung vom Bildmittelpunkt an den Rand klemmen.
+          let dx = s.x - rw / 2, dy = s.y - rh / 2;
+          if (s.z <= 0 || s.z >= 1) { dx = -dx; dy = -dy; }
+          const ang = Math.atan2(dy, dx);
+          const hx = rw / 2 - 46, hy = rh / 2 - 46;
+          const tx = Math.abs(Math.cos(ang)) < 1e-4 ? Infinity : hx / Math.abs(Math.cos(ang));
+          const ty = Math.abs(Math.sin(ang)) < 1e-4 ? Infinity : hy / Math.abs(Math.sin(ang));
+          const t = Math.min(tx, ty);
+          waypointMarker.zeige({
+            sx: rw / 2 + Math.cos(ang) * t, sy: rh / 2 + Math.sin(ang) * t,
+            onScreen: false, dirRad: ang, distanz: wdist, name: waypoint.name,
+          });
+        }
+      }
+    }
     if (overviewMap.isOpen()) {
       const mapBlips: MapBlip[] = [
         // Schrottplatz-Layout: alle Props farbcodiert (so sieht man WO was ist).
@@ -3012,7 +3097,7 @@ function boot(build: BuildFolge): void {
           .map((g) => {
             const k = OVERVIEW_KIND[g.entity.kind]!;
             const blip: MapBlip = { x: g.entity.pos.x, z: g.entity.pos.z, color: k.color, r: k.r };
-            if (k.notable) { blip.id = 'me_' + g.entity.id; blip.name = entityBeschriftung(g.entity.asset, g.entity.kind); }
+            if (k.notable) { blip.id = 'me_' + g.entity.id; blip.name = entityBeschriftung(g.entity.asset, g.entity.kind); blip.poi = true; }
             return blip;
           }),
         ...roster
@@ -3025,7 +3110,7 @@ function boot(build: BuildFolge): void {
             hpFrac: e.combatant.hp / e.combatant.maxHp,
           })),
       ];
-      overviewMap.update(playerCombatant.x, playerCombatant.z, mapBlips, mouseX, mouseY);
+      overviewMap.update(playerCombatant.x, playerCombatant.z, tank.view.root.rotation.y, mapBlips, mouseX, mouseY);
     }
 
     frame++;
