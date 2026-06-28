@@ -11,8 +11,11 @@ import { generiere } from './world/map/generator';
 import { getRezept } from './world/map/recipe';
 import { ladeKarte } from './world/map/loader';
 import { treffeBreakable, breakableLoot, hazardSchaden, hazardAktiv, sammleCollectible } from './world/map/mapEntities';
-import { createNest, pruefeEntdeckung, nestGegnerGefallen, nestGeraeumt, lebenDropAnzahl } from './world/map/dormantNest';
+import { createNest, pruefeEntdeckung, nestGegnerGefallen, nestGeraeumt, lebenDropAnzahl, type NestState } from './world/map/dormantNest';
 import { rampeAusgeloest, sprungBogen, sprungFertig } from './world/map/secret';
+import { waehleKarte } from './world/map/curatedMaps';
+import { createMapsmith, naechsterSeed, kuratierteZeile } from './world/map/mapsmith';
+import { createMapsmithHud } from './ui/mapsmithHud';
 import { MAP_TUNING } from './world/map/mapTuning';
 import { createCameraRig } from './camera/cameraRig';
 import { createTankView } from './tank/tankFactory';
@@ -213,29 +216,71 @@ function boot(build: BuildFolge): void {
 
   // Schrott-Spielplatz-Karte (Map-Builder): generieren + laden. Seed vorerst = SEED;
   // kuratierte Karten-Auswahl folgt in Phase 7.
-  const karte = generiere(getRezept('schrottfeld'), SEED);
-  const mapHandle = ladeKarte(scene, karte);
-  log.info('map geladen', { rezept: karte.rezeptId, seed: karte.seed, entities: karte.entities.length, valid: karte.valid });
-
-  // Schlafende Nester aus der Karte (Phase 5): wach bei Entdeckung, droppen Leben bei Räumung.
-  const nester = karte.entities
-    .filter((e) => e.kind === 'dormantNest')
-    .map((e) => ({ id: e.id, pos: e.pos, state: createNest(Number(e.params?.gegner ?? 3)), belohnt: false }));
+  // — Schrott-Spielplatz-Karte (Map-Builder), live neu ladbar für den Mapsmith-Debugmodus (Phase 7/8) —
+  const startKarte = waehleKarte(0); // kuratierte Bibliothek statt Runtime-Zufall
+  const mapsmith = createMapsmith(startKarte.rezeptId, startKarte.seed);
+  let karte = generiere(getRezept(mapsmith.rezeptId), mapsmith.seed);
+  let mapHandle = ladeKarte(scene, karte);
+  let nester: { id: string; pos: { x: number; z: number }; state: NestState; belohnt: boolean }[] = [];
   const nestGegnerVon = new Map<string, string>(); // EnemyId → NestId (Tag: droppt Leben statt Impuls)
   let nestSeq = 0;
-
-  // Secret-Rampe → Bonus-Insel (Phase 6): Insel mit Funden + einem Toy bestücken; Sprung-Zustand.
-  const rampe = karte.entities.find((e) => e.kind === 'secretRamp');
-  const insel = karte.entities.find((e) => e.kind === 'bonusIsland');
-  if (insel) {
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2;
-      mapHandle.spawnCollectible(insel.pos.x + Math.cos(a) * 5, insel.pos.z + Math.sin(a) * 5, i === 0 ? 'toy' : 'heal');
-    }
-  }
+  let rampe = karte.entities.find((e) => e.kind === 'secretRamp');
+  let insel = karte.entities.find((e) => e.kind === 'bonusIsland');
   let sprungT = -1; // <0 = kein Sprung aktiv
   let sprungStart = { x: 0, z: 0 };
   let sprungZiel = { x: 0, z: 0 };
+
+  // Gameplay-Zustand aus der aktuellen Karte aufbauen (Nester/Rampe/Insel + Insel-Funde).
+  function bestueckeKarte(): void {
+    nester = karte.entities
+      .filter((e) => e.kind === 'dormantNest')
+      .map((e) => ({ id: e.id, pos: e.pos, state: createNest(Number(e.params?.gegner ?? 3)), belohnt: false }));
+    rampe = karte.entities.find((e) => e.kind === 'secretRamp');
+    insel = karte.entities.find((e) => e.kind === 'bonusIsland');
+    if (insel) {
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2;
+        mapHandle.spawnCollectible(insel.pos.x + Math.cos(a) * 5, insel.pos.z + Math.sin(a) * 5, i === 0 ? 'toy' : 'heal');
+      }
+    }
+  }
+  // Mapsmith-Reroll: alte Karte verwerfen, mit dem aktuellen Seed neu generieren + bestücken.
+  function ladeKarteNeu(): void {
+    mapHandle.dispose();
+    nestGegnerVon.clear();
+    sprungT = -1;
+    karte = generiere(getRezept(mapsmith.rezeptId), mapsmith.seed);
+    mapHandle = ladeKarte(scene, karte);
+    bestueckeKarte();
+    log.info('map neu geladen', { rezept: karte.rezeptId, seed: karte.seed, entities: karte.entities.length, valid: karte.valid });
+  }
+  bestueckeKarte();
+  log.info('map geladen', { rezept: karte.rezeptId, seed: karte.seed, entities: karte.entities.length, valid: karte.valid });
+
+  // Mapsmith-Debug-HUD + Tasten: M Toggle, G reroll (neuer Seed), C speichern (Zeile für curatedMaps.ts).
+  const mapsmithHud = createMapsmithHud();
+  const mapsmithRefresh = (): void =>
+    mapsmithHud.update({ rezeptId: karte.rezeptId, seed: karte.seed, valid: karte.valid, warnungen: karte.warnungen, entities: karte.entities.length });
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key === 'm' || ev.key === 'M') {
+      mapsmith.aktiv = !mapsmith.aktiv;
+      mapsmithHud.setSichtbar(mapsmith.aktiv);
+      if (mapsmith.aktiv) mapsmithRefresh();
+      return;
+    }
+    if (!mapsmith.aktiv) return;
+    if (ev.key === 'g' || ev.key === 'G') {
+      mapsmith.seed = naechsterSeed(mapsmith.seed);
+      ladeKarteNeu();
+      mapsmithRefresh();
+    } else if (ev.key === 'c' || ev.key === 'C') {
+      const zeile = kuratierteZeile(mapsmith);
+      try { void navigator.clipboard?.writeText(zeile); } catch { /* Clipboard evtl. blockiert */ }
+      try { localStorage.setItem('mapsmith_last', zeile); } catch { /* localStorage evtl. blockiert */ }
+      log.info('mapsmith gespeichert — Zeile in curatedMaps.ts einfügen', { zeile });
+      showToast('💾 ' + zeile, '#ffe0a8');
+    }
+  });
 
   // Kamera auf den Panzer-Root
   const camera = createCameraRig(scene, tank.view.root);
