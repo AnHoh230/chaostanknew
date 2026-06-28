@@ -235,7 +235,8 @@ function baueDecalMesh(scene: Scene, def: AssetDef, name: string, cache: MatCach
   }
   g.material = m;
   g.isPickable = false;
-  g.renderingGroupId = 2; // Decals über Modul-Böden (0) und Straßen (1)
+  g.renderingGroupId = 0; // Gruppe 0 -> Tiefentest verdeckt Decals hinter Panzer/Props (NICHT Gruppe 2 mit Auto-Depth-Clear)
+  g.alphaIndex = 3; // Reihenfolge der transparenten Flach-Layer: Modul-Boden (1) < Straße (2) < Decal (3)
   return g;
 }
 

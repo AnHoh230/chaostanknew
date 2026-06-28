@@ -5,7 +5,8 @@
  *
  * Damit die Platten NICHT als harte Rechtecke erscheinen ("verschieden große Vierecke"), bekommt
  * jede eine organisch ausgefranste Kanten-Maske (opacityTexture, tools/bakeMask.mjs) -> weicher
- * Material-Fleck, der in den Hauptboden übergeht. renderingGroupId 0 (unter Straßen/Decals).
+ * Material-Fleck, der in den Hauptboden übergeht. Alle flachen Layer in renderingGroupId 0 (damit
+ * Panzer/Props sie per Tiefentest verdecken); alphaIndex schichtet sie: Boden < Straße < Decal.
  *
  * Footprint kommt aus cityGen.blockRects (Welt-Mittelpunkt + Größe inkl. Theme). Eine Platte je
  * Modul (≤ ~12), eingefroren, nicht pickbar.
@@ -48,7 +49,8 @@ export function createGroundTiles(scene: Scene, blocks: readonly BlockRect[]): G
     m.specularColor = new Color3(0, 0, 0);
     q.material = m;
     q.isPickable = false;
-    q.renderingGroupId = 0; // unter Straßen (1) und Decals (2)
+    q.renderingGroupId = 0; // alle flachen Layer in Gruppe 0 -> Tiefentest verdeckt sie hinter Panzer/Props
+    q.alphaIndex = 1; // Reihenfolge der transparenten Flach-Layer: Modul-Boden (1) < Straße (2) < Decal (3)
     q.freezeWorldMatrix();
     meshes.push(q);
   });

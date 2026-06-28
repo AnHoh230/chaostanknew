@@ -77,7 +77,8 @@ export function createRoadMesh(
     m.name = 'roads_' + kind;
     m.material = matFuer(kind);
     m.isPickable = false;
-    m.renderingGroupId = 1; // über Modul-Böden (0), unter Decals (2)
+    m.renderingGroupId = 0; // Gruppe 0 wie Panzer/Props -> Tiefentest verdeckt die Straße korrekt (NICHT Gruppe 1: deren Auto-Depth-Clear zeichnete über den Panzer)
+    m.alphaIndex = 2; // Reihenfolge der transparenten Flach-Layer: Modul-Boden (1) < Straße (2) < Decal (3)
     m.freezeWorldMatrix();
     merged.push(m);
   }
