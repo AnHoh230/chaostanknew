@@ -77,6 +77,7 @@ export function createRoadMesh(
     m.name = 'roads_' + kind;
     m.material = matFuer(kind);
     m.isPickable = false;
+    m.renderingGroupId = 1; // über Modul-Böden (0), unter Decals (2)
     m.freezeWorldMatrix();
     merged.push(m);
   }

@@ -235,6 +235,7 @@ function baueDecalMesh(scene: Scene, def: AssetDef, name: string, cache: MatCach
   }
   g.material = m;
   g.isPickable = false;
+  g.renderingGroupId = 2; // Decals über Modul-Böden (0) und Straßen (1)
   return g;
 }
 
