@@ -11,6 +11,8 @@ import { generiere } from './world/map/generator';
 import { getRezept } from './world/map/recipe';
 import { ladeKarte } from './world/map/loader';
 import { treffeBreakable, breakableLoot, hazardSchaden, hazardAktiv, sammleCollectible } from './world/map/mapEntities';
+import { createNest, pruefeEntdeckung, nestGegnerGefallen, nestGeraeumt, lebenDropAnzahl } from './world/map/dormantNest';
+import { MAP_TUNING } from './world/map/mapTuning';
 import { createCameraRig } from './camera/cameraRig';
 import { createTankView } from './tank/tankFactory';
 import { createTank } from './tank/tank';
@@ -213,6 +215,13 @@ function boot(build: BuildFolge): void {
   const karte = generiere(getRezept('schrottfeld'), SEED);
   const mapHandle = ladeKarte(scene, karte);
   log.info('map geladen', { rezept: karte.rezeptId, seed: karte.seed, entities: karte.entities.length, valid: karte.valid });
+
+  // Schlafende Nester aus der Karte (Phase 5): wach bei Entdeckung, droppen Leben bei Räumung.
+  const nester = karte.entities
+    .filter((e) => e.kind === 'dormantNest')
+    .map((e) => ({ id: e.id, pos: e.pos, state: createNest(Number(e.params?.gegner ?? 3)), belohnt: false }));
+  const nestGegnerVon = new Map<string, string>(); // EnemyId → NestId (Tag: droppt Leben statt Impuls)
+  let nestSeq = 0;
 
   // Kamera auf den Panzer-Root
   const camera = createCameraRig(scene, tank.view.root);
@@ -835,6 +844,29 @@ function boot(build: BuildFolge): void {
   // Gegner-Tod (von Projektil-Treffer ODER Tick-Schaden aus DoT/AoE): XP + entfernen.
   function killEnemy(e: Enemy, killerTeam: string): void {
     bus.emit('tank.died', { tankId: e.id });
+    // Phase 5: Nest-Gegner droppen LEBEN (HP) statt Impuls; bei Räumung Belohnung streuen.
+    const nestId = nestGegnerVon.get(e.id);
+    if (nestId) {
+      nestGegnerVon.delete(e.id);
+      const nest = nester.find((nn) => nn.id === nestId);
+      if (nest) {
+        nestGegnerGefallen(nest.state);
+        if (nestGeraeumt(nest.state) && !nest.belohnt) {
+          nest.belohnt = true;
+          const anz = lebenDropAnzahl(rng);
+          for (let i = 0; i < anz; i++) {
+            const a = rng.next() * Math.PI * 2, rr = 2 + rng.next() * 4;
+            mapHandle.spawnCollectible(nest.pos.x + Math.cos(a) * rr, nest.pos.z + Math.sin(a) * rr, 'leben');
+          }
+          showToast('♥ Nest geräumt — Leben gedroppt', '#e8607a');
+        }
+      }
+      spawnTimes.delete(e.id);
+      e.view.root.dispose();
+      const idxN = roster.indexOf(e);
+      if (idxN >= 0) roster.splice(idxN, 1);
+      return;
+    }
     if (killerTeam === 'player') {
       metrics.onKill(e.typeId, runClock - (spawnTimes.get(e.id) ?? runClock));
       styleTracker.onKill({ dist: Math.hypot(e.combatant.x - playerCombatant.x, e.combatant.z - playerCombatant.z) });
@@ -898,6 +930,26 @@ function boot(build: BuildFolge): void {
     e.combatant.lootValue = 0; // keine XP
     e.haescher = true;
     tintHaescher(e);
+    return e;
+  }
+
+  // Nest-Gegner (Phase 5): geliehene Häscher-Optik/-Verhalten, aber als Nest getaggt → Leben statt Impuls.
+  function spawnNestGegner(nestId: string, x: number, z: number): Enemy {
+    const spec: EnemySpec = {
+      id: 'nest' + nestSeq++,
+      comp: haescherType.comp,
+      spawn: { x, z },
+      level: 1,
+      displayName: 'Nest-Wache',
+      typeId: 'haescher',
+      behavior: haescherType.behavior,
+    };
+    const e = createEnemyEntity(scene, spec, TANK_RADIUS, () => aiRng.next());
+    const hs = haescherStats(2);
+    e.combatant.maxHp = hs.hp; e.combatant.hp = hs.hp;
+    e.damage = hs.damage; e.speed = hs.speed;
+    e.combatant.lootValue = 0;
+    nestGegnerVon.set(e.id, nestId);
     return e;
   }
 
@@ -1972,6 +2024,21 @@ function boot(build: BuildFolge): void {
             floatNums.spawn(px, pz, eff.menge, '#9be36b');
           } else showToast('🔧 ' + eff.toy, '#e8b53a');
         }
+      }
+    }
+
+    // Schlafende Nester (Phase 5): bei Entdeckung erwachen + Wachen spawnen (Leben-Drop bei Räumung).
+    for (const nest of nester) {
+      if (nest.state.wach || nest.state.rest <= 0) continue;
+      const dN = Math.hypot(px - nest.pos.x, pz - nest.pos.z);
+      if (pruefeEntdeckung(nest.state, dN, MAP_TUNING.nestEntdeckRadius)) {
+        const anz = nest.state.rest;
+        for (let i = 0; i < anz; i++) {
+          const a = (i / anz) * Math.PI * 2;
+          const g = spawnNestGegner(nest.id, nest.pos.x + Math.cos(a) * 6, nest.pos.z + Math.sin(a) * 6);
+          roster.push(g); spawnTimes.set(g.id, runClock);
+        }
+        showToast('⚠ Nest geweckt!', '#ff9f43');
       }
     }
 

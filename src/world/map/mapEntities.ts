@@ -50,5 +50,6 @@ export type CollectibleEffekt =
 
 export function sammleCollectible(effekt: string): CollectibleEffekt {
   if (effekt === 'heal') return { art: 'heal', menge: MAP_TUNING.collectibleHeal };
+  if (effekt === 'leben') return { art: 'heal', menge: MAP_TUNING.nestLebenProDrop }; // Nest-Belohnung (HP, nie Impuls)
   return { art: 'toy', toy: effekt };
 }
