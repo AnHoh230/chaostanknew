@@ -37,6 +37,7 @@ export function createGroundTiles(scene: Scene, blocks: readonly BlockRect[]): G
     t.wrapV = Texture.WRAP_ADDRESSMODE;
     t.uScale = Math.max(1, Math.round(b.w / TILE_WORLD));
     t.vScale = Math.max(1, Math.round(b.h / TILE_WORLD));
+    t.anisotropicFilteringLevel = 16; // scharf bis in die Tiefe bei flacher Kamera (s. ground.ts)
     m.diffuseTexture = t;
 
     // Organische Kanten-Maske -> kein hartes Rechteck, sondern ein weicher ausgefranster Fleck.

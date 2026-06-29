@@ -63,6 +63,7 @@ export function createRoadMesh(
       m = new StandardMaterial('road_' + kind, scene);
       const t = new Texture(ROAD_TILE[kind], scene);
       t.hasAlpha = true; // Schutt-Rand ist transparent -> Boden scheint durch (organisch)
+      t.anisotropicFilteringLevel = 16; // scharf bis in die Tiefe bei flacher Kamera (s. ground.ts)
       if (FLIP_V) t.vScale = -1;
       m.diffuseTexture = t;
       m.useAlphaFromDiffuseTexture = true;
