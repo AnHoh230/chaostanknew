@@ -241,16 +241,16 @@ function baueDecalMesh(scene: Scene, def: AssetDef, name: string, cache: MatCach
 }
 
 /**
- * Baut das (gemergte) Prop-Mesh. matCache wird vom Loader pro Kartenladung geteilt,
- * damit gleichfarbige Teile dasselbe Material nutzen (wenig Shader-Wechsel).
+ * Baut die EINZELTEILE eines Props (positioniert, Material aus dem matCache), UNGEMERGT.
+ * Erlaubt dem Loader, die Teile vieler statischer Props NACH MATERIAL zusammenzufassen — ein
+ * Draw-Call je Material statt je Prop-Submesh. Nur Primitiv-Props; Decals laufen über baueDecalMesh.
  */
-export function baueAssetMesh(scene: Scene, def: AssetDef, name: string, matCache: MatCache = new Map()): Mesh {
-  if (def.textur) return baueDecalMesh(scene, def, name, matCache);
+export function baueAssetTeile(scene: Scene, def: AssetDef, matCache: MatCache): Mesh[] {
   const parts: Mesh[] = [];
   const ctx: Ctx = {
     base: def.mesh.color,
     add(nm, form, size, pos, color, opt): void {
-      const m = prim(scene, name + '_' + nm, form, size, opt);
+      const m = prim(scene, def.id + '_' + nm, form, size, opt);
       m.material = mat(scene, matCache, color, opt?.emissive);
       m.position.set(pos[0], pos[1], pos[2]);
       if (opt?.rotX) m.rotation.x = opt.rotX;
@@ -260,7 +260,6 @@ export function baueAssetMesh(scene: Scene, def: AssetDef, name: string, matCach
       parts.push(m);
     },
   };
-
   const bau = BAUART[def.id];
   if (bau) bau(ctx);
   else {
@@ -269,9 +268,19 @@ export function baueAssetMesh(scene: Scene, def: AssetDef, name: string, matCach
     const form: Form = def.mesh.form === 'cylinder' ? 'cyl' : (def.mesh.form as Form);
     ctx.add('x', form, [s.x, s.y, s.z], [0, 0, 0], def.mesh.color);
   }
+  return parts;
+}
 
-  const merged = parts.length === 1 ? parts[0] : Mesh.MergeMeshes(parts, true, true, undefined, false, true);
-  const root = merged ?? parts[0];
+/**
+ * Baut EIN (gemergtes, multi-material) Prop-Mesh — für INTERAKTIVE Props (breakable/collectible/
+ * hazard/Rampe/Insel), die einzeln gezeigt/versteckt/animiert werden. Statische Props batcht der
+ * Loader stattdessen über baueAssetTeile nach Material. matCache teilt gleichfarbige Materialien.
+ */
+export function baueAssetMesh(scene: Scene, def: AssetDef, name: string, matCache: MatCache = new Map()): Mesh {
+  if (def.textur) return baueDecalMesh(scene, def, name, matCache);
+  const parts = baueAssetTeile(scene, def, matCache);
+  const merged = parts.length === 1 ? parts[0]! : Mesh.MergeMeshes(parts, true, true, undefined, false, true);
+  const root = merged ?? parts[0]!;
   root.name = name;
   root.isPickable = false;
   return root;
