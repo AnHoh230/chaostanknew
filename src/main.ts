@@ -9,6 +9,7 @@ import { registerBiome, getBiome } from './world/biomeRegistry';
 import { createEndlessGround } from './world/ground';
 import { createArenaBoundary, type ArenaBoundary } from './world/arenaBoundary';
 import { ladeKarte } from './world/map/loader';
+import { createMessages } from './ui/messages';
 import { generiereStadt, type StadtOpt, type BlockRect } from './world/map/cityGen';
 import { STANDARD_CAPS } from './world/map/moduleCaps';
 import { MODUL_KATALOG } from './world/map/moduleKatalog';
@@ -793,7 +794,7 @@ function boot(build: BuildFolge): void {
       comboLog = comboLog.filter((c) => runClock - c.t <= 8);
       if (new Set(comboLog.map((c) => c.id)).size >= 2 && !blueprint.besessen.includes('systembruch')) {
         blueprint.besessen.push('systembruch');
-        showToast('⚡ KOMBO — Systembruch-Bauplan freigeschaltet!', '#ff6ec7');
+        showTeach('⚡ KOMBO — Systembruch-Bauplan freigeschaltet!', '#ff6ec7');
       }
     }
     return true;
@@ -1015,7 +1016,7 @@ function boot(build: BuildFolge): void {
         if (e.typeId !== 'swarm') spawnImpulseOrb(e.combatant.x, e.combatant.z, ACTIVE_CORE, e.typeId === 'bunker' ? 8 : 4); // Kill droppt Impuls (Schwarm = Futter, gibt keinen); KEINE Spieler-Schonfrist auf Gegner-Drops
         const up = progression.addXp(Math.round(18 + (e.combatant.lootValue ?? 0.4) * 60));
         if (up.gained > 0) {
-          if (up.newMkUnlocks.length) showToast(`MK${up.newMkUnlocks[up.newMkUnlocks.length - 1]} frei!`, '#9be36b');
+          if (up.newMkUnlocks.length) showTeach(`MK${up.newMkUnlocks[up.newMkUnlocks.length - 1]} frei!`, '#9be36b');
           onLevelUp(up.gained); // pro gewonnenem Level eine Boni-Auswahl (Welt pausiert)
         }
       }
@@ -1925,6 +1926,20 @@ function boot(build: BuildFolge): void {
     updateMetricsHud();
   });
 
+  // [L] — Meldungs-Log zum Nachlesen öffnen/schließen. Pausiert die Welt wie Inspect/Skill
+  // (simSpeed 0, beim Schließen wiederhergestellt), damit man verpasste Hinweise in Ruhe liest.
+  let logPrevSpeed = 1;
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key === 'l' || ev.key === 'L') {
+      if (inspecting || skillOpen) return; // andere Pause-Panels haben Vorrang
+      if (messages.toggleLog()) { logPrevSpeed = clock.simSpeed; clock.simSpeed = 0; }
+      else clock.simSpeed = logPrevSpeed;
+    } else if (ev.key === 'Escape' && messages.isLogOpen()) {
+      messages.closeLog();
+      clock.simSpeed = logPrevSpeed;
+    }
+  });
+
   // [V] — Grundtyp-Verb (die manuelle Phase-4-Schicht).
   window.addEventListener('keydown', (ev) => { if (ev.key === 'v' || ev.key === 'V') grundtypVerb(); });
 
@@ -1934,22 +1949,15 @@ function boot(build: BuildFolge): void {
       if (!pendingBauplan) return;
       const alt = blueprint.besessen[0];
       const ok = nimmBauplan(blueprint, pendingBauplan) || (alt != null && ersetzeBauplan(blueprint, alt, pendingBauplan));
-      if (ok) { markMeilenstein(telemetry, 'ersterBauplan'); showToast(`📜 genommen: ${finisherDef(pendingBauplan).name}`, '#b794f4'); }
+      if (ok) { markMeilenstein(telemetry, 'ersterBauplan'); showTeach(`📜 genommen: ${finisherDef(pendingBauplan).name}`, '#b794f4'); }
       pendingBauplan = null;
     } else if (ev.key === 'n' || ev.key === 'N') {
-      if (pendingBauplan) { showToast('Bauplan verworfen — warten', '#888'); pendingBauplan = null; }
+      if (pendingBauplan) { showTeach('Bauplan verworfen — warten', '#888'); pendingBauplan = null; }
     }
   });
 
-  // Toast: kurze Einblendung (Level-Up etc.).
-  const toast = document.createElement('div');
-  toast.id = 'loot-toast';
-  toast.className = 'hud-bc'; // UI-Scale: unten-zentriert über dem Munitions-HUD
-  toast.style.cssText =
-    'position:fixed;left:50%;bottom:calc(64px * var(--ui-scale));z-index:22;pointer-events:none;' +
-    'font:700 16px system-ui,sans-serif;color:#ffe08a;background:rgba(8,10,12,0.72);' +
-    'padding:8px 16px;border-radius:8px;opacity:0;transition:opacity 0.2s;text-shadow:0 1px 3px #000;';
-  document.body.appendChild(toast);
+  // Meldungen: flüchtiges Feedback (Toast-Stapel) + Lern-/Freischalt-Banner + [L]-Nachlese-Log.
+  const messages = createMessages();
   // Munitions-/Nachlade-Anzeige (Garten): Punkte = Schüsse, sonst Nachlade-Countdown.
   const ammoHud = document.createElement('div');
   ammoHud.id = 'ammo-hud';
@@ -1967,11 +1975,14 @@ function boot(build: BuildFolge): void {
     'position:fixed;left:50%;bottom:calc(92px * var(--ui-scale));z-index:21;pointer-events:none;' +
     'font:800 17px system-ui,sans-serif;text-shadow:0 1px 4px #000;letter-spacing:0.5px;white-space:nowrap;display:none;';
   document.body.appendChild(befehlHud);
+  // Bestehende Aufrufer bleiben unverändert (flüchtiger Toast); showTeach hebt eine Meldung
+  // zum Lern-/Freischalt-Banner an (länger, prominent, oben-zentriert). hold=true hält das
+  // Banner bis zum nächsten Banner stehen — z. B. der [B]/[N]-Bauplan-Entscheid.
   function showToast(msg: string, color = '#ffe08a'): void {
-    toast.textContent = msg;
-    toast.style.color = color;
-    toast.style.opacity = '1';
-    setTimeout(() => (toast.style.opacity = '0'), 1600);
+    messages.toast(msg, color);
+  }
+  function showTeach(msg: string, color = '#ffe08a', hold = false): void {
+    messages.toast(msg, color, { tier: 'teach', hold });
   }
 
   // Spieler-Respawn: bei 0 HP nicht „tot weiterballern", sondern neu aufbauen —
@@ -2313,7 +2324,7 @@ function boot(build: BuildFolge): void {
         dominantChannel: ACTIVE_CORE,
       });
       if (evoUnlock) {
-        showToast(istZustand && evoUnlock.channelId === ACTIVE_CORE
+        showTeach(istZustand && evoUnlock.channelId === ACTIVE_CORE
           ? `🦠 STUFE ${evoUnlock.stage} · ${BUILD_STUFE_NAME[Math.min(evoUnlock.stage, BUILD_STUFE_NAME.length - 1)]}`
           : `STUFE ${evoUnlock.stage} · ${CHANNEL_DISPLAY[evoUnlock.channelId].displayName}`);
         alog.log('evolution', { ch: evoUnlock.channelId, stage: evoUnlock.stage, t: +runClock.toFixed(1) });
@@ -2336,12 +2347,12 @@ function boot(build: BuildFolge): void {
         const stufe3 = evo.unlockedStagesByChannel[ACTIVE_CORE] >= 3; // 3. Build-Stufe (BBB/ZZZ/RRR) erreicht
         if (stufe3 && skillbaumVoll()) {
           // Skillbaum komplett → der Überlauf speist die Kompass-Konsole (Spec 0 Verdauungskette).
-          if (!kompass.freigeschaltet) { kompassFreischalten(kompass); markMeilenstein(telemetry, 'kompassFrei'); showToast('🧭 KOMPASS frei — lenke mit [1][2][3]', '#4dabf7'); }
+          if (!kompass.freigeschaltet) { kompassFreischalten(kompass); markMeilenstein(telemetry, 'kompassFrei'); showTeach('🧭 KOMPASS frei — lenke mit [1][2][3]', '#4dabf7'); }
           if (phasen.verhaertet.finisher) autoLenke(); // E: nach Phase 3 lenkt der Kompass selbst
           speiseImpuls(kompass, effektiverImpuls(o.points, telemetry.ewmaRaw, IMPULS_MODUS));
         } else if (stufe3 && (!MASTERY_GATE_HARD || buildGemeistert(pol, mastery))) {
           skillProgress += o.points;
-          while (skillProgress >= PUNKT_KOSTEN) { skillProgress -= PUNKT_KOSTEN; (istZustand ? skill : istRaum ? raumSkill : befehlSkill).punkte += 1; showToast('✦ Skillpunkt frei — [T]'); }
+          while (skillProgress >= PUNKT_KOSTEN) { skillProgress -= PUNKT_KOSTEN; (istZustand ? skill : istRaum ? raumSkill : befehlSkill).punkte += 1; showTeach('✦ Skillpunkt frei — [T]'); }
         }
         o.mesh.dispose(); orbs.splice(i, 1); continue;
       }
@@ -2357,7 +2368,7 @@ function boot(build: BuildFolge): void {
     // Häutung 1 = Build + Skillbaum (Ult + Talente) als EINE Haut: verhärtet erst bei skillbaumVoll(),
     // sonst hat man beim Skillpunkte-Sammeln nichts zu tun. Befehl bekommt KEIN Build-Auto-Feuer — seine
     // Auto-Schuss-Schicht IST die kommando-Ult (Spec 7 §6/§8). Bei Verhärtung: Build-Verb (Raum/Zustand) + Ult auto.
-    if (skillbaumVoll() && verhaerte(phasen, 'build')) { verhaerte(phasen, 'ult'); showToast('🤖 Haut verhärtet — Build + Ult laufen selbst', '#8bd5ff'); }
+    if (skillbaumVoll() && verhaerte(phasen, 'build')) { verhaerte(phasen, 'ult'); showTeach('🤖 Haut verhärtet — Build + Ult laufen selbst', '#8bd5ff'); }
     if (buildGemeistert(pol, mastery)) markMeilenstein(telemetry, 'buildMastery'); // Spec 7 Gate 8
     if (phasen.verhaertet.ult && ultCd <= 0 && ultActive <= 0) ausloeseUlt(); // Q automatisch
     // Spec 7 §6 — Build-Verhärtung SICHER: Befehl hat KEIN Build-Auto-Feuer (nur die kommando-Ult feuert auto).
@@ -2388,31 +2399,31 @@ function boot(build: BuildFolge): void {
       if (finisherTick <= 0) {
         finisherTick = AUTO_FIRE_EVALUATION_SECONDS;
         const neuGeschmiedet = schmiede(finisher, gemaxtePole(kompass), blueprint.besessen);
-        for (const id of neuGeschmiedet) showToast(`🔨 Finisher bereit: ${finisherDef(id).name}`, '#ffd166');
+        for (const id of neuGeschmiedet) showTeach(`🔨 Finisher bereit: ${finisherDef(id).name}`, '#ffd166');
         if (neuGeschmiedet.length) markMeilenstein(telemetry, 'ersterFinisher');
         const gm = gemaxtePole(kompass);
         if (gm.length >= 1) markMeilenstein(telemetry, 'polLvl5');
         if (gm.length >= 2) markMeilenstein(telemetry, 'paarMax');
-        if (finisher.aktiv.some((id) => istVerhaertet(finisher, id))) { markMeilenstein(telemetry, 'finisherVerhaertet'); if (verhaerte(phasen, 'finisher')) showToast('🧭 Kompass lenkt jetzt selbst', '#4dabf7'); }
+        if (finisher.aktiv.some((id) => istVerhaertet(finisher, id))) { markMeilenstein(telemetry, 'finisherVerhaertet'); if (verhaerte(phasen, 'finisher')) showTeach('🧭 Kompass lenkt jetzt selbst', '#4dabf7'); }
         blueprintOfferTimer += AUTO_FIRE_EVALUATION_SECONDS;
         if (!pendingBauplan && (mussErstenErzwingen(blueprint) || mussRelevantenErzwingen(blueprint) || blueprintOfferTimer >= 25)) {
           blueprintOfferTimer = 0;
           const lv = { befehl: kompass.pole.befehl.level, raum: kompass.pole.raum.level, zustand: kompass.pole.zustand.level };
           const angebot = zieheBauplan(blueprint, lv, Math.random);
-          if (angebot) { pendingBauplan = angebot.id; showToast(`📜 Bauplan-Fund: ${finisherDef(angebot.id).name} — [B] nehmen / [N] warten`, '#b794f4'); }
+          if (angebot) { pendingBauplan = angebot.id; showTeach(`📜 Bauplan-Fund: ${finisherDef(angebot.id).name} — [B] nehmen / [N] warten`, '#b794f4', true); }
         }
         const auto = naechsterAutoFinisher(finisher, kompass, gegnerBoard(), true); // nur verhärtete
         if (auto) zuendeFinisher(auto);
         // Spieler-Evolution: gemeistertes Pol-Paar → Grundtyp (sticky)
         const neuTyp = evolviere(spielerEvo, kompass, finisher, pol);
-        if (neuTyp !== grundTyp) { grundTyp = neuTyp; markMeilenstein(telemetry, 'evolution'); setGrundVisual(neuTyp); showToast(`⭐ EVOLUTION — du bist jetzt ${GRUND_LABEL[neuTyp]}!`, GRUND_FARBE[neuTyp]); }
+        if (neuTyp !== grundTyp) { grundTyp = neuTyp; markMeilenstein(telemetry, 'evolution'); setGrundVisual(neuTyp); showTeach(`⭐ EVOLUTION — du bist jetzt ${GRUND_LABEL[neuTyp]}!`, GRUND_FARBE[neuTyp]); }
         // Fusion/Systemform-Stufe (Spec 4/5 §11)
         const fs = fusionStufe(spielerEvo, kompass, finisher);
         if (fs !== fusionStufeNow) {
           fusionStufeNow = fs;
-          if (fs === 'preview') { markMeilenstein(telemetry, 'fusionPreview'); showToast('🌀 Fusion beginnt — die Pole bluten ineinander', '#ff6ec7'); }
-          else if (fs === 'phase') { markMeilenstein(telemetry, 'fusionPhase'); showToast('🌀 Fusion-Phase — Hybrid-Verben', '#ff6ec7'); }
-          else if (fs === 'systemform') { markMeilenstein(telemetry, 'systemform'); grundTyp = 'systemform'; setGrundVisual('systemform'); showToast('✷ SYSTEMFORM — du biegst die Regeln der Arena!', '#ff6ec7'); }
+          if (fs === 'preview') { markMeilenstein(telemetry, 'fusionPreview'); showTeach('🌀 Fusion beginnt — die Pole bluten ineinander', '#ff6ec7'); }
+          else if (fs === 'phase') { markMeilenstein(telemetry, 'fusionPhase'); showTeach('🌀 Fusion-Phase — Hybrid-Verben', '#ff6ec7'); }
+          else if (fs === 'systemform') { markMeilenstein(telemetry, 'systemform'); grundTyp = 'systemform'; setGrundVisual('systemform'); showTeach('✷ SYSTEMFORM — du biegst die Regeln der Arena!', '#ff6ec7'); }
         }
         // C (Spec 4 §2 / Spec 7 §10) — Fusion: Pole bluten ineinander, Seuche aber nur auf UNINFIZIERTE (kein Reset).
         if (fusionStufeNow !== 'keine') {
@@ -3193,6 +3204,8 @@ function boot(build: BuildFolge): void {
       const visible = projectileView.visibleCount();
       log.debug('pool state', { active, visible, match: active === visible });
     }
+
+    messages.update(realDt); // Toasts/Banner in Echtzeit ausblenden (bei Pause ist realDt 0 → eingefroren)
   });
   log.info('loop running');
 
