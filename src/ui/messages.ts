@@ -18,10 +18,10 @@
  * realDt). Bei Pause (simSpeed 0 → dt 0) frieren Toasts/Banner ein, statt unter
  * einem offenen Panel davonzulaufen.
  */
-export type MsgTier = 'feedback' | 'teach';
+export type MsgTier = 'feedback' | 'mini' | 'teach';
 
 export interface Messages {
-  /** Meldung zeigen. tier 'teach' → Banner (+ optional hold); sonst Feedback-Toast. Immer geloggt. */
+  /** Meldung zeigen. tier 'teach' → Banner (+ optional hold); 'mini' → kleiner dezenter Toast; sonst Feedback-Toast. Immer geloggt. */
   toast(msg: string, color?: string, opts?: { tier?: MsgTier; hold?: boolean }): void;
   toggleLog(): boolean; // neuer Offen-Zustand
   closeLog(): void;
@@ -40,9 +40,9 @@ const FADE_MS = 350; // muss zur CSS-opacity-transition unten passen
  * Funktion → testbar ohne DOM.
  */
 export function durationFor(len: number, tier: MsgTier): number {
-  return tier === 'teach'
-    ? Math.min(8.5, Math.max(4.5, 3.5 + len * 0.06))
-    : Math.min(4.5, Math.max(2.2, 1.6 + len * 0.05));
+  if (tier === 'teach') return Math.min(8.5, Math.max(4.5, 3.5 + len * 0.06));
+  if (tier === 'mini') return Math.min(2.6, Math.max(1.3, 1.0 + len * 0.04)); // dezenter Status-Toast: flüchtiger als feedback
+  return Math.min(4.5, Math.max(2.2, 1.6 + len * 0.05));
 }
 
 function escapeHtml(s: string): string {
@@ -139,27 +139,30 @@ export function createMessages(): Messages {
     bannerLife = hold ? Infinity : durationFor(msg.length, 'teach');
   }
 
-  function showFeedback(msg: string, color: string): void {
+  function showFeedback(msg: string, color: string, mini = false): void {
     if (live.length >= MAX_TOASTS) {
       const old = live.shift()!; // ältesten sichtbaren früh wegnehmen, damit der Stapel atmet
       old.el.remove();
     }
     const el = document.createElement('div');
-    el.style.cssText =
-      `font:700 19px system-ui,sans-serif;color:${color};background:rgba(8,10,12,0.8);` +
-      'padding:7px 16px;border-radius:8px;text-align:center;text-shadow:0 1px 3px #000;' +
-      'opacity:0;transition:opacity 0.3s;';
+    // 'mini' = dezenter Status-Toast (kleinere Schrift, gedämpft) — für häufige Buff-Quittungen wie die Ernte,
+    // damit der Stapel beim Dauer-Ernten nicht mit großen Toasts zugespammt wird.
+    el.style.cssText = mini
+      ? `font:600 13px system-ui,sans-serif;color:${color};background:rgba(8,10,12,0.55);` +
+        'padding:2px 9px;border-radius:6px;text-align:center;text-shadow:0 1px 2px #000;opacity:0;transition:opacity 0.3s;'
+      : `font:700 19px system-ui,sans-serif;color:${color};background:rgba(8,10,12,0.8);` +
+        'padding:7px 16px;border-radius:8px;text-align:center;text-shadow:0 1px 3px #000;opacity:0;transition:opacity 0.3s;';
     el.textContent = msg;
     stack.appendChild(el); // neuester landet unten im Stapel (flex column)
     requestAnimationFrame(() => (el.style.opacity = '1')); // im Folgeframe einblenden → Transition greift
-    live.push({ el, life: durationFor(msg.length, 'feedback') });
+    live.push({ el, life: durationFor(msg.length, mini ? 'mini' : 'feedback') });
   }
 
   function toast(msg: string, color = '#ffe08a', opts?: { tier?: MsgTier; hold?: boolean }): void {
     const tier = opts?.tier ?? 'feedback';
     pushLog(msg, color, tier);
     if (tier === 'teach') showBanner(msg, color, opts?.hold ?? false);
-    else showFeedback(msg, color);
+    else showFeedback(msg, color, tier === 'mini');
     if (tier === 'teach' && !taughtLog) {
       taughtLog = true; // beim ersten Lern-Banner den neuen Nachlese-Kanal selbst beibringen
       showFeedback('📜 [L] öffnet das Meldungs-Log zum Nachlesen', '#9be36b');

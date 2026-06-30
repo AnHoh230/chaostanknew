@@ -15,6 +15,12 @@ describe('durationFor — längen-gekoppelte Anzeigedauer', () => {
     expect(durationFor(40, 'teach')).toBeGreaterThan(durationFor(40, 'feedback'));
   });
 
+  it('mini ist auf [1.3 .. 2.6] s geclampt und flüchtiger als feedback', () => {
+    expect(durationFor(0, 'mini')).toBe(1.3);
+    expect(durationFor(500, 'mini')).toBe(2.6);
+    expect(durationFor(40, 'mini')).toBeLessThan(durationFor(40, 'feedback')); // dezenter Status-Toast verschwindet schneller
+  });
+
   it('wächst monoton mit der Länge (vor dem Clamp)', () => {
     expect(durationFor(20, 'feedback')).toBeGreaterThan(durationFor(5, 'feedback'));
     expect(durationFor(60, 'teach')).toBeGreaterThan(durationFor(20, 'teach'));

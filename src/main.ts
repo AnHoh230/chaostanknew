@@ -444,11 +444,6 @@ function boot(build: BuildFolge): void {
   const AMMO_MAX = 3;
   let reloadCd = 0;
   const RELOAD_TIME = 2.2, RELOAD_SPEED = 1.7; // Nachlade-Dauer (s) + Tempo-Faktor währenddessen
-  // Aktiv-Nachladen: die Schuss-Taste auf leeres Magazin löst das Nachladen aus (statt totem Klick) und
-  // belohnt das mit einem kurzen Feuerrate-Schub aufs frische Magazin. Greift build-übergreifend, weil jeder
-  // Schuss seinen Cooldown über fireRateMul rechnet; erscheint dezent als Buff-Chip (kein großer Toast).
-  let reloadBuffPending = false; // Aus-Leer-Nachladen → Buff bei Abschluss setzen
-  const RELOAD_BUFF_FIRERATE = 1.5, RELOAD_BUFF_TIME = 4;
   const SLOMO_SCALE = 0.2; // Welt-Zeit im Slomo (Bullet-Time beim Infizieren); Spieler-Feuertakt bleibt real
   let slomoTime = 3; // Slomo-Zeit-Budget pro Magazin (s) — sonst klebt man ewig im Slomo
   const SLOMO_TIME = 3;
@@ -552,7 +547,7 @@ function boot(build: BuildFolge): void {
         if (Math.hypot(o.combatant.x - e.combatant.x, o.combatant.z - e.combatant.z) <= AUSBRUCH_RADIUS) o.gift = saeGift(undefined, gartenCfg);
       }
     }
-    showToast(`🦠 ERNTESIEG — Erntefieber +${erntefieber}`);
+    showMini(`🦠 ERNTESIEG — Erntefieber +${erntefieber}`, '#9be36b'); // dezent: feuert bei JEDER Ernte, soll den Toast-Stapel nicht fluten
     alog.log('ernte', { fieber: erntefieber, t: +runClock.toFixed(1) });
   };
   let scopeApplied = false, savedShotRange = 40; // Übergangs-Zustand für den Scope
@@ -1556,15 +1551,13 @@ function boot(build: BuildFolge): void {
   });
 
   // Nachladen füllt die 3 Infektions-Schüsse wieder auf (CD; Tempo-Schub läuft solange = mobil). Auslöser:
-  // R (jederzeit) ODER die Schuss-Taste bei leerem Magazin (siehe fire()). Aus LEEREM Magazin wird der
-  // Belohnungs-Buff vorgemerkt, der bei Abschluss aufs frische Magazin greift.
+  // R (jederzeit) ODER die Schuss-Taste bei leerem Magazin (siehe fire()).
   function startReload(): void {
     if (!ARENA_MODE || reloadCd > 0 || !playerCombatant.alive) return;
     if (ammo >= maxAmmo() && slomoTime >= SLOMO_TIME) return; // schon randvoll
-    if (ammo <= 0) reloadBuffPending = true; // leergeschossen → Belohnung vormerken
     reloadCd = RELOAD_TIME;
     if (istBefehl) { entmarkiereAlle(); bruch(befehl); } // Nachladen verwirft die gesetzten Markierungen (+ laufende Kette; gehaltener Buff bleibt)
-    alog.log('reload', { t: +runClock.toFixed(1), leer: reloadBuffPending ? 1 : 0 });
+    alog.log('reload', { t: +runClock.toFixed(1) });
   }
   window.addEventListener('keydown', (ev) => {
     if (ev.key === 'r' || ev.key === 'R') startReload();
@@ -1998,6 +1991,9 @@ function boot(build: BuildFolge): void {
   function showTeach(msg: string, color = '#ffe08a', hold = false): void {
     messages.toast(msg, color, { tier: 'teach', hold });
   }
+  function showMini(msg: string, color = '#ffe08a'): void {
+    messages.toast(msg, color, { tier: 'mini' }); // dezenter Status-Toast für häufige Quittungen (z. B. Ernte-Buff)
+  }
 
   // Spieler-Respawn: bei 0 HP nicht „tot weiterballern", sondern neu aufbauen —
   // volle HP, an eine neue zufällige Position, mit kurzer Mercy-Unverwundbarkeit.
@@ -2154,7 +2150,7 @@ function boot(build: BuildFolge): void {
     if (slomoOn) { simDt = realDt * SLOMO_SCALE; if (!seucheSlomo) slomoTime = Math.max(0, slomoTime - realDt); }
     else if (ARENA_MODE && !scopeActive && slomoTime < SLOMO_TIME) slomoTime = Math.min(SLOMO_TIME, slomoTime + realDt * SLOMO_REGEN); // außerhalb des Scopes regeneriert das Budget
     // Nachladen (R) läuft in Echtzeit + Tempo-Schub (mobile Ausweich-Phase); füllt Munition UND Slomo-Zeit.
-    if (reloadCd > 0) { reloadCd -= realDt; if (reloadCd <= 0) { ammo = maxAmmo(); slomoTime = SLOMO_TIME; if (istBefehl && befehl.marks.length === 0) salveOffen = true; if (reloadBuffPending) { reloadBuffPending = false; playerBuffs.add({ id: 'nachgeladen', icon: '⟳', label: 'Frisch geladen', fireRateMul: RELOAD_BUFF_FIRERATE, duration: RELOAD_BUFF_TIME }); } } } // nach dem Nachladen wieder markierbar (Salve offen) + Aktiv-Nachlade-Buff aufs frische Magazin
+    if (reloadCd > 0) { reloadCd -= realDt; if (reloadCd <= 0) { ammo = maxAmmo(); slomoTime = SLOMO_TIME; if (istBefehl && befehl.marks.length === 0) salveOffen = true; } } // nach dem Nachladen wieder markierbar (Salve offen)
     // Ult-Timer (Echtzeit): aktiv runter → bei 0 in den Cooldown; danach Cooldown runter.
     if (ultActive > 0) {
       ultActive -= realDt;
@@ -2825,7 +2821,7 @@ function boot(build: BuildFolge): void {
             ernteFeldKill(raum);
             if (ultActive > 0) raum.buff += raumSkill.ranks.beute * RAUM_BEUTE_PRO_RANG; // Erntegier: während der Ult +Buffs je Kill
             floatNums.spawn(e.combatant.x, e.combatant.z, raum.buff, '#c77dff'); // sichtbare Ernte am Sterbeort (Buff-Zähler)
-            showToast(`▦ ERNTE — Felder +${raum.buff}`, '#c77dff');
+            showMini(`▦ ERNTE — Felder +${raum.buff}`, '#c77dff'); // dezent wie der Zustand-Erntefieber-Toast
           }
         }
       }
