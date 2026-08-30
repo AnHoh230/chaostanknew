@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { maskeFuer, tileFuer, type RoadKind } from './roadTopology';
+import { corridorRenderCells } from './roadMesh';
+import { createGridSpec } from './worldGrid';
+import type { RoutedCorridor } from './worldTypes';
 
 const M = (...dirs: number[]): number => dirs.reduce((m, d) => m | (1 << d), 0);
 // Welt-konforme Anschlüsse eines Tiles nach Rotation r (CW): d -> (d+r)%4.
@@ -47,5 +50,17 @@ describe('tileFuer', () => {
   it('isolierte Zelle (Maske 0) stürzt nicht ab', () => {
     expect(() => tileFuer(0)).not.toThrow();
     expect(tileFuer(0).rot).toBe(0);
+  });
+});
+
+describe('corridorRenderCells', () => {
+  it('leitet visuelle Strassenzellen aus Korridoren statt Generatorbesitz ab', () => {
+    const grid = createGridSpec(160, 128, 5);
+    const corridor: RoutedCorridor = {
+      id: 'c0', fromSiteId: 'a', toSiteId: 'b', width: 12,
+      cells: [64 * 160 + 80, 64 * 160 + 81, 64 * 160 + 82],
+      centerline: [],
+    };
+    expect(corridorRenderCells([corridor], grid)).toEqual(['80,64', '81,64', '82,64']);
   });
 });

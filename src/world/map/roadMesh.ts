@@ -18,6 +18,7 @@ import { MeshBuilder, StandardMaterial, Texture, Color3, Mesh } from '@babylonjs
 import type { Scene } from '@babylonjs/core';
 import { maskeFuer, tileFuer, type RoadKind } from './roadTopology';
 import { ROAD_TILE } from './tileAssets';
+import type { GridSpec, RoutedCorridor } from './worldTypes';
 
 const BASIS_ROT = 0; // globale Korrektur-Drehung (0..3)
 const FLIP_V = false; // Textur-V spiegeln
@@ -33,13 +34,33 @@ export interface RoadMeshHandle {
   dispose(): void;
 }
 
+export function corridorRenderCells(corridors: readonly RoutedCorridor[], grid: GridSpec): string[] {
+  const cells = new Set<number>();
+  corridors.forEach((corridor) => corridor.cells.forEach((cell) => {
+    if (cell >= 0 && cell < grid.cols * grid.rows) cells.add(cell);
+  }));
+  return [...cells]
+    .sort((a, b) => a - b)
+    .map((cell) => `${cell % grid.cols},${Math.floor(cell / grid.cols)}`);
+}
+
+export function createRoadMesh(scene: Scene, corridors: readonly RoutedCorridor[], grid: GridSpec): RoadMeshHandle;
+export function createRoadMesh(scene: Scene, roadZellen: readonly string[], cellSize: number, halfX: number, halfZ: number): RoadMeshHandle;
 export function createRoadMesh(
   scene: Scene,
-  roadZellen: readonly string[],
-  cellSize: number,
-  halfX: number,
-  halfZ: number,
+  corridorsOrCells: readonly RoutedCorridor[] | readonly string[],
+  gridOrCellSize: GridSpec | number,
+  legacyHalfX?: number,
+  legacyHalfZ?: number,
 ): RoadMeshHandle {
+  const usingGrid = typeof gridOrCellSize !== 'number';
+  const roadZellen = usingGrid
+    ? corridorRenderCells(corridorsOrCells as readonly RoutedCorridor[], gridOrCellSize)
+    : corridorsOrCells as readonly string[];
+  const cellSize = usingGrid ? gridOrCellSize.cellSize : gridOrCellSize;
+  const halfX = usingGrid ? gridOrCellSize.extents.halfX : legacyHalfX!;
+  const halfZ = usingGrid ? gridOrCellSize.extents.halfZ : legacyHalfZ!;
+  const centerOffset = usingGrid ? 0.5 : 0;
   if (roadZellen.length === 0) return { dispose() {} };
   const set = new Set(roadZellen);
 
@@ -50,7 +71,7 @@ export function createRoadMesh(
     const row = Number(key.slice(komma + 1));
     const { kind, rot } = tileFuer(maskeFuer(set, col, row));
     const tile = MeshBuilder.CreateGround('rt', { width: cellSize * QUAD, height: cellSize * QUAD }, scene);
-    tile.position.set(col * cellSize - halfX, Y, row * cellSize - halfZ);
+    tile.position.set((col + centerOffset) * cellSize - halfX, Y, (row + centerOffset) * cellSize - halfZ);
     tile.rotation.y = ((rot + BASIS_ROT + KIND_ROT[kind]) % 4) * (Math.PI / 2);
     tile.isPickable = false;
     proArt[kind].push(tile);
