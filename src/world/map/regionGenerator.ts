@@ -122,10 +122,10 @@ export function generateRegions(
   grid: GridSpec,
   _fields: WorldFields,
   potentials: DerivedPotentials,
+  active: ActiveBiomeSelection,
   dna: WorldDNA,
   rng: Rng,
 ): RegionMap {
-  const active = selectActiveBiomes(potentials);
   const targetRegionCount = Math.max(active.biomes.length, Math.round(8 + (3 - 8) * dna.targetRegionScale));
   const biomeCounts = Object.fromEntries(active.biomes.map((biome) => [biome, 1])) as Partial<Record<SpecialBiome, number>>;
   const seedBiomes = [...active.biomes];

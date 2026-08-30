@@ -25,7 +25,8 @@ function generateRegionFixture(seed: number) {
   const dna = generateWorldDNA(seed);
   const macro = generateMacroStructure(dna, grid, createSeedStream(seed, 'macro'));
   const fields = generateWorldFields(dna, macro, grid, createSeedStream(seed, 'fields'));
-  return generateRegions(grid, fields, derivePotentials(fields), dna, createSeedStream(seed, 'regions'));
+  const potentials = derivePotentials(fields);
+  return generateRegions(grid, fields, potentials, selectActiveBiomes(potentials), dna, createSeedStream(seed, 'regions'));
 }
 
 describe('regionGenerator', () => {

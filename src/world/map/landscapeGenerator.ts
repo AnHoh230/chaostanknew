@@ -260,7 +260,7 @@ export function emitIsland(
       grid,
       cells: discCells(grid, anchor, base * 0.9),
       clearance: base * 0.35,
-      allowedRoles: ['clearing-anchor'],
+      allowedRoles: pattern.role === 'clearing-anchor' ? ['clearing-anchor'] : ['clearing-anchor', pattern.role],
     }],
   };
 }

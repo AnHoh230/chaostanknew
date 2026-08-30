@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { generateMacroStructure } from './macroStructure';
-import { generateRegions } from './regionGenerator';
+import { generateRegions, selectActiveBiomes } from './regionGenerator';
 import { createSeedStream } from './seedStreams';
 import { generateSites } from './siteGenerator';
 import { cellAtWorld, createGridSpec } from './worldGrid';
@@ -12,7 +12,8 @@ function generateSiteFixture(seed: number) {
   const dna = generateWorldDNA(seed);
   const macro = generateMacroStructure(dna, grid, createSeedStream(seed, 'macro'));
   const fields = generateWorldFields(dna, macro, grid, createSeedStream(seed, 'fields'));
-  const regions = generateRegions(grid, fields, derivePotentials(fields), dna, createSeedStream(seed, 'regions'));
+  const potentials = derivePotentials(fields);
+  const regions = generateRegions(grid, fields, potentials, selectActiveBiomes(potentials), dna, createSeedStream(seed, 'regions'));
   return { grid, regions, sites: generateSites(grid, fields, regions, dna, createSeedStream(seed, 'sites')) };
 }
 
