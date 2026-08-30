@@ -1,6 +1,8 @@
 import type { RuntimeKarte } from './runtimeMap';
 import type { BiomeId } from './worldTypes';
 
+export { buildCellSurfaceGeometry } from './styleSurfaceGeometry';
+
 export interface RegionMeshData {
   positions: number[];
   normals: number[];

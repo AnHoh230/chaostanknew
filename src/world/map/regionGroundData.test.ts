@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildRegionGroundData } from './regionGroundData';
+import * as regionGroundDataModule from './regionGroundData';
 import type { RuntimeKarte } from './runtimeMap';
 
 function runtimeFixture(): RuntimeKarte {
@@ -21,6 +22,11 @@ function runtimeFixture(): RuntimeKarte {
 }
 
 describe('regionGroundData', () => {
+  it('stellt die reine StyleKit-Surface-Geometrie bereit', () => {
+    const exported = regionGroundDataModule as unknown as Record<string, unknown>;
+    expect(exported.buildCellSurfaceGeometry).toBeTypeOf('function');
+  });
+
   it('baut pro Biom ein indiziertes Quadset ohne fehlende Zellen', () => {
     const data = buildRegionGroundData(runtimeFixture());
     expect(Object.values(data).reduce((sum, entry) => sum + entry.cellCount, 0)).toBe(12);

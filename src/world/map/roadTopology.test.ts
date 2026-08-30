@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { NullEngine, Scene } from '@babylonjs/core';
 import { maskeFuer, tileFuer, type RoadKind } from './roadTopology';
 import { corridorRenderCells, createRoadMesh } from './roadMesh';
+import * as roadTopologyModule from './roadTopology';
 import { createGridSpec } from './worldGrid';
 import type { RoutedCorridor } from './worldTypes';
 
@@ -55,6 +56,11 @@ describe('tileFuer', () => {
 });
 
 describe('corridorRenderCells', () => {
+  it('stellt die reine StyleKit-Ribbon-Geometrie bereit', () => {
+    const exported = roadTopologyModule as unknown as Record<string, unknown>;
+    expect(exported.buildRoadRibbonGeometry).toBeTypeOf('function');
+  });
+
   it('leitet visuelle Strassenzellen aus Korridoren statt Generatorbesitz ab', () => {
     const grid = createGridSpec(160, 128, 5);
     const corridor: RoutedCorridor = {

@@ -12,6 +12,8 @@
  */
 export type RoadKind = 'gerade' | 'kurve' | 't' | 'kreuz' | 'ende';
 
+export { buildRoadRibbonGeometry } from './styleRoadGeometry';
+
 /** Kanonische Anschluss-Richtungen je Basis-Tile (vor Rotation), als Richtungs-Indizes. */
 const BASIS: Record<RoadKind, number[]> = {
   gerade: [0, 2], // N–S (verifiziert: road_gerade)
