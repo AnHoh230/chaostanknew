@@ -1,17 +1,22 @@
 import { describe, it, expect } from 'vitest';
 import { NullEngine, Scene } from '@babylonjs/core';
 import { ladeKarte } from './loader';
-import type { KartenDaten, MapEntity, EntityKind } from './mapTypes';
+import type { MapEntity, EntityKind } from './mapTypes';
+import type { RuntimeKarte } from './runtimeMap';
 
 function ent(id: string, kind: EntityKind, asset: string, x: number, z: number): MapEntity {
   return { id, kind, asset, pos: { x, z }, rotY: 0, scale: 1 };
 }
 
-function karte(entities: MapEntity[]): KartenDaten {
+function karte(entities: MapEntity[]): RuntimeKarte {
   return {
-    rezeptId: 'test', seed: 1, biomeId: 'steppe',
+    seed: 1,
     extents: { halfX: 400, halfZ: 320 }, spawn: { x: 0, z: 0 },
-    zones: [], paths: [], entities, valid: true, warnungen: [],
+    entities,
+    regionGrid: { cols: 1, rows: 1, cellSize: 10, extents: { halfX: 5, halfZ: 5 } },
+    traversalGrid: { cols: 2, rows: 2, cellSize: 5, extents: { halfX: 5, halfZ: 5 } },
+    regionCells: [{ cell: 0, biomeId: 'wasteland', regionId: 'r0' }],
+    corridors: [],
   };
 }
 

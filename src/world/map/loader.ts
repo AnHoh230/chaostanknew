@@ -23,7 +23,8 @@
  */
 import { TransformNode, Vector3, Mesh } from '@babylonjs/core';
 import type { Scene, StandardMaterial } from '@babylonjs/core';
-import type { KartenDaten, MapEntity } from './mapTypes';
+import type { MapEntity } from './mapTypes';
+import type { RuntimeKarte } from './runtimeMap';
 import { getAsset, type AssetDef } from './assetKit';
 import { baueAssetMesh, baueAssetTeile } from './mapMesh';
 import { createBreakable } from './mapEntities';
@@ -56,7 +57,7 @@ export interface MapHandle {
   dispose(): void;
 }
 
-export function ladeKarte(scene: Scene, daten: KartenDaten): MapHandle {
+export function ladeKarte(scene: Scene, daten: Pick<RuntimeKarte, 'entities'>): MapHandle {
   const root = new TransformNode('mapRoot', scene);
   const geladen: GeladeneEntity[] = [];
   const matCache = new Map<string, StandardMaterial>(); // gleichfarbige Teile teilen ein Material

@@ -3,7 +3,15 @@
  * Start als parametrische Platzhalter-Meshes (Form/Größe/Farbe) — echte Modelle später,
  * ohne Generator-Umbau. Registry-Muster analog biomeRegistry (lauter Fehler statt stiller Fallback).
  */
+import type { Rng } from '../../core/rng';
 import type { AssetId, ZoneTheme, Vec3 } from './mapTypes';
+import type {
+  BiomeId,
+  Footprint,
+  LandscapeFeature,
+  PlacementMode,
+  TraversalType,
+} from './worldTypes';
 
 export type AssetCategory = 'ground' | 'obstacle' | 'breakable' | 'hazard' | 'setpiece' | 'decor' | 'pickup';
 
@@ -12,6 +20,13 @@ export interface AssetDef {
   category: AssetCategory;
   footprint: number; // Radius für Abstands-/Kollisionsprüfung bei der Platzierung
   themes: ZoneTheme[]; // Kohärenz: in welchen Zonen passend
+  blockingShape: Footprint;
+  allowedBiomes: BiomeId[];
+  placementModes: PlacementMode[];
+  traversal: TraversalType;
+  clearance: number;
+  allowedRotations: 'any' | number[];
+  tags: string[];
   mesh: { form: 'box' | 'cylinder' | 'cone' | 'sphere'; size: Vec3; color: [number, number, number] };
   textur?: string; // flache Tile-Textur (Decal, URL in public/tiles) statt Primitiv-Mesh
   defaultParams?: Record<string, number | string | boolean>;
@@ -37,8 +52,54 @@ export function assetsByThemeCategory(theme: ZoneTheme, cat: AssetCategory): Ass
   return allAssets().filter((a) => a.category === cat && a.themes.includes(theme));
 }
 
+export function assertAssetFits(feature: LandscapeFeature, asset: AssetDef, scale = 1): void {
+  if (
+    asset.blockingShape.halfX * scale + asset.clearance > feature.footprint.halfX + 1e-9
+    || asset.blockingShape.halfZ * scale + asset.clearance > feature.footprint.halfZ + 1e-9
+  ) throw new Error('asset-envelope-exceeded');
+}
+
+export function resolveAsset(feature: LandscapeFeature, rng: Rng): AssetDef {
+  const candidates = allAssets()
+    .filter((asset) => asset.traversal === feature.traversal)
+    .filter((asset) => asset.allowedBiomes.includes(feature.biomeId))
+    .filter((asset) => asset.placementModes.includes(feature.placementMode))
+    .filter((asset) => {
+      try { assertAssetFits(feature, asset); return true; } catch { return false; }
+    })
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const preferredCategory: AssetCategory = feature.traversal === 'destructible'
+    ? 'breakable'
+    : feature.traversal === 'driveable'
+      ? 'decor'
+      : feature.role === 'landmark' ? 'setpiece' : 'obstacle';
+  const preferred = candidates.filter((asset) => asset.category === preferredCategory);
+  const pool = preferred.length > 0 ? preferred : candidates;
+  if (pool.length === 0) throw new Error(`no-fitting-asset:${feature.id}`);
+  return pool[rng.int(pool.length)]!;
+}
+
 // — Generisches Start-Kit (≥3 je Kategorie) —
 const ALLE: ZoneTheme[] = ['offenerHof', 'wrackCluster', 'pressWerk', 'funkturmZone'];
+const ALLE_BIOME: BiomeId[] = ['wasteland', 'scrap', 'industrial', 'mud', 'ruins', 'crater'];
+const ALLE_PLATZIERUNGEN: PlacementMode[] = ['single', 'cluster', 'line', 'border', 'site'];
+
+function biomesForThemes(themes: readonly ZoneTheme[]): BiomeId[] {
+  if (themes.includes('funkturmZone')) return [...ALLE_BIOME];
+  const result = new Set<BiomeId>();
+  for (const theme of themes) {
+    if (theme === 'offenerHof') ['wasteland', 'mud', 'crater'].forEach((biome) => result.add(biome as BiomeId));
+    if (theme === 'wrackCluster') ['scrap', 'ruins', 'wasteland'].forEach((biome) => result.add(biome as BiomeId));
+    if (theme === 'pressWerk') ['industrial', 'ruins'].forEach((biome) => result.add(biome as BiomeId));
+  }
+  return [...result];
+}
+
+function traversalForCategory(category: AssetCategory): TraversalType {
+  if (category === 'obstacle' || category === 'setpiece') return 'blocking';
+  if (category === 'breakable') return 'destructible';
+  return 'driveable';
+}
 
 function def(
   id: string,
@@ -51,7 +112,23 @@ function def(
   defaultParams?: Record<string, number | string | boolean>,
   textur?: string,
 ): AssetDef {
-  return { id, category, footprint, themes, mesh: { form, size, color }, defaultParams, textur };
+  const traversal = traversalForCategory(category);
+  return {
+    id,
+    category,
+    footprint,
+    themes,
+    blockingShape: { halfX: Math.max(0.1, size.x / 2), halfZ: Math.max(0.1, size.z / 2) },
+    allowedBiomes: biomesForThemes(themes),
+    placementModes: [...ALLE_PLATZIERUNGEN],
+    traversal,
+    clearance: traversal === 'blocking' ? 0.25 : traversal === 'destructible' ? 0.1 : 0,
+    allowedRotations: 'any',
+    tags: [category, form],
+    mesh: { form, size, color },
+    defaultParams,
+    textur,
+  };
 }
 
 [
