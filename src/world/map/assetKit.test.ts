@@ -29,7 +29,7 @@ describe('Asset-Kit (Phase 1)', () => {
 
   it('verwirft Assets, deren Blockierform die Feature-Huelle ueberragt', () => {
     const feature: LandscapeFeature = {
-      id: 'f', biomeId: 'industrial', regionId: 'r', shape: 'line', size: 'large',
+      id: 'f', demandClass: 'industrial.linearBarrier', biomeId: 'industrial', regionId: 'r', shape: 'line', size: 'large',
       traversal: 'blocking', role: 'border', placementMode: 'line',
       footprint: { halfX: 8, halfZ: 12 }, clearance: 0,
       position: { x: 0, z: 0 }, rotation: 0,

@@ -35,6 +35,7 @@ describe('worldValidator', () => {
       ...world,
       features: [...world.features, {
         id: 'illegal_blocker',
+        demandClass: 'wasteland.coverCluster' as const,
         biomeId: 'wasteland' as const,
         regionId: world.regions.regionByCell[0]!,
         shape: 'point' as const,
