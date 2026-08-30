@@ -70,6 +70,14 @@ export default defineConfig({
   // Reines Canvas-SPA ohne Client-Routing → './' ist hier die robusteste Wahl.
   base: './',
   plugins: [actionLogPlugin()],
+  build: {
+    rollupOptions: {
+      input: {
+        game: path.resolve(process.cwd(), 'index.html'),
+        assetLab: path.resolve(process.cwd(), 'asset-lab.html'),
+      },
+    },
+  },
   server: {
     open: false,
     port: 5174,

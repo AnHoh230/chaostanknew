@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ChaosTank AssetLab</title>
+    <style>
+      :root {
+        color: #e8ece8;
+        background: #111517;
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      html, body, #assetLabCanvas { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+      #assetLabCanvas { display: block; touch-action: none; outline: none; }
+      .panel {
+        position: fixed;
+        top: 18px;
+        left: 18px;
+        width: min(390px, calc(100vw - 36px));
+        padding: 16px;
+        border: 1px solid rgba(127, 188, 184, 0.34);
+        border-radius: 12px;
+        background: rgba(18, 23, 25, 0.94);
+        box-shadow: 0 16px 50px rgba(0, 0, 0, 0.35);
+        backdrop-filter: blur(12px);
+      }
+      h1 { margin: 0 0 4px; font-size: 18px; letter-spacing: 0.04em; }
+      .sub { color: #9eaaa8; font-size: 12px; margin-bottom: 14px; }
+      .badge {
+        display: inline-flex;
+        margin: 0 0 14px;
+        padding: 5px 8px;
+        border-radius: 999px;
+        color: #93d8d1;
+        background: rgba(61, 156, 165, 0.14);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      label { display: grid; gap: 5px; color: #aab4b2; font-size: 11px; }
+      .stepper { display: grid; grid-template-columns: 34px 1fr 34px; gap: 5px; }
+      button, input {
+        min-width: 0;
+        height: 34px;
+        border: 1px solid #3e4a4d;
+        border-radius: 7px;
+        color: #eef4f1;
+        background: #20272a;
+        font: inherit;
+      }
+      button { cursor: pointer; font-weight: 700; }
+      button:hover { border-color: #3d9ca5; background: #273235; }
+      input { width: 100%; padding: 0 8px; text-align: center; }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 7px;
+        margin: 14px 0 10px;
+      }
+      .stat { padding: 8px; border-radius: 7px; background: #171d1f; }
+      .stat b { display: block; color: #dce4df; font-size: 15px; }
+      .stat span { color: #889492; font-size: 10px; }
+      #scope { max-height: 130px; overflow: auto; color: #9da9a7; font: 11px/1.5 ui-monospace, monospace; }
+      #status { margin-top: 9px; color: #8f9b99; font-size: 11px; }
+      #status[data-state="error"] { color: #ff9d83; }
+      .hint { position: fixed; right: 18px; bottom: 16px; color: #84908e; font-size: 11px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="assetLabCanvas"></canvas>
+    <aside class="panel">
+      <h1>IRONWASTE ASSETLAB</h1>
+      <div class="sub">Generator → PlacementPlan → WorldStyleKit</div>
+      <div class="badge">Preview · keine Fallbacks</div>
+      <div class="controls">
+        <label>WORLD-SEED
+          <span class="stepper">
+            <button id="worldPrev" type="button">−</button>
+            <input id="worldSeed" type="number" step="1" />
+            <button id="worldNext" type="button">+</button>
+          </span>
+        </label>
+        <label>VISUAL-SEED
+          <span class="stepper">
+            <button id="visualPrev" type="button">−</button>
+            <input id="visualSeed" type="number" step="1" />
+            <button id="visualNext" type="button">+</button>
+          </span>
+        </label>
+      </div>
+      <div class="stats">
+        <div class="stat"><b id="renderedCount">–</b><span>Placements</span></div>
+        <div class="stat"><b id="classCount">–</b><span>Klassen sichtbar</span></div>
+        <div class="stat"><b id="omittedCount">–</b><span>bewusst ausgelassen</span></div>
+      </div>
+      <div id="scope"></div>
+      <div id="status">Initialisiere …</div>
+    </aside>
+    <div class="hint">Linke Maustaste: drehen · Mausrad: zoomen · rechte Maustaste: verschieben</div>
+    <script type="module" src="/src/assetLab.ts"></script>
+  </body>
+</html>

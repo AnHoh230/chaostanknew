@@ -43,4 +43,19 @@ describe('styleSurfaceGeometry', () => {
     expect(Math.max(...zs)).toBe(5);
     expect(geometry.indices).toHaveLength(6);
   });
+
+  it('wickelt Flaechen fuer die Babylon-Oberseite front-facing', () => {
+    const geometry = buildCellSurfaceGeometry(
+      { cols: 1, rows: 1, cellSize: 10, extents: { halfX: 5, halfZ: 5 } },
+      [0],
+      5,
+    );
+    const [a, b, c] = geometry.indices.slice(0, 3).map((index) => ({
+      x: geometry.positions[index! * 3]!,
+      z: geometry.positions[index! * 3 + 2]!,
+    }));
+    const windingY = (b!.z - a!.z) * (c!.x - a!.x) - (b!.x - a!.x) * (c!.z - a!.z);
+
+    expect(windingY).toBeLessThan(0);
+  });
 });

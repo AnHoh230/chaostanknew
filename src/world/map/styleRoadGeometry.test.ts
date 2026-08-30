@@ -51,4 +51,15 @@ describe('styleRoadGeometry', () => {
     expect(geometry.indices).toHaveLength(12 * 3);
     expect(geometry.positions.slice(0, 3)).toEqual([3, 0, -2]);
   });
+
+  it('wickelt das Ribbon wie die sichtbare Oberseite seiner Endkappe', () => {
+    const ribbon = buildRoadRibbonGeometry([{ x: 0, z: 0 }, { x: 10, z: 0 }], 6, 5);
+    const [a, b, c] = ribbon.indices.slice(0, 3).map((index) => ({
+      x: ribbon.positions[index! * 3]!,
+      z: ribbon.positions[index! * 3 + 2]!,
+    }));
+    const windingY = (b!.z - a!.z) * (c!.x - a!.x) - (b!.x - a!.x) * (c!.z - a!.z);
+
+    expect(windingY).toBeLessThan(0);
+  });
 });

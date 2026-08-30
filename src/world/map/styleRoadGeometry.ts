@@ -80,7 +80,7 @@ export function buildRoadRibbonGeometry(
     geometry.uvs.push(0, travelled / uvScale, 1, travelled / uvScale);
     if (index > 0) {
       const base = (index - 1) * 2;
-      geometry.indices.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
+      geometry.indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
     }
   }
   return geometry;

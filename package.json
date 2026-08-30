@@ -11,6 +11,7 @@
     "assets:catalog": "vite-node tools/exportAssetCatalog.ts",
     "assets:audit": "vite-node tools/auditAssetSeeds.ts",
     "assets:preview": "vite-node tools/renderIronwasteSeedBoard.ts",
+    "assets:lab": "vite --open /asset-lab.html",
     "assets:generate": "npm run assets:catalog && node tools/generateIronwasteAssets.mjs && npm run assets:preview",
     "assets:verify": "node tools/verifyIronwasteAssets.mjs",
     "assets:approve": "node tools/verifyIronwasteAssets.mjs --approve"

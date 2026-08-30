@@ -32,7 +32,7 @@ function addQuad(
   for (const point of points) geometry.positions.push(point.x, 0, point.z);
   geometry.normals.push(0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0);
   geometry.uvs.push(...uvs);
-  geometry.indices.push(base, base + 2, base + 1, base, base + 3, base + 2);
+  geometry.indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
 }
 
 export function buildCellSurfaceGeometry(
