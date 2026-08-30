@@ -5,6 +5,7 @@ import { readPng } from './pngDrawing.mjs';
 
 const root = process.cwd();
 const candidateDir = path.resolve(root, 'public/style-kits/ironwaste-v1/candidates');
+const manifestPath = path.resolve(root, 'src/world/map/ironwasteCandidateManifest.json');
 const generatedDir = path.resolve(root, 'docs/generated');
 const catalog = JSON.parse(fs.readFileSync(path.join(generatedDir, 'required-asset-catalog.json'), 'utf8'));
 const seedCoverage = JSON.parse(fs.readFileSync(path.join(generatedDir, 'asset-seed-coverage.json'), 'utf8'));
@@ -131,7 +132,7 @@ const manifest = {
   state: approve ? 'approved' : 'candidate',
   files,
 };
-fs.writeFileSync(path.join(candidateDir, 'candidate-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 
 const report = [
   '# Ironwaste v1 Asset QA',

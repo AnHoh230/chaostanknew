@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import manifestJson from '../../../public/style-kits/ironwaste-v1/candidates/candidate-manifest.json';
+import manifestJson from './ironwasteCandidateManifest.json';
 import type { AssetCandidateManifest } from './assetCandidateManifest';
 import { IRONWASTE_V1_PREVIEW_KIT } from './ironwasteStyleKit';
 import { buildWorldAssetPlacementPlan } from './worldAssetPlacement';
