@@ -102,6 +102,7 @@ export type ReservationType = 'spawn' | 'site' | 'corridor' | 'junction' | 'clea
 export interface SpatialReservation {
   id: string;
   type: ReservationType;
+  grid: GridSpec;
   cells: number[];
   clearance: number;
   allowedRoles: LandscapeRole[];

@@ -52,6 +52,7 @@ export function generateSpatialReservations(
   reservations.push({
     id: `reservation_spawn_${spawn.id}`,
     type: 'spawn',
+    grid,
     cells: discCells(grid, spawn.center, spawn.radius + 16),
     clearance: 16,
     allowedRoles: [],
@@ -60,6 +61,7 @@ export function generateSpatialReservations(
     reservations.push({
       id: `reservation_site_${site.id}`,
       type: 'site',
+      grid,
       cells: discCells(grid, site.center, site.radius),
       clearance: 6,
       allowedRoles: ['landmark', 'clearing-anchor'],
@@ -68,6 +70,7 @@ export function generateSpatialReservations(
       reservations.push({
         id: `reservation_clearing_${site.id}`,
         type: 'clearing',
+        grid,
         cells: discCells(grid, site.center, Math.max(grid.cellSize, site.radius * 0.65)),
         clearance: Math.max(4, site.accessBand * 0.5),
         allowedRoles: ['clearing-anchor'],
@@ -78,6 +81,7 @@ export function generateSpatialReservations(
     reservations.push({
       id: `reservation_corridor_${corridor.id}`,
       type: 'corridor',
+      grid,
       cells: sweptCells(grid, corridor.cells, corridor.width / 2),
       clearance: 3,
       allowedRoles: ['border'],
@@ -88,6 +92,7 @@ export function generateSpatialReservations(
     reservations.push({
       id: `reservation_junction_${node.id}`,
       type: 'junction',
+      grid,
       cells: discCells(grid, node.pos, widestCorridor * 0.75),
       clearance: widestCorridor * 0.75,
       allowedRoles: ['border', 'landmark'],
