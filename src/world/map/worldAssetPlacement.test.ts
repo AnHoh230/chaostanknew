@@ -33,7 +33,12 @@ describe('worldAssetPlacement', () => {
     ))).toBe(true);
     expect(plan.omitted.length).toBeGreaterThan(0);
     expect(plan.omitted.every((entry) => entry.reason === 'outside-preview-scope')).toBe(true);
-    expect(plan.omitted.some((entry) => entry.demandClass === 'ground.wasteland')).toBe(true);
+    expect(plan.placements.some((entry) => entry.demandClass === 'ground.wasteland')).toBe(true);
+    expect(plan.placements.some((entry) => entry.demandClass === 'wasteland.landmarkIsland')).toBe(true);
+    expect(plan.placements.some((entry) => (
+      entry.kind === 'transition' && entry.biomes.includes('wasteland')
+    ))).toBe(true);
+    expect(plan.omitted.some((entry) => entry.demandClass.startsWith('wasteland.'))).toBe(false);
   }, 20_000);
 
   it('platziert jede unterstuetzte Site-Einfahrt am zugehoerigen Korridorende', () => {

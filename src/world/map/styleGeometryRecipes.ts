@@ -10,6 +10,9 @@ export const IRONWASTE_RECIPE_IDS = [
   'scrap-wreck-cluster',
   'scrap-yard',
   'site-entrance',
+  'wasteland-cover-cluster',
+  'wasteland-destructible-blob',
+  'wasteland-landmark-island',
 ] as const;
 
 export type IronwasteRecipeId = typeof IRONWASTE_RECIPE_IDS[number];
@@ -109,6 +112,26 @@ const RECIPES: Record<IronwasteRecipeId, Recipe> = {
     primitive(c, 'box', -0.72, 0, 0.16, c.height * 1.2, 0.42, 'concrete'),
     primitive(c, 'box', 0.72, 0, 0.16, c.height * 1.2, 0.42, 'concrete'),
     primitive(c, 'box', 0, 0, 1.28, c.height * 0.18, 0.2, 'cyanAccent'),
+  ],
+  'wasteland-cover-cluster': (c) => [
+    primitive(c, 'box', -0.42 * c.mirror, 0.05, 0.5, c.height * 0.34, 0.38, 'dryClay', c.mirror * 0.12),
+    primitive(c, 'box', 0, -0.06, 0.5, c.height * 0.4, 0.42, 'ash', -c.mirror * 0.08),
+    primitive(c, 'box', 0.42 * c.mirror, 0.05, 0.5, c.height * 0.3, 0.36, 'dryClay', c.mirror * 0.1),
+    primitive(c, 'box', c.shift, 0.3, 0.82, c.height * 0.22, 0.18, 'rust', c.mirror * 0.18),
+  ],
+  'wasteland-destructible-blob': (c) => [
+    primitive(c, 'cylinder', -0.28 * c.mirror, -0.16, 0.7, c.height * 0.42, 0.62, 'ash'),
+    primitive(c, 'box', 0.24 * c.mirror, 0.18, 0.7, c.height * 0.58, 0.42, 'concrete', -c.mirror * 0.28),
+    primitive(c, 'box', -0.04, 0.34 * c.mirror, 0.78, c.height * 0.28, 0.26, 'rust', c.mirror * 0.34),
+    primitive(c, 'cylinder', 0.38 * c.mirror, -0.26, 0.32, c.height * 0.32, 0.32, 'bone'),
+  ],
+  'wasteland-landmark-island': (c) => [
+    primitive(c, 'cylinder', 0, 0, 1.55, c.height * 0.3, 1.55, 'dryClay'),
+    primitive(c, 'cylinder', -0.06 * c.mirror, 0.02, 1.1, c.height * 0.44, 1.08, 'ash'),
+    primitive(c, 'box', -0.12 * c.mirror, -0.02, 0.18, c.height * 2.35, 0.18, 'graphite', c.mirror * 0.12),
+    primitive(c, 'box', -0.03 * c.mirror, 0.02, 0.65, c.height * 0.12, 0.12, 'steel', -c.mirror * 0.18),
+    primitive(c, 'box', 0.2 * c.mirror, 0.04, 0.22, c.height * 0.76, 0.2, 'cyanAccent', c.mirror * 0.16),
+    primitive(c, 'box', 0.42 * c.mirror, -0.3, 0.45, c.height * 0.32, 0.28, 'rust', -c.mirror * 0.32),
   ],
 };
 

@@ -13,12 +13,18 @@ const approve = process.argv.includes('--approve');
 const specs = [
   { name: 'ground_industrial.png', tileX: true, tileY: true, alphaVariation: false },
   { name: 'ground_scrap.png', tileX: true, tileY: true, alphaVariation: false },
+  { name: 'ground_wasteland.png', tileX: true, tileY: true, alphaVariation: false },
   { name: 'transition_industrial_scrap.png', tileX: false, tileY: true, alphaVariation: true },
+  { name: 'transition_industrial_wasteland.png', tileX: false, tileY: true, alphaVariation: true },
+  { name: 'transition_scrap_wasteland.png', tileX: false, tileY: true, alphaVariation: true },
   { name: 'road_surface.png', tileX: false, tileY: true, alphaVariation: false },
   { name: 'road_edge.png', tileX: false, tileY: true, alphaVariation: true },
   { name: 'decal_industrial_cracks.png', tileX: true, tileY: true, alphaVariation: true },
   { name: 'decal_scrap_fragments.png', tileX: true, tileY: true, alphaVariation: true },
   { name: 'decal_shared_grime.png', tileX: true, tileY: true, alphaVariation: true },
+  { name: 'decal_wasteland_landmark.png', tileX: false, tileY: false, alphaVariation: true, maxBorderAlpha: 0 },
+  { name: 'decal_wasteland_debris.png', tileX: false, tileY: false, alphaVariation: true, maxBorderAlpha: 0 },
+  { name: 'decal_wasteland_cover.png', tileX: false, tileY: false, alphaVariation: true, maxBorderAlpha: 0 },
 ];
 
 function edgeRms(png, axis) {
@@ -41,6 +47,19 @@ function edgeRms(png, axis) {
 
 function sha256(buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
+function borderAlpha(png) {
+  let maximum = 0;
+  for (let x = 0; x < png.width; x++) {
+    maximum = Math.max(maximum, png.data[x * 4 + 3]);
+    maximum = Math.max(maximum, png.data[((png.height - 1) * png.width + x) * 4 + 3]);
+  }
+  for (let y = 0; y < png.height; y++) {
+    maximum = Math.max(maximum, png.data[(y * png.width) * 4 + 3]);
+    maximum = Math.max(maximum, png.data[(y * png.width + png.width - 1) * 4 + 3]);
+  }
+  return maximum;
 }
 
 const errors = [];
@@ -72,14 +91,19 @@ for (const spec of specs) {
   }
   if (spec.alphaVariation && maxAlpha - minAlpha < 32) errors.push(`candidate-alpha-range-too-small:${spec.name}`);
   if (!spec.alphaVariation && (minAlpha !== 255 || maxAlpha !== 255)) errors.push(`candidate-unexpected-alpha:${spec.name}`);
+  const observedBorderAlpha = borderAlpha(png);
+  if (spec.maxBorderAlpha !== undefined && observedBorderAlpha > spec.maxBorderAlpha) {
+    errors.push(`candidate-border-alpha:${spec.name}:${observedBorderAlpha}`);
+  }
   const relativePath = `style-kits/ironwaste-v1/candidates/${spec.name}`;
   files.push({ path: relativePath, sha256: sha256(buffer), width: png.width, height: png.height, format: 'png' });
-  checks.push({ name: spec.name, rmsX: Number(rmsX.toFixed(3)), rmsY: Number(rmsY.toFixed(3)), minAlpha, maxAlpha });
+  checks.push({ name: spec.name, rmsX: Number(rmsX.toFixed(3)), rmsY: Number(rmsY.toFixed(3)), minAlpha, maxAlpha, borderAlpha: observedBorderAlpha });
 }
 
 const qaImages = [
-  { path: 'docs/superpowers/assets/ironwaste-v1-contact-sheet.png', width: 1024, height: 1024 },
+  { path: 'docs/superpowers/assets/ironwaste-v1-contact-sheet.png', width: 1536, height: 1100 },
   { path: 'docs/superpowers/assets/ironwaste-v1-seed-board.png', width: 1000, height: 840 },
+  { path: 'docs/superpowers/assets/wasteland-v1-concept.png', width: 1254, height: 1254 },
 ];
 for (const qa of qaImages) {
   const filePath = path.resolve(root, qa.path);
@@ -102,7 +126,7 @@ if (errors.length > 0) {
 fs.mkdirSync(generatedDir, { recursive: true });
 const manifest = {
   kitId: 'ironwaste-v1',
-  kitVersion: 1,
+  kitVersion: 2,
   catalogSignature: catalog.signature,
   state: approve ? 'approved' : 'candidate',
   files,
@@ -113,17 +137,19 @@ const report = [
   '# Ironwaste v1 Asset QA',
   '',
   `- Catalog signature: \`${catalog.signature}\``,
-  '- Kit version: `1`',
+  '- Kit version: `2`',
   `- State: \`${manifest.state}\``,
   '- Activation: `preview`',
+  '- Preview biomes: `industrial`, `scrap`, `wasteland`',
   `- Seed coverage: \`${seedCoverage.seedStart}..${seedCoverage.seedEnd}\``,
   `- Seed coverage signature: \`${seedCoverage.signature}\``,
+  '- Wasteland style reference: `docs/superpowers/assets/wasteland-v1-concept.png`',
   '',
-  '| File | X-edge RMS | Y-edge RMS | Alpha range | SHA-256 |',
-  '| --- | ---: | ---: | --- | --- |',
+  '| File | X-edge RMS | Y-edge RMS | Alpha range | Border alpha | SHA-256 |',
+  '| --- | ---: | ---: | --- | ---: | --- |',
   ...checks.map((check) => {
     const file = files.find((entry) => entry.path.endsWith(`/${check.name}`));
-    return `| ${check.name} | ${check.rmsX} | ${check.rmsY} | ${check.minAlpha}–${check.maxAlpha} | \`${file.sha256}\` |`;
+    return `| ${check.name} | ${check.rmsX} | ${check.rmsY} | ${check.minAlpha}–${check.maxAlpha} | ${check.borderAlpha} | \`${file.sha256}\` |`;
   }),
   '',
   '## Generator demand frequencies',

@@ -27,6 +27,9 @@ describe('styleGeometryRecipes', () => {
       'scrap-wreck-cluster',
       'scrap-yard',
       'site-entrance',
+      'wasteland-cover-cluster',
+      'wasteland-destructible-blob',
+      'wasteland-landmark-island',
     ]);
     for (const recipeId of IRONWASTE_RECIPE_IDS) {
       const footprint = { halfX: 8, halfZ: 6 };
@@ -51,6 +54,20 @@ describe('styleGeometryRecipes', () => {
     expect(first).not.toEqual(second);
     expect(() => assertPrimitivesFit(first, footprint, 'wreck.v1')).not.toThrow();
     expect(() => assertPrimitivesFit(second, footprint, 'wreck.v2')).not.toThrow();
+  });
+
+  it('haelt alle Wasteland-Rezepte auch in ihren kleinsten Generatorhuellen', () => {
+    const cases = [
+      ['wasteland-cover-cluster', { halfX: 1.5, halfZ: 1.5 }],
+      ['wasteland-destructible-blob', { halfX: 3, halfZ: 3 }],
+      ['wasteland-landmark-island', { halfX: 4.5, halfZ: 4.5 }],
+    ] as const;
+
+    for (const [recipeId, footprint] of cases) {
+      const primitives = buildStyleGeometryRecipe(recipeId, footprint, `${recipeId}.v3`);
+      expect(primitives.length, recipeId).toBeGreaterThanOrEqual(3);
+      expect(() => assertPrimitivesFit(primitives, footprint, recipeId)).not.toThrow();
+    }
   });
 
   it('verwirft unbekannte Rezepte und Primitive ausserhalb der Huelle', () => {

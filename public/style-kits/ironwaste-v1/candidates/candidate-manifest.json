@@ -1,6 +1,6 @@
 {
   "kitId": "ironwaste-v1",
-  "kitVersion": 1,
+  "kitVersion": 2,
   "catalogSignature": "f8386129",
   "state": "approved",
   "files": [
@@ -26,6 +26,27 @@
       "format": "png"
     },
     {
+      "path": "style-kits/ironwaste-v1/candidates/decal_wasteland_cover.png",
+      "sha256": "ea2e7489eeec9002705d845e84c3cc4e5a42456c38c15b9fab0401a4e4cf2f79",
+      "width": 256,
+      "height": 256,
+      "format": "png"
+    },
+    {
+      "path": "style-kits/ironwaste-v1/candidates/decal_wasteland_debris.png",
+      "sha256": "e1b25e10e348f04c20c5df253f53363a1ee0670463feddcb6b86e91f53b322e9",
+      "width": 256,
+      "height": 256,
+      "format": "png"
+    },
+    {
+      "path": "style-kits/ironwaste-v1/candidates/decal_wasteland_landmark.png",
+      "sha256": "2950b2de3361e8577c1103a1bc5708c35c973a20ddd9f91e51984581399dd108",
+      "width": 256,
+      "height": 256,
+      "format": "png"
+    },
+    {
       "path": "style-kits/ironwaste-v1/candidates/ground_industrial.png",
       "sha256": "ade3f7fad7959c0aad914ed587ad0156f5dbea40323aaa27a2c9af45e752002a",
       "width": 256,
@@ -35,6 +56,13 @@
     {
       "path": "style-kits/ironwaste-v1/candidates/ground_scrap.png",
       "sha256": "045a171ffdce4d766a3ba44943226ced2bbdf472ce6276ce23da140f923e5a08",
+      "width": 256,
+      "height": 256,
+      "format": "png"
+    },
+    {
+      "path": "style-kits/ironwaste-v1/candidates/ground_wasteland.png",
+      "sha256": "f698110d93fff2ec7e248f1e63cc432ff534274d6ad3d6b0dd63d999d0aabef0",
       "width": 256,
       "height": 256,
       "format": "png"
@@ -56,6 +84,20 @@
     {
       "path": "style-kits/ironwaste-v1/candidates/transition_industrial_scrap.png",
       "sha256": "f173bf16afdd2c0dfb4678d40fc70213aadfc02b48f0a9e1f21e28e66db9c0fc",
+      "width": 256,
+      "height": 256,
+      "format": "png"
+    },
+    {
+      "path": "style-kits/ironwaste-v1/candidates/transition_industrial_wasteland.png",
+      "sha256": "77c3c1b740f8535884da37d48a61568c343747911a7851a7c92b6dda95cba893",
+      "width": 256,
+      "height": 256,
+      "format": "png"
+    },
+    {
+      "path": "style-kits/ironwaste-v1/candidates/transition_scrap_wasteland.png",
+      "sha256": "fe8f6b196830495965586d918d8bf8c8f37142cc11c5f43722e3d419af49d379",
       "width": 256,
       "height": 256,
       "format": "png"

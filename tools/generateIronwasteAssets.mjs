@@ -24,6 +24,29 @@ function periodicNoise(x, y, seed = 0) {
   );
 }
 
+function latticeValue(x, y, seed) {
+  let hash = Math.imul(x + seed * 1013, 374761393) ^ Math.imul(y - seed * 733, 668265263);
+  hash = Math.imul(hash ^ (hash >>> 13), 1274126177);
+  return ((hash ^ (hash >>> 16)) >>> 0) / 0xffffffff;
+}
+
+function seamlessValueNoise(x, y, cells, seed) {
+  const gx = x / (SIZE - 1) * cells;
+  const gy = y / (SIZE - 1) * cells;
+  const x0 = Math.floor(gx), y0 = Math.floor(gy);
+  const fx = gx - x0, fy = gy - y0;
+  const wrap = (value) => ((value % cells) + cells) % cells;
+  const smooth = (value) => value * value * (3 - 2 * value);
+  const sx = smooth(fx), sy = smooth(fy);
+  const a = latticeValue(wrap(x0), wrap(y0), seed);
+  const b = latticeValue(wrap(x0 + 1), wrap(y0), seed);
+  const c = latticeValue(wrap(x0), wrap(y0 + 1), seed);
+  const d = latticeValue(wrap(x0 + 1), wrap(y0 + 1), seed);
+  const top = a + (b - a) * sx;
+  const bottom = c + (d - c) * sx;
+  return top + (bottom - top) * sy;
+}
+
 function texture(render) {
   const png = new PNG({ width: SIZE, height: SIZE });
   for (let y = 0; y < SIZE; y++) {
@@ -61,6 +84,19 @@ const scrap = texture((x, y) => {
   return [...rgb, 255];
 });
 
+const wasteland = texture((x, y) => {
+  const broad = seamlessValueNoise(x, y, 4, 61);
+  const patches = seamlessValueNoise(x, y, 9, 67);
+  const grain = seamlessValueNoise(x, y, 19, 71);
+  const stone = Math.max(0, grain - 0.8) * 3.4;
+  const crack = Math.abs(patches - 0.48) < 0.018 && broad < 0.58;
+  let rgb = mix([70, 66, 58], [116, 98, 73], broad * 0.62 + patches * 0.24);
+  rgb = mix(rgb, [83, 72, 57], Math.max(0, patches - 0.55) * 0.8);
+  rgb = mix(rgb, [164, 152, 126], Math.min(0.58, stone));
+  if (crack) rgb = mix(rgb, [42, 40, 36], 0.55);
+  return [...rgb, 255];
+});
+
 const transition = texture((x, y) => {
   const t = x / (SIZE - 1);
   const ragged = periodicNoise(x, y, 22) * 0.13;
@@ -69,6 +105,19 @@ const transition = texture((x, y) => {
   const alpha = Math.sin(Math.PI * t) ** 0.7 * 235;
   return [...mix(left, right, blend), alpha];
 });
+
+function transitionTexture(left, right, seed) {
+  return texture((x, y) => {
+    const t = x / (SIZE - 1);
+    const ragged = periodicNoise(x, y, seed) * 0.13;
+    const blend = Math.max(0, Math.min(1, t + ragged));
+    const alpha = Math.sin(Math.PI * t) ** 0.7 * 235;
+    return [...mix(left, right, blend), alpha];
+  });
+}
+
+const industrialWastelandTransition = transitionTexture([72, 79, 81], [98, 85, 66], 73);
+const scrapWastelandTransition = transitionTexture([104, 63, 39], [98, 85, 66], 79);
 
 const road = texture((x, y) => {
   const u = x / (SIZE - 1);
@@ -111,15 +160,61 @@ const sharedGrime = texture((x, y) => {
   return value > 0 ? [85, 57, 38, alpha] : [28, 32, 33, alpha];
 });
 
+function transparentEdge(x, y, width = 24) {
+  return Math.max(0, Math.min(1, Math.min(x, y, SIZE - 1 - x, SIZE - 1 - y) / width));
+}
+
+const wastelandLandmark = texture((x, y) => {
+  const nx = (x - (SIZE - 1) / 2) / ((SIZE - 1) / 2);
+  const ny = (y - (SIZE - 1) / 2) / ((SIZE - 1) / 2);
+  const radius = Math.hypot(nx * 0.92, ny);
+  const noise = periodicNoise(x, y, 83) * 0.08;
+  const outer = Math.max(0, Math.min(1, (0.95 - radius + noise) * 8));
+  const ring = Math.abs(radius - 0.58 - noise * 0.4) < 0.11;
+  const rgb = ring ? [107, 99, 84] : mix([70, 62, 50], [125, 106, 78], (periodicNoise(x, y, 89) + 1) * 0.35);
+  return [...rgb, outer * transparentEdge(x, y) * 205];
+});
+
+const wastelandDebris = texture((x, y) => {
+  const nx = (x - (SIZE - 1) / 2) / ((SIZE - 1) / 2);
+  const ny = (y - (SIZE - 1) / 2) / ((SIZE - 1) / 2);
+  const radiusFade = Math.max(0, 1 - Math.hypot(nx, ny) / 0.96);
+  const value = periodicNoise(x, y, 97);
+  const shard = Math.max(0, Math.abs(value) - 0.38) * 2.3;
+  const rusted = periodicNoise(x, y, 101) > 0.08;
+  const rgb = rusted ? [145, 70, 39] : [104, 105, 97];
+  return [...rgb, Math.min(220, shard * radiusFade * transparentEdge(x, y) * 255)];
+});
+
+const wastelandCover = texture((x, y) => {
+  const u = (x - (SIZE - 1) / 2) / ((SIZE - 1) / 2);
+  const v = (y - (SIZE - 1) / 2) / ((SIZE - 1) / 2);
+  const bags = [-0.66, -0.34, 0, 0.34, 0.66].reduce((best, center) => (
+    Math.min(best, ((u - center) / 0.21) ** 2 + ((v + 0.06 * Math.cos(center * 7)) / 0.18) ** 2)
+  ), Infinity);
+  const plate = Math.abs(u + v * 0.34) < 0.12 && Math.abs(v - 0.22) < 0.22;
+  const edge = transparentEdge(x, y);
+  if (bags < 1) return [143, 125, 91, (1 - bags * 0.28) * edge * 225];
+  if (plate) return [133, 67, 39, edge * 200];
+  const pebble = periodicNoise(x, y, 107) > 0.72 && Math.hypot(u, v) < 0.92;
+  return [126, 119, 99, pebble ? edge * 150 : 0];
+});
+
 const files = new Map([
   ['ground_industrial.png', industrial],
   ['ground_scrap.png', scrap],
+  ['ground_wasteland.png', wasteland],
   ['transition_industrial_scrap.png', transition],
+  ['transition_industrial_wasteland.png', industrialWastelandTransition],
+  ['transition_scrap_wasteland.png', scrapWastelandTransition],
   ['road_surface.png', road],
   ['road_edge.png', roadEdge],
   ['decal_industrial_cracks.png', industrialCracks],
   ['decal_scrap_fragments.png', scrapFragments],
   ['decal_shared_grime.png', sharedGrime],
+  ['decal_wasteland_landmark.png', wastelandLandmark],
+  ['decal_wasteland_debris.png', wastelandDebris],
+  ['decal_wasteland_cover.png', wastelandCover],
 ]);
 
 for (const [name, png] of files) writePng(path.join(outputDir, name), png);
@@ -130,30 +225,46 @@ function tileInto(target, source, x, y, columns, rows) {
   }
 }
 
-const sheet = new PNG({ width: 1024, height: 1024 });
+const sheet = new PNG({ width: 1536, height: 1100 });
 fillRect(sheet, 0, 0, sheet.width, sheet.height, [24, 28, 29, 255]);
 
-drawText(sheet, 'INDUSTRIAL TILE 2X2', 14, 8, [226, 226, 212, 255], 2);
-drawText(sheet, 'SCRAP TILE 2X2', 530, 8, [226, 226, 212, 255], 2);
-tileInto(sheet, industrial, 0, 32, 2, 2);
-tileInto(sheet, scrap, 512, 32, 2, 2);
-
-drawText(sheet, 'BIOME TRANSITION', 14, 556, [226, 226, 212, 255], 2);
-for (let y = 584; y < 1016; y += SIZE) {
-  blit(sheet, industrial, 0, y);
-  blit(sheet, scrap, 256, y);
-  blit(sheet, transition, 128, y);
+const groundPanels = [
+  { label: 'INDUSTRIAL TILE 2X2', texture: industrial },
+  { label: 'SCRAP TILE 2X2', texture: scrap },
+  { label: 'WASTELAND TILE 2X2', texture: wasteland },
+];
+for (let index = 0; index < groundPanels.length; index++) {
+  const panel = groundPanels[index];
+  const x = index * 512;
+  drawText(sheet, panel.label, x + 14, 8, [226, 226, 212, 255], 2);
+  tileInto(sheet, panel.texture, x, 32, 2, 2);
 }
 
-drawText(sheet, 'ROAD AND DECALS', 530, 556, [226, 226, 212, 255], 2);
-blit(sheet, industrial, 512, 584);
-blit(sheet, scrap, 768, 584);
-blit(sheet, road, 640, 584);
-blit(sheet, road, 640, 840);
-blit(sheet, roadEdge, 640, 584);
+const transitionPanels = [
+  { label: 'INDUSTRIAL TO SCRAP', left: industrial, right: scrap, blend: transition },
+  { label: 'INDUSTRIAL TO WASTELAND', left: industrial, right: wasteland, blend: industrialWastelandTransition },
+  { label: 'SCRAP TO WASTELAND', left: scrap, right: wasteland, blend: scrapWastelandTransition },
+];
+for (let index = 0; index < transitionPanels.length; index++) {
+  const panel = transitionPanels[index];
+  const x = index * 512;
+  drawText(sheet, panel.label, x + 14, 556, [226, 226, 212, 255], 2);
+  blit(sheet, panel.left, x, 584);
+  blit(sheet, panel.right, x + 256, 584);
+  blit(sheet, panel.blend, x + 128, 584);
+  blit(sheet, panel.left, x, 840);
+  blit(sheet, panel.right, x + 256, 840);
+}
+
+blit(sheet, road, 128, 840);
+blit(sheet, roadEdge, 128, 840);
+blit(sheet, industrialCracks, 0, 840);
+blit(sheet, scrapFragments, 256, 840);
 blit(sheet, industrialCracks, 512, 840);
-blit(sheet, scrapFragments, 768, 840);
-blit(sheet, sharedGrime, 768, 840);
+blit(sheet, wastelandLandmark, 768, 840);
+blit(sheet, scrapFragments, 1024, 840);
+blit(sheet, wastelandDebris, 1280, 840);
+blit(sheet, wastelandCover, 1280, 840);
 
 writePng(path.join(qaDir, 'ironwaste-v1-contact-sheet.png'), sheet);
 process.stdout.write(`ironwaste-assets:${files.size}:256x256\n`);
