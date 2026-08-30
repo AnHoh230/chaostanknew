@@ -14,9 +14,9 @@ const rows = REQUIRED_ASSET_CATALOG.families.map((family) => (
 const markdown = [
   '# Required Asset Catalog',
   '',
-  `Generator version: \`${REQUIRED_ASSET_CATALOG.generatorVersion}\`  `,
-  `Catalog signature: \`${REQUIRED_ASSET_CATALOG.signature}\`  `,
-  `Required families: **${REQUIRED_ASSET_CATALOG.families.length}**`,
+  `- Generator version: \`${REQUIRED_ASSET_CATALOG.generatorVersion}\``,
+  `- Catalog signature: \`${REQUIRED_ASSET_CATALOG.signature}\``,
+  `- Required families: **${REQUIRED_ASSET_CATALOG.families.length}**`,
   '',
   '| Demand class | Source | Geometry | Biomes | Variants | States | Connectors | Reserved |',
   '| --- | --- | --- | --- | ---: | --- | --- | --- |',

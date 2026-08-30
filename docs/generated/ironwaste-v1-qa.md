@@ -1,11 +1,11 @@
 # Ironwaste v1 Asset QA
 
-Catalog signature: `f8386129`  
-Kit version: `1`  
-State: `approved`  
-Activation: `preview`
-Seed coverage: `1..500`  
-Seed coverage signature: `8f92eb4c`
+- Catalog signature: `f8386129`
+- Kit version: `1`
+- State: `approved`
+- Activation: `preview`
+- Seed coverage: `1..500`
+- Seed coverage signature: `8f92eb4c`
 
 | File | X-edge RMS | Y-edge RMS | Alpha range | SHA-256 |
 | --- | ---: | ---: | --- | --- |
@@ -55,7 +55,7 @@ Seed coverage signature: `8f92eb4c`
 | `wasteland.destructibleBlob` | 6880 |
 | `wasteland.landmarkIsland` | 10688 |
 
-Missing catalog classes: **0**  
-Unknown emitted classes: **0**
+- Missing catalog classes: **0**
+- Unknown emitted classes: **0**
 
 Unrestricted runtime activation remains blocked until the complete non-reserved catalog is covered.

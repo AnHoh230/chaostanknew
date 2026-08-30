@@ -1,8 +1,8 @@
 # Required Asset Catalog
 
-Generator version: `hybrid-asset-grammar-v1`  
-Catalog signature: `f8386129`  
-Required families: **32**
+- Generator version: `hybrid-asset-grammar-v1`
+- Catalog signature: `f8386129`
+- Required families: **32**
 
 | Demand class | Source | Geometry | Biomes | Variants | States | Connectors | Reserved |
 | --- | --- | --- | --- | ---: | --- | --- | --- |
