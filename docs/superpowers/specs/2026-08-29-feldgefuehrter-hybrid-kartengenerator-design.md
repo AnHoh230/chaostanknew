@@ -1,7 +1,7 @@
 # Feldgefuehrter Hybrid-Kartengenerator
 
 **Status:** vom Nutzer inhaltlich freigegebene Zielarchitektur  
-**Datum:** 2026-08-29  
+**Datum:** 2026-08-29, praezisiert am 2026-08-30
 **Projekt:** ChaosTankNew
 
 ## 1. Ausgangslage
@@ -25,14 +25,15 @@ Seed
 -> geroutete Korridore
 -> raeumliche Reservierungen
 -> lokale Landschaftskompositionen
--> validierte Graybox-Welt
+-> validiertes abstraktes Weltmodell
+-> Graybox-Runtimeprojektion
 ```
 
 Die Karte bleibt offen und verwendet keine Isaac-artigen Raeume. Der spaetere Isaac-Bezug entsteht durch kontrollierte Moeglichkeitsverteilung, Entdeckung, Sites, Events, Nester, Secrets und Belohnungen. Diese Inhalte sind nicht Teil der ersten Generatorfassung.
 
 ## 3. Verbindliche Grundsaetze
 
-1. Die Landschaft entsteht vor dem Graphen. Der Graph organisiert Exploration und Erreichbarkeit, diktiert aber weder Felder noch Biome.
+1. Makrogeografie, Felder und Regionen entstehen vor dem Graphen. Der Graph organisiert Exploration und Erreichbarkeit, diktiert aber weder Felder noch Biome. Lokale Landschaftskompositionen entstehen erst nach den realisierten Korridoren.
 2. Biome werden nicht als Ellipsen oder zufaellige Flecken platziert. Sie werden aus Eignungswerten zusammenhaengend gewachsen.
 3. Gameplayrelevante Geometrie wird nicht allgemein gestreut. Sie entsteht aus lokalen Kompositionsregeln.
 4. Der Generator erzeugt abstrakte Landschaftsmerkmale. Konkrete Assets werden erst spaeter passend aufgeloest.
@@ -54,11 +55,15 @@ seedStreams
 -> siteGenerator
 -> terrainCostGraph
 -> traversalGraph
--> siteRoleResolver
 -> pathRouter
+-> realizedTraversalGraph
+-> siteRoleResolver
 -> spatialReservations
 -> landscapeGenerator
 -> worldValidator
+=> GenerierteWelt
+
+GenerierteWelt
 -> grayboxResolver
 -> RuntimeKarte
 ```
@@ -71,12 +76,13 @@ Vorgesehene Quelldateien unter `src/world/map/`:
 - `worldDNA.ts`: globale Weltidentitaet.
 - `macroStructure.ts`: konkrete grossraeumige Geografie eines Seeds.
 - `worldGrid.ts`: Griddefinitionen, Indexierung, Sampling und Nachbarschaften.
-- `worldFields.ts`: geographische Grundfelder und abgeleitete Potentiale.
-- `regionGenerator.ts`: aktive Biome, Regionswachstum und Regionsnormalisierung.
+- `worldFields.ts`: geographische Grundfelder; `derivePotentials` liefert einen eigenen, typisierten Output.
+- `regionGenerator.ts`: `selectActiveBiomes`, Regionswachstum und Regionsnormalisierung mit jeweils typisiertem Output.
 - `siteGenerator.ts`: raeumlich geeignete Sites ohne vorweggenommene Graphrollen.
-- `traversalGraph.ts`: kostenbewertete Kandidaten, MST und gezielte Zusatzkanten.
-- `siteRoleResolver.ts`: aus der Graphstruktur abgeleitete topologische Rollen.
+- `traversalGraph.ts`: `buildTerrainCostGraph`, gradbegrenzter Spannbaum und gezielte Zusatzkanten mit getrennten Outputs.
 - `pathRouter.ts`: feines Routing und kanonische Korridore.
+- `realizedTraversalGraph.ts`: aus Korridoren, geteilten Segmenten und Kreuzungen abgeleitete reale Fahr-Topologie.
+- `siteRoleResolver.ts`: aus der realisierten Fahr-Topologie abgeleitete Site-Eigenschaften.
 - `spatialReservations.ts`: typisierte Schutz- und Freiraeume.
 - `landscapeGrammar.ts`: abstrakte Features, Patterns und Assetvertrag.
 - `landscapeGenerator.ts`: lokale Kompositionen von gross nach klein.
@@ -84,6 +90,8 @@ Vorgesehene Quelldateien unter `src/world/map/`:
 - `grayboxResolver.ts`: sichtbare Primitive fuer die erste Entwicklungsfassung.
 
 Kleine, klar zusammengehoerige Typen duerfen waehrend der Implementierung zusammengelegt werden. Die fachlichen Grenzen bleiben jedoch erhalten.
+
+`derivePotentials`, `selectActiveBiomes` und `buildTerrainCostGraph` sind echte Pipeline-Stufen mit den expliziten Outputs `DerivedPotentials`, `ActiveBiomeSelection` und `TerrainCostGraph`, auch wenn ihre Implementierung in derselben Datei wie die direkt verwandte Stufe liegt. Keine nachfolgende Stufe berechnet diese Ergebnisse verdeckt ein zweites Mal.
 
 ## 5. Weltmodell und Runtime-Projektion
 
@@ -98,15 +106,26 @@ interface GenerierteWelt {
   fields: WorldFields;
   regions: RegionMap;
   sites: Site[];
-  graph: TraversalGraph;
+  intentGraph: TraversalGraph;
   corridors: RoutedCorridor[];
+  realizedGraph: RealizedTraversalGraph;
+  siteTopology: Record<SiteId, SiteTopology>;
   reservations: SpatialReservation[];
   features: LandscapeFeature[];
   debug: WorldDebugData;
 }
 ```
 
-Der `grayboxResolver` projiziert diese Welt in ein separates Runtimeformat fuer Loader und Renderer. Dieses Runtimeformat enthaelt nur Daten, die das laufende Spiel benoetigt. Alte Generatorbegriffe wie eine einzelne globale `biomeId`, frei platzierte `zones` oder zweipunktige `paths` werden nicht in das neue Weltmodell uebernommen.
+Die oeffentliche Generatorgrenze ist eindeutig:
+
+```ts
+generiereWelt(options, seed): GenerierteWelt
+resolveGraybox(welt): RuntimeKarte
+```
+
+`generiereWelt` endet nach der lesenden Validierung. Der `grayboxResolver` ist eine separate Runtimeprojektion fuer Loader und Renderer. Dieses Runtimeformat enthaelt nur Daten, die das laufende Spiel benoetigt. Alte Generatorbegriffe wie eine einzelne globale `biomeId`, frei platzierte `zones` oder zweipunktige `paths` werden nicht in das neue Weltmodell uebernommen.
+
+`WorldDebugData` enthaelt ausschliesslich deterministische Daten wie Scores, Masken, Kosten, ausgewaehlte Kandidaten und Validierungsergebnisse. Laufzeiten, Timestamps, zufaellige IDs und andere Laufzeittelemetrie liegen ausserhalb von `GenerierteWelt`, damit die serialisierte Welt deterministisch bleibt.
 
 ## 6. Stabile RNG-Stroeme
 
@@ -136,6 +155,16 @@ TraversalGrid: 160 x 128,   5 Welteinheiten pro Zelle
 ```
 
 Beide Raster decken bei den aktuellen Extents dieselbe Weltflaeche von 800 x 640 Welteinheiten ab. Typen und Funktionen duerfen niemals stillschweigend annehmen, dass beide Raster identisch sind. Das TraversalGrid liest Feldwerte durch bilineares Sampling aus dem FieldGrid.
+
+Das Weltkoordinatensystem ist zentriert:
+
+```text
+X: -400 bis +400
+Z: -320 bis +320
+Spawn: (0, 0)
+```
+
+Kontinuierliche Felder wie `openness` und `wetness` werden bilinear gesampelt. Kategoriale Werte wie `regionId` und `biomeId` stammen aus der enthaltenden beziehungsweise naechsten FieldGrid-Zelle und werden niemals interpoliert.
 
 Die Rastergroessen sind Generatoroptionen mit diesen Werten als verbindlichen Defaults. Kartenextents muessen ohne abgeschnittene Randzellen abbildbar sein.
 
@@ -192,7 +221,7 @@ Jedes Feld entsteht aus normalisiertem niedrigfrequentem mehrstufigem Value Nois
 normalizedNoise + DNA-Level + MacroInfluence -> clamp(0, 1)
 ```
 
-Nur der rohe Noise wird normalisiert. Das fertige Feld wird niemals pro Karte auf seinen jeweiligen Minimal- und Maximalwert gestreckt. Eine Karte mit niedriger Industrialisierung darf dadurch kein kuenstlich auf 1 skaliertes Industriegebiet erhalten.
+Nur der rohe Noise wird normalisiert. Value Noise liefert seinen definierten Wertebereich; bei mehreren Oktaven wird durch die bekannte Summe ihrer Amplituden geteilt. Minimum und Maximum der aktuell erzeugten Karte werden niemals zur Normalisierung verwendet. Das fertige Feld wird nicht pro Karte auf seinen jeweiligen Minimal- und Maximalwert gestreckt. Eine Karte mit niedriger Industrialisierung darf dadurch kein kuenstlich auf 1 skaliertes Industriegebiet erhalten.
 
 Aus den vier Grundfeldern entstehen deterministisch abgeleitete Potentiale, unter anderem:
 
@@ -217,9 +246,17 @@ Moegliche Biome der ersten Fassung sind:
 - Ruinen,
 - Krater.
 
-Nicht jedes Biom muss in jedem Seed erscheinen. Zunaechst wird aus DNA und globaler Eignung ein `activeBiomeSet` bestimmt. Nur ausreichend relevante Biome erhalten Wachstumssamen. Offene Oednis bleibt der verbindende Grundtyp; extreme DNA-Profile duerfen bewusst nur wenige weitere Biome aktivieren.
+Nicht jedes Biom muss in jedem Seed erscheinen. Zunaechst wird aus DNA und globaler Eignung ein `activeBiomeSet` fuer die fuenf Spezialbiome bestimmt. Nur ausreichend relevante Spezialbiome erhalten Wachstumssamen. Ein bis vier Spezialbiome werden aktiv; das global am besten geeignete Spezialbiom ist immer enthalten. Extreme DNA-Profile duerfen bewusst nur ein Spezialbiom aktivieren.
+
+Die globale Relevanz eines Spezialbioms ist `0.7 * Kartenmittel + 0.3 * 90-Prozent-Quantil` seiner Eignung. Alle Biome mit Relevanz mindestens 0.42 werden aktiv, hoechstens jedoch die vier bestbewerteten. Liegt kein Biom ueber 0.42, wird nur das bestbewertete aktiv.
+
+Die Zielzahl der Spezialregionen ist `round(lerp(8, 3, targetRegionScale))`, mindestens jedoch die Zahl aktiver Biome. Jedes aktive Biom erhaelt einen Keim. Weitere Keime werden gewichtet nach globaler Relevanz und dem jeweils besten noch ausreichend entfernten lokalen Maximum verteilt. Oednisregionen zaehlen nicht in dieses Zielbudget.
+
+Offene Oednis erhaelt keine Wachstumssamen. Zuerst wachsen die aktiven Spezialbiome innerhalb ihrer Flaechenbudgets. Jede danach nicht beanspruchte Zelle wird offene Oednis. Getrennte Oednisflaechen erhalten getrennte `regionId`s. Oednis ist damit verbindendes Gewebe und kein verpflichtendes weiteres Themenpark-Biom.
 
 Fuer jedes aktive Biom wird pro Zelle eine Eignung aus Grundfeldern, Potentialen und Nachbarschaftsregeln berechnet. Weit auseinanderliegende lokale Maxima werden zu Regionskeimen. Ein gewichtetes Multi-Source-Flood-Fill laesst Regionen zusammenhaengend wachsen. Nachbarschaftsregeln beeinflussen die Kosten, damit plausible Uebergaenge wahrscheinlicher werden.
+
+Nachbarschaftskosten liegen zentral in einer symmetrischen Biom-Matrix: bevorzugte Uebergaenge addieren 0.1, neutrale 0.4 und bewusst seltene 0.8 auf die Wachstumskosten. Industrie-Ruinen, Industrie-Schrott, Schlamm-Schrott und Ruinen-Krater starten als bevorzugte Uebergaenge. Die Matrix ist Graybox-Tuning und keine versteckte Fallunterscheidung im Flood-Fill.
 
 Der `regionGenerator` normalisiert sein eigenes Ergebnis deterministisch:
 
@@ -234,11 +271,26 @@ Mehrere getrennte Regionen duerfen dasselbe Biom besitzen.
 
 Der erste Pass erzeugt sieben bis elf raeumlich geeignete Sites. Der Spawn bleibt in der ersten Fassung am Ursprung und wird als vollstaendige Site behandelt. Weitere Sites entstehen aus bewerteten Kandidaten, die Mindestabstaende zu Spawn, Kartenrand und anderen Sites einhalten.
 
+Der Routingvertrag einer Site ist mindestens:
+
+```ts
+interface Site {
+  id: SiteId;
+  center: Vec2;
+  radius: number;
+  accessBand: number;
+  regionId: RegionId;
+  biomeId: BiomeId;
+}
+```
+
+Ein Korridor erreicht eine Site, wenn seine volle Breite in einer zulaessigen TraversalGrid-Zelle des Zugangsbandes liegt. Er muss nicht den Mittelpunkt beruehren. Spaetere SiteArchetypes duerfen das Zugangsband durch konkrete Ports einschraenken.
+
 Der `siteGenerator` vergibt noch keine Rollen wie Sackgasse oder Hub. Er beschreibt nur raeumliche Eignung, Groesse und moegliche lokale Site-Archetypen. Rollen, die erst aus einem Graphen hervorgehen, duerfen nicht vorweggenommen werden.
 
 Die Kandidatenauswahl besitzt begrenzte Versuche. Ein ungeeigneter Kandidat wird innerhalb dieser Stufe deterministisch durch den naechstbesten Kandidaten ersetzt.
 
-## 13. Landschaftsbewusster TraversalGraph
+## 13. Landschaftsbewusster Intent-Graph
 
 Bei sieben bis elf Sites werden alle Site-Paare als Kandidaten betrachtet. Eine Kante wird nicht nur nach Luftlinie bewertet. Grobes A* auf dem FieldGrid schaetzt die tatsaechliche Durchquerungskosten:
 
@@ -248,40 +300,50 @@ edgeCost = routeDistance + sampledTerrainCost + transitionCost
 
 Terrainkosten beruecksichtigen vor allem geringe Offenheit, Feuchtigkeit, Zerstoerung und Regionsuebergaenge. Die Gewichtungen sind zentral in den Generatoroptionen definiert und nicht ueber Algorithmen verteilt.
 
+Die initiale weiche Zellkostenfunktion ist:
+
+```text
+1.0
++ (1 - openness) * 2.0
++ wetness * 0.8
++ destruction * 0.6
++ Regionswechsel * 0.25
++ Richtungswechsel * 0.15
++ Naehe-zu-fremder-Site * [0.0, 1.5]
+```
+
+Beim feinen Routing multipliziert eine bereits von genau einem Korridor verwendete Zelle diese Kosten mit 0.75. Ab der zweiten Wiederverwendung steigt der Faktor auf 1.25, ab der dritten auf 2.0. Dadurch entstehen gemeinsame Achsen, ohne alle Verbindungen in denselben Stamm zu zwingen. Diese Werte sind zentrale `RoutingOptions` und werden anhand der Graybox-Metriken angepasst.
+
 Aus dem kostenbewerteten Kandidatengraphen entstehen:
 
-1. ein Minimum-Spanning-Tree fuer garantierte Erreichbarkeit,
+1. ein deterministischer, gradbegrenzter Spannbaum fuer garantierte Erreichbarkeit,
 2. ein aus `roadDensity` abgeleitetes Budget von ein bis drei Zusatzkanten,
-3. moeglichst kurze Zusatzkanten ohne uebermaessige Knotengrade,
+3. moeglichst kurze Zusatzkanten unter derselben Gradgrenze,
 4. bewusst erhaltene Sackgassen.
+
+Der harte maximale Site-Grad im Intent-Graph ist 4. Der Spannbaum wird daher nicht als normaler MST bezeichnet. Die Auswahl minimiert Landschaftskosten unter der Gradbedingung und verwendet bei Bedarf deterministisches Backtracking, das bei sieben bis elf Sites begrenzt bleibt. `roadDensity` wird in drei Intervalle geteilt: unteres Drittel erzeugt eine, mittleres Drittel zwei und oberes Drittel drei Zusatzkanten.
 
 Der Graph veraendert keine Felder und keine Regionen. Er waehlt lediglich unter landschaftlich unterschiedlich teuren Verbindungen.
 
-## 14. Site-Rollen
+## 14. Geroutete Korridore
 
-Nach dem Graphbau leitet `siteRoleResolver` ausschliesslich topologische Rollen ab:
+Jede ausgewaehlte Graphkante wird mit A* auf dem TraversalGrid geroutet. Eine Traversal-Zelle ist nur zulaessig, wenn der vollstaendige Korridorquerschnitt aus halber Breite und Clearance innerhalb der Kartengrenze und ausserhalb harter Ausschlussflaechen liegt.
 
-```text
-hub
-deadEnd
-loopNode
-peripheral
-remote
-```
+Harte Ausschluesse sind:
 
-`remote` wird aus der gewichteten kuerzesten Wegdistanz vom Spawn abgeleitet, nicht aus Luftlinie. Diese Rollen sind spaetere Eingaben fuer Site-Archetypen, Secrets und den ContentDirector. Gefahr und Belohnungswert gehoeren noch nicht in diese Stufe.
+- die um halbe Korridorbreite und Clearance erodierte Kartengrenze,
+- Kerne fremder Sites,
+- Zellen, in die der vollstaendige Korridorquerschnitt nicht passt.
 
-## 15. Geroutete Korridore
-
-Jede ausgewaehlte Graphkante wird mit A* auf dem TraversalGrid geroutet. Die Routingkosten sampeln die geographischen Felder und beruecksichtigen:
+Weiche Routingkosten beruecksichtigen:
 
 - Terrainkosten,
 - Regionsuebergaenge,
 - Richtungswechsel,
 - bereits vorhandene Korridore,
-- Schutzabstaende zu ungeeigneten Sites und Kartenrand.
+- Naehe zu ungeeigneten Sites und Kartenrand.
 
-Vorhandene Korridore werden leicht bevorzugt, damit gemeinsame Hauptachsen und echte Kreuzungen entstehen. Ein Wiederverwendungslimit verhindert, dass alle Routen in einem einzigen Stamm verschmelzen.
+Vorhandene Korridore werden zunaechst leicht bevorzugt, damit gemeinsame Hauptachsen und echte Kreuzungen entstehen. Uebermaessige Wiederverwendung erhaelt danach progressiv steigende weiche Kosten. Es gibt kein hartes Wiederverwendungslimit, das A* unnoetig scheitern lassen kann.
 
 Das kanonische Ergebnis ist nicht das Rasterformat des aktuellen Strassenrenderers:
 
@@ -297,6 +359,22 @@ interface RoutedCorridor {
 ```
 
 Die Centerline und Breite sind die Weltlogik. Ein Renderer darf daraus fuer die aktuelle Darstellung Strassenzellen ableiten. Spaetere Spline- oder Biom-spezifische Wegrenderer erfordern keine Aenderung am Generatorvertrag.
+
+## 15. Realisierte Topologie und Site-Eigenschaften
+
+Nach dem Routing erzeugt `realizedTraversalGraph` aus Korridoren, gemeinsam genutzten Segmenten und echten Kreuzungen die tatsaechlich befahrbare Topologie. Er enthaelt Sites und kuenstliche Kreuzungsknoten. Kanten sind maximale Korridorabschnitte zwischen diesen Knoten und tragen ihre reale geroutete Laenge und Kosten.
+
+Erst danach berechnet `siteRoleResolver` unabhaengige Eigenschaften und Tags:
+
+```ts
+interface SiteTopology {
+  degree: number;
+  distanceFromSpawn: number;
+  tags: Array<'hub' | 'deadEnd' | 'loopNode' | 'peripheral' | 'remote'>;
+}
+```
+
+Tags sind nicht gegenseitig exklusiv. Eine Site kann gleichzeitig `deadEnd` und `remote` sein. `remote` basiert auf realer gewichteter Wegdistanz: Eine Site liegt im oberen Viertel aller Spawn-Distanzen und zugleich mindestens 25 Prozent ueber dem Median. `loopNode` wird durch Zykluszugehoerigkeit im realisierten Graphen bestimmt. Gefahr und Belohnungswert gehoeren weiterhin erst in den spaeteren ContentDirector.
 
 ## 16. SpatialReservations
 
@@ -417,6 +495,7 @@ Jede Stufe garantiert und normalisiert ihr eigenes Ergebnis:
 - `siteGenerator` ersetzt eigene ungeeignete Kandidaten.
 - `traversalGraph` garantiert einen verbundenen Graphen.
 - `pathRouter` garantiert Breite und Durchgaengigkeit seiner Korridore.
+- `realizedTraversalGraph` bildet geteilte Segmente und Kreuzungen ohne Mutation der Korridore ab.
 - `landscapeGenerator` respektiert Reservations bereits beim Erzeugen.
 
 Alle Such- und Reparaturschritte besitzen feste Versuchslimits. Es gibt keine Endlosschleifen und kein Neuwuerfeln mit einem anderen Seed.
@@ -430,8 +509,8 @@ Harte Invarianten:
 - Jede FieldGrid-Zelle besitzt alle Grundfelder, eine `regionId` und eine `biomeId`.
 - Jede Region ist zusammenhaengend und besitzt genau ein Biom.
 - Jede Site liegt innerhalb der Extents und respektiert ihre Mindestabstaende.
-- Der Graph ist vom Spawn aus vollstaendig erreichbar.
-- Schleifenbudget und maximale Knotengrade werden eingehalten.
+- Intent-Graph und realisierter Graph sind vom Spawn aus vollstaendig erreichbar.
+- Schleifenbudget und der harte maximale Site-Grad 4 im Intent-Graph werden eingehalten.
 - Jede Graphkante besitzt genau einen befahrbaren Korridor.
 - Korridore, Spawn und harte Reservations sind frei von blockierenden Features.
 - Alle Feature-Footprints liegen vollstaendig innerhalb der Karte.
@@ -460,8 +539,8 @@ Automatische Tests:
 - Tests fuer Hashlabels und getrennte RNG-Stroeme.
 - Tests fuer FieldGrid-/TraversalGrid-Umrechnung und Interpolation.
 - Regionskontiguitaet und aktive Biome.
-- kostenbewerteter MST, Schleifenbudget und Site-Rollen.
-- A*-Routing, Korridorbreite und Reservationen.
+- kostenbewerteter gradbegrenzter Spannbaum und Schleifenbudget.
+- A*-Routing mit Korridorquerschnitt, realisierte Topologie und Site-Tags.
 - Feature-Footprints und Asset-Envelope-Vertrag.
 - lesender Validator ohne Seiteneffekte.
 - Eigenschaftstests ueber mindestens 500 Seeds.
@@ -481,7 +560,7 @@ Mapsmith zeigt schaltbare Ebenen fuer WorldDNA, MacroStructure, Grundfelder, Pot
 
 ## 23. Runtime-Integration und Entfernung der Altlogik
 
-`main.ts` ruft ausschliesslich `generiereWelt` auf. Der regionsbasierte Bodenrenderer ersetzt die rechteckigen Modulboeden. Der Strassenrenderer konsumiert `RoutedCorridor` und leitet seine momentanen Rastertiles selbst daraus ab. Loader, Kollision und Mapsmith werden auf das neue Runtimeformat umgestellt.
+`main.ts` ruft `generiereWelt` und danach explizit `resolveGraybox` auf. Der regionsbasierte Bodenrenderer ersetzt die rechteckigen Modulboeden. Der Strassenrenderer konsumiert `RoutedCorridor` und leitet seine momentanen Rastertiles selbst daraus ab. Loader, Kollision und Mapsmith werden auf das neue Runtimeformat umgestellt.
 
 Folgende Generationspfade werden entfernt, sobald ihre neue Entsprechung integriert ist:
 
