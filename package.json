@@ -7,7 +7,12 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "assets:catalog": "vite-node tools/exportAssetCatalog.ts",
+    "assets:preview": "vite-node tools/renderIronwasteSeedBoard.ts",
+    "assets:generate": "npm run assets:catalog && node tools/generateIronwasteAssets.mjs && npm run assets:preview",
+    "assets:verify": "node tools/verifyIronwasteAssets.mjs",
+    "assets:approve": "node tools/verifyIronwasteAssets.mjs --approve"
   },
   "dependencies": {
     "@babylonjs/core": "^8.0.0"

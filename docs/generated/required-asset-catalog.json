@@ -1,0 +1,815 @@
+{
+  "schemaVersion": 1,
+  "generatorVersion": "hybrid-asset-grammar-v1",
+  "families": [
+    {
+      "demandClass": "corridor.edge",
+      "source": "corridor",
+      "familyRole": "edge",
+      "geometryMode": "parametric",
+      "biomes": [
+        "crater",
+        "industrial",
+        "mud",
+        "ruins",
+        "scrap",
+        "wasteland"
+      ],
+      "minFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "maxFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "connectorProfiles": [
+        "corridor-width-v1"
+      ],
+      "requiredVariants": 1,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "corridor.surface",
+      "source": "corridor",
+      "familyRole": "surface",
+      "geometryMode": "parametric",
+      "biomes": [
+        "crater",
+        "industrial",
+        "mud",
+        "ruins",
+        "scrap",
+        "wasteland"
+      ],
+      "minFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "maxFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "connectorProfiles": [
+        "corridor-width-v1"
+      ],
+      "requiredVariants": 1,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "crater.boundaryArc",
+      "source": "landscape",
+      "familyRole": "edge",
+      "geometryMode": "bounded",
+      "biomes": [
+        "crater"
+      ],
+      "minFootprint": {
+        "halfX": 3,
+        "halfZ": 3
+      },
+      "maxFootprint": {
+        "halfX": 9,
+        "halfZ": 9
+      },
+      "connectorProfiles": [],
+      "requiredVariants": 3,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "crater.clearingIsland",
+      "source": "landscape",
+      "familyRole": "structure",
+      "geometryMode": "bounded",
+      "biomes": [
+        "crater"
+      ],
+      "minFootprint": {
+        "halfX": 4.5,
+        "halfZ": 4.5
+      },
+      "maxFootprint": {
+        "halfX": 14,
+        "halfZ": 14
+      },
+      "connectorProfiles": [],
+      "requiredVariants": 2,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "crater.destructibleBlob",
+      "source": "landscape",
+      "familyRole": "cluster",
+      "geometryMode": "bounded",
+      "biomes": [
+        "crater"
+      ],
+      "minFootprint": {
+        "halfX": 1.5,
+        "halfZ": 1.5
+      },
+      "maxFootprint": {
+        "halfX": 5.5,
+        "halfZ": 5.5
+      },
+      "connectorProfiles": [],
+      "requiredVariants": 3,
+      "requiredStates": [
+        "damaged",
+        "destroyed",
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "ground.crater",
+      "source": "ground",
+      "familyRole": "surface",
+      "geometryMode": "tileable",
+      "biomes": [
+        "crater"
+      ],
+      "minFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "maxFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "connectorProfiles": [
+        "ground-material-v1"
+      ],
+      "requiredVariants": 1,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "ground.industrial",
+      "source": "ground",
+      "familyRole": "surface",
+      "geometryMode": "tileable",
+      "biomes": [
+        "industrial"
+      ],
+      "minFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "maxFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "connectorProfiles": [
+        "ground-material-v1"
+      ],
+      "requiredVariants": 1,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "ground.mud",
+      "source": "ground",
+      "familyRole": "surface",
+      "geometryMode": "tileable",
+      "biomes": [
+        "mud"
+      ],
+      "minFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "maxFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "connectorProfiles": [
+        "ground-material-v1"
+      ],
+      "requiredVariants": 1,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "ground.ruins",
+      "source": "ground",
+      "familyRole": "surface",
+      "geometryMode": "tileable",
+      "biomes": [
+        "ruins"
+      ],
+      "minFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "maxFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "connectorProfiles": [
+        "ground-material-v1"
+      ],
+      "requiredVariants": 1,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "ground.scrap",
+      "source": "ground",
+      "familyRole": "surface",
+      "geometryMode": "tileable",
+      "biomes": [
+        "scrap"
+      ],
+      "minFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "maxFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "connectorProfiles": [
+        "ground-material-v1"
+      ],
+      "requiredVariants": 1,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "ground.transition",
+      "source": "transition",
+      "familyRole": "surface",
+      "geometryMode": "parametric",
+      "biomes": [
+        "crater",
+        "industrial",
+        "mud",
+        "ruins",
+        "scrap",
+        "wasteland"
+      ],
+      "minFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "maxFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "connectorProfiles": [
+        "biome-boundary-v1"
+      ],
+      "requiredVariants": 1,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "ground.wasteland",
+      "source": "ground",
+      "familyRole": "surface",
+      "geometryMode": "tileable",
+      "biomes": [
+        "wasteland"
+      ],
+      "minFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "maxFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "connectorProfiles": [
+        "ground-material-v1"
+      ],
+      "requiredVariants": 1,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "industrial.breakableEdge",
+      "source": "landscape",
+      "familyRole": "obstacle",
+      "geometryMode": "bounded",
+      "biomes": [
+        "industrial"
+      ],
+      "minFootprint": {
+        "halfX": 1.5,
+        "halfZ": 1.5
+      },
+      "maxFootprint": {
+        "halfX": 5.5,
+        "halfZ": 5.5
+      },
+      "connectorProfiles": [],
+      "requiredVariants": 3,
+      "requiredStates": [
+        "damaged",
+        "destroyed",
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "industrial.coverCluster",
+      "source": "landscape",
+      "familyRole": "cluster",
+      "geometryMode": "bounded",
+      "biomes": [
+        "industrial"
+      ],
+      "minFootprint": {
+        "halfX": 3,
+        "halfZ": 3
+      },
+      "maxFootprint": {
+        "halfX": 9,
+        "halfZ": 9
+      },
+      "connectorProfiles": [],
+      "requiredVariants": 3,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "industrial.linearBarrier",
+      "source": "landscape",
+      "familyRole": "edge",
+      "geometryMode": "bounded",
+      "biomes": [
+        "industrial"
+      ],
+      "minFootprint": {
+        "halfX": 4.5,
+        "halfZ": 4.5
+      },
+      "maxFootprint": {
+        "halfX": 14,
+        "halfZ": 14
+      },
+      "connectorProfiles": [],
+      "requiredVariants": 2,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "junction.degree3",
+      "source": "junction",
+      "familyRole": "surface",
+      "geometryMode": "parametric",
+      "biomes": [
+        "crater",
+        "industrial",
+        "mud",
+        "ruins",
+        "scrap",
+        "wasteland"
+      ],
+      "minFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "maxFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "connectorProfiles": [
+        "road-junction-v1"
+      ],
+      "requiredVariants": 1,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "junction.degree4",
+      "source": "junction",
+      "familyRole": "surface",
+      "geometryMode": "parametric",
+      "biomes": [
+        "crater",
+        "industrial",
+        "mud",
+        "ruins",
+        "scrap",
+        "wasteland"
+      ],
+      "minFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "maxFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "connectorProfiles": [
+        "road-junction-v1"
+      ],
+      "requiredVariants": 1,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "mud.clearingIsland",
+      "source": "landscape",
+      "familyRole": "structure",
+      "geometryMode": "bounded",
+      "biomes": [
+        "mud"
+      ],
+      "minFootprint": {
+        "halfX": 4.5,
+        "halfZ": 4.5
+      },
+      "maxFootprint": {
+        "halfX": 14,
+        "halfZ": 14
+      },
+      "connectorProfiles": [],
+      "requiredVariants": 2,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "mud.destructibleBlob",
+      "source": "landscape",
+      "familyRole": "cluster",
+      "geometryMode": "bounded",
+      "biomes": [
+        "mud"
+      ],
+      "minFootprint": {
+        "halfX": 3,
+        "halfZ": 3
+      },
+      "maxFootprint": {
+        "halfX": 9,
+        "halfZ": 9
+      },
+      "connectorProfiles": [],
+      "requiredVariants": 3,
+      "requiredStates": [
+        "damaged",
+        "destroyed",
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "mud.fillerCluster",
+      "source": "landscape",
+      "familyRole": "cluster",
+      "geometryMode": "bounded",
+      "biomes": [
+        "mud"
+      ],
+      "minFootprint": {
+        "halfX": 1.5,
+        "halfZ": 1.5
+      },
+      "maxFootprint": {
+        "halfX": 5.5,
+        "halfZ": 5.5
+      },
+      "connectorProfiles": [],
+      "requiredVariants": 3,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "ruins.coverCluster",
+      "source": "landscape",
+      "familyRole": "cluster",
+      "geometryMode": "bounded",
+      "biomes": [
+        "ruins"
+      ],
+      "minFootprint": {
+        "halfX": 1.5,
+        "halfZ": 1.5
+      },
+      "maxFootprint": {
+        "halfX": 5.5,
+        "halfZ": 5.5
+      },
+      "connectorProfiles": [],
+      "requiredVariants": 3,
+      "requiredStates": [
+        "damaged",
+        "destroyed",
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "ruins.landmarkArc",
+      "source": "landscape",
+      "familyRole": "structure",
+      "geometryMode": "bounded",
+      "biomes": [
+        "ruins"
+      ],
+      "minFootprint": {
+        "halfX": 4.5,
+        "halfZ": 4.5
+      },
+      "maxFootprint": {
+        "halfX": 14,
+        "halfZ": 14
+      },
+      "connectorProfiles": [],
+      "requiredVariants": 2,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "ruins.linearBarrier",
+      "source": "landscape",
+      "familyRole": "edge",
+      "geometryMode": "bounded",
+      "biomes": [
+        "ruins"
+      ],
+      "minFootprint": {
+        "halfX": 3,
+        "halfZ": 3
+      },
+      "maxFootprint": {
+        "halfX": 9,
+        "halfZ": 9
+      },
+      "connectorProfiles": [],
+      "requiredVariants": 3,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "scrap.landmarkIsland",
+      "source": "landscape",
+      "familyRole": "structure",
+      "geometryMode": "bounded",
+      "biomes": [
+        "scrap"
+      ],
+      "minFootprint": {
+        "halfX": 4.5,
+        "halfZ": 4.5
+      },
+      "maxFootprint": {
+        "halfX": 14,
+        "halfZ": 14
+      },
+      "connectorProfiles": [],
+      "requiredVariants": 2,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "scrap.scrapPile",
+      "source": "landscape",
+      "familyRole": "cluster",
+      "geometryMode": "bounded",
+      "biomes": [
+        "scrap"
+      ],
+      "minFootprint": {
+        "halfX": 1.5,
+        "halfZ": 1.5
+      },
+      "maxFootprint": {
+        "halfX": 5.5,
+        "halfZ": 5.5
+      },
+      "connectorProfiles": [],
+      "requiredVariants": 3,
+      "requiredStates": [
+        "damaged",
+        "destroyed",
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "scrap.wreckCluster",
+      "source": "landscape",
+      "familyRole": "cluster",
+      "geometryMode": "bounded",
+      "biomes": [
+        "scrap"
+      ],
+      "minFootprint": {
+        "halfX": 3,
+        "halfZ": 3
+      },
+      "maxFootprint": {
+        "halfX": 9,
+        "halfZ": 9
+      },
+      "connectorProfiles": [],
+      "requiredVariants": 3,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "site.entrance",
+      "source": "site",
+      "familyRole": "site",
+      "geometryMode": "parametric",
+      "biomes": [
+        "crater",
+        "industrial",
+        "mud",
+        "ruins",
+        "scrap",
+        "wasteland"
+      ],
+      "minFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "maxFootprint": {
+        "halfX": 0,
+        "halfZ": 0
+      },
+      "connectorProfiles": [
+        "yard-road-v1"
+      ],
+      "requiredVariants": 1,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "site.industrialYard",
+      "source": "site",
+      "familyRole": "site",
+      "geometryMode": "bounded",
+      "biomes": [
+        "industrial"
+      ],
+      "minFootprint": {
+        "halfX": 10,
+        "halfZ": 10
+      },
+      "maxFootprint": {
+        "halfX": 40,
+        "halfZ": 40
+      },
+      "connectorProfiles": [
+        "yard-road-v1"
+      ],
+      "requiredVariants": 2,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": true
+    },
+    {
+      "demandClass": "site.scrapYard",
+      "source": "site",
+      "familyRole": "site",
+      "geometryMode": "bounded",
+      "biomes": [
+        "scrap"
+      ],
+      "minFootprint": {
+        "halfX": 10,
+        "halfZ": 10
+      },
+      "maxFootprint": {
+        "halfX": 40,
+        "halfZ": 40
+      },
+      "connectorProfiles": [
+        "yard-road-v1"
+      ],
+      "requiredVariants": 2,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": true
+    },
+    {
+      "demandClass": "wasteland.coverCluster",
+      "source": "landscape",
+      "familyRole": "cluster",
+      "geometryMode": "bounded",
+      "biomes": [
+        "wasteland"
+      ],
+      "minFootprint": {
+        "halfX": 1.5,
+        "halfZ": 1.5
+      },
+      "maxFootprint": {
+        "halfX": 5.5,
+        "halfZ": 5.5
+      },
+      "connectorProfiles": [],
+      "requiredVariants": 3,
+      "requiredStates": [
+        "damaged",
+        "destroyed",
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "wasteland.destructibleBlob",
+      "source": "landscape",
+      "familyRole": "cluster",
+      "geometryMode": "bounded",
+      "biomes": [
+        "wasteland"
+      ],
+      "minFootprint": {
+        "halfX": 3,
+        "halfZ": 3
+      },
+      "maxFootprint": {
+        "halfX": 9,
+        "halfZ": 9
+      },
+      "connectorProfiles": [],
+      "requiredVariants": 3,
+      "requiredStates": [
+        "damaged",
+        "destroyed",
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "wasteland.landmarkIsland",
+      "source": "landscape",
+      "familyRole": "structure",
+      "geometryMode": "bounded",
+      "biomes": [
+        "wasteland"
+      ],
+      "minFootprint": {
+        "halfX": 4.5,
+        "halfZ": 4.5
+      },
+      "maxFootprint": {
+        "halfX": 14,
+        "halfZ": 14
+      },
+      "connectorProfiles": [],
+      "requiredVariants": 2,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    }
+  ],
+  "signature": "f8386129"
+}
