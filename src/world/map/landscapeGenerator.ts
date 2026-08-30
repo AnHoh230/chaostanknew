@@ -104,6 +104,7 @@ function feature(
 ): LandscapeFeature {
   return {
     id: '',
+    demandClass: pattern.demandClass,
     biomeId: region.biomeId,
     regionId: region.id,
     shape: pattern.kind === 'island' ? 'blob' : pattern.kind === 'cluster' ? 'point' : pattern.kind,

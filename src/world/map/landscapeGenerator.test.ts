@@ -64,4 +64,15 @@ describe('landscapeGenerator', () => {
     expect(first.features.map((feature) => feature.id)).toEqual(first.features.map((_, index) => `landscape_${index}`));
     expect(first).toEqual(second);
   });
+
+  it('traegt die semantische Assetanforderung der Generatorgrammatik in jedes Feature', () => {
+    const result = generateLandscape(fixture(), createSeedStream(55, 'landscape'));
+    expect(result.features.length).toBeGreaterThan(0);
+    expect(new Set(result.features.map((feature) => feature.demandClass)))
+      .toEqual(new Set([
+        'industrial.linearBarrier',
+        'industrial.coverCluster',
+        'industrial.breakableEdge',
+      ]));
+  });
 });

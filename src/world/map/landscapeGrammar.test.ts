@@ -16,4 +16,14 @@ describe('landscapeGrammar', () => {
         .toEqual(new Set(['large', 'medium', 'small']));
     }
   });
+
+  it('ordnet jede moegliche Komposition einer expliziten Biom-Demand-Class zu', () => {
+    for (const recipe of Object.values(LANDSCAPE_RECIPES)) {
+      for (const pattern of recipe.patterns) {
+        expect(pattern.demandClass.startsWith(`${recipe.biomeId}.`)).toBe(true);
+        expect(Number.isInteger(pattern.requiredVariants)).toBe(true);
+        expect(pattern.requiredVariants).toBeGreaterThan(0);
+      }
+    }
+  });
 });
