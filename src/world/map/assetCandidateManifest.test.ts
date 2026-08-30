@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import * as candidateManifestModule from './assetCandidateManifest';
 import { REQUIRED_ASSET_CATALOG } from './assetDemandCompiler';
 import {
+  assertApprovedCandidateManifest,
   validateCandidateManifest,
   type AssetCandidateManifest,
   type ObservedCandidateFile,
@@ -32,6 +34,32 @@ function fixture(): { manifest: AssetCandidateManifest; observed: ObservedCandid
 }
 
 describe('assetCandidateManifest', () => {
+  it('stellt ein hartes Runtime-Gate fuer genehmigte Manifeste bereit', () => {
+    const exported = candidateManifestModule as unknown as Record<string, unknown>;
+
+    expect(exported.assertApprovedCandidateManifest).toBeTypeOf('function');
+  });
+
+  it('blockiert Candidate-Dateien vor der Runtime-Planung', () => {
+    const { manifest } = fixture();
+
+    expect(() => assertApprovedCandidateManifest(
+      { ...manifest, state: 'candidate' },
+      IRONWASTE_V1_PREVIEW_KIT,
+      REQUIRED_ASSET_CATALOG,
+    )).toThrow(`candidate-manifest-not-approved:${IRONWASTE_V1_PREVIEW_KIT.id}`);
+  });
+
+  it('blockiert ein genehmigtes Manifest der falschen Kitversion', () => {
+    const { manifest } = fixture();
+
+    expect(() => assertApprovedCandidateManifest(
+      { ...manifest, kitVersion: manifest.kitVersion + 1 },
+      IRONWASTE_V1_PREVIEW_KIT,
+      REQUIRED_ASSET_CATALOG,
+    )).toThrow(`candidate-kit-version-mismatch:${IRONWASTE_V1_PREVIEW_KIT.id}`);
+  });
+
   it('akzeptiert vollstaendige, unveraenderte Dateien der richtigen Kit- und Katalogversion', () => {
     const { manifest, observed } = fixture();
 

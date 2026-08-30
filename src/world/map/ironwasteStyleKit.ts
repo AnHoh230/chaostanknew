@@ -80,6 +80,7 @@ export const IRONWASTE_V1_PREVIEW_KIT: WorldStyleKit = {
   catalogSignature: REQUIRED_ASSET_CATALOG.signature,
   activation: 'preview',
   previewScope: PREVIEW_SCOPE,
+  previewBiomes: ['industrial', 'scrap'],
   globalStyle: {
     texelsPerWorldUnit: 16,
     materialFinish: 'matte-weathered',

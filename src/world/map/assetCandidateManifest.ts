@@ -23,6 +23,22 @@ export interface CandidateManifestValidation {
   errors: string[];
 }
 
+export function assertApprovedCandidateManifest(
+  manifest: AssetCandidateManifest,
+  kit: WorldStyleKit,
+  catalog: RequiredAssetCatalog,
+): void {
+  if (manifest.state !== 'approved') {
+    throw new Error(`candidate-manifest-not-approved:${kit.id}`);
+  }
+  if (manifest.kitId !== kit.id || manifest.kitVersion !== kit.version) {
+    throw new Error(`candidate-kit-version-mismatch:${kit.id}`);
+  }
+  if (manifest.catalogSignature !== catalog.signature || manifest.catalogSignature !== kit.catalogSignature) {
+    throw new Error(`candidate-catalog-signature-mismatch:${kit.id}`);
+  }
+}
+
 export function validateCandidateManifest(
   manifest: AssetCandidateManifest,
   kit: WorldStyleKit,

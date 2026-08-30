@@ -101,6 +101,7 @@ export interface WorldStyleKit {
   catalogSignature: string;
   activation: 'preview' | 'runtime';
   previewScope: DemandClassId[];
+  previewBiomes: BiomeId[];
   globalStyle: GlobalStyleContract;
   biomeKits: BiomeStyleKit[];
   families: AssetFamily[];

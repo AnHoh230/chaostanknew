@@ -22,6 +22,13 @@ describe('worldStyleKit', () => {
     expect(validation.coveredDemandClasses).toEqual([...IRONWASTE_V1_PREVIEW_KIT.previewScope].sort());
   });
 
+  it('verwirft Preview-Kits ohne expliziten Biom-Scope', () => {
+    const invalid = { ...IRONWASTE_V1_PREVIEW_KIT, previewBiomes: [] } as WorldStyleKit;
+
+    expect(() => validateWorldStyleKit(invalid, REQUIRED_ASSET_CATALOG))
+      .toThrow(`preview-kit-has-no-biomes:${invalid.id}`);
+  });
+
   it('blockiert eine Runtime-Aktivierung solange der Gesamtkatalog nicht gedeckt ist', () => {
     const runtimeKit: WorldStyleKit = { ...IRONWASTE_V1_PREVIEW_KIT, activation: 'runtime' };
 

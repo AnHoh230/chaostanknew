@@ -44,6 +44,10 @@ export function validateWorldStyleKit(
   }
   assertUnique(kit.families.map((family) => family.id), 'duplicate-family-id');
   assertUnique(kit.families.flatMap((family) => family.variants.map((variant) => variant.id)), 'duplicate-variant-id');
+  if (kit.activation === 'preview' && kit.previewBiomes.length === 0) {
+    throw new Error(`preview-kit-has-no-biomes:${kit.id}`);
+  }
+  assertUnique(kit.previewBiomes, 'duplicate-preview-biome');
 
   const catalogByClass = new Map(catalog.families.map((family) => [family.demandClass, family]));
   for (const family of kit.families) {
