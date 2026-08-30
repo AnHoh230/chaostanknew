@@ -13,8 +13,6 @@ describe('grayboxResolver', () => {
     expect(runtime.entities).toHaveLength(world.features.length);
     expect(runtime.regionCells).toHaveLength(world.regions.grid.cols * world.regions.grid.rows);
     expect(JSON.stringify(world)).toBe(before);
-    expect(runtime).not.toHaveProperty('zones');
-    expect(runtime).not.toHaveProperty('rezeptId');
   });
 
   it('waehlt fuer jedes Feature ein Asset innerhalb seiner autoritativen Huelle', () => {

@@ -13,18 +13,10 @@ export interface HybridMapsmithInfo {
   world: GenerierteWelt;
 }
 
-interface LegacyMapsmithInfo {
-  rezeptId: string;
-  seed: number;
-  valid: boolean;
-  warnungen: string[];
-  entities: number;
-}
-
 export interface MapsmithHud {
   setSichtbar(v: boolean): void;
   setLayer(layer: DebugLayer): void;
-  update(info: HybridMapsmithInfo | LegacyMapsmithInfo): void;
+  update(info: HybridMapsmithInfo): void;
 }
 
 function colorFor(category: string, alpha = 0.72): string {
@@ -117,15 +109,11 @@ export function createMapsmithHud(onLayerChange?: (layer: DebugLayer) => void): 
       if (latestWorld) drawDebug(canvas, latestWorld, projectWorldDebug(latestWorld, layer));
     },
     update(info): void {
-      if ('world' in info) {
-        latestWorld = info.world;
-        select.value = info.layer;
-        const failures = info.world.debug.validation.hardFailures.length;
-        summary.textContent = `🛠 MAPSMITH · ${info.generatorId} · Seed ${info.seed} · ${info.world.features.length} Features · ${failures === 0 ? 'valide' : `${failures} Fehler`}`;
-        drawDebug(canvas, info.world, projectWorldDebug(info.world, info.layer));
-      } else {
-        summary.textContent = `🛠 MAPSMITH · ${info.rezeptId} · Seed ${info.seed} · ${info.entities} Entities · ${info.valid ? 'valide' : info.warnungen.join(', ')}`;
-      }
+      latestWorld = info.world;
+      select.value = info.layer;
+      const failures = info.world.debug.validation.hardFailures.length;
+      summary.textContent = `🛠 MAPSMITH · ${info.generatorId} · Seed ${info.seed} · ${info.world.features.length} Features · ${failures === 0 ? 'valide' : `${failures} Fehler`}`;
+      drawDebug(canvas, info.world, projectWorldDebug(info.world, info.layer));
     },
   };
 }

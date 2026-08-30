@@ -10,12 +10,10 @@ import { createEndlessGround } from './world/ground';
 import { createArenaBoundary, type ArenaBoundary } from './world/arenaBoundary';
 import { ladeKarte } from './world/map/loader';
 import { createMessages } from './ui/messages';
-import { generiereStadt, type StadtOpt, type BlockRect } from './world/map/cityGen';
-import { STANDARD_CAPS } from './world/map/moduleCaps';
-import { MODUL_KATALOG } from './world/map/moduleKatalog';
 import { createRoadMesh, type RoadMeshHandle } from './world/map/roadMesh';
-import { createGroundTiles, type GroundTilesHandle } from './world/map/groundTiles';
-import type { KartenDaten } from './world/map/mapTypes';
+import { createRegionGround, type RegionGroundHandle } from './world/map/regionGround';
+import { DEFAULT_WORLD_OPTIONS, generiereWelt } from './world/map/worldGenerator';
+import { resolveGraybox } from './world/map/grayboxResolver';
 import { treffeBreakable, breakableLoot, hazardSchaden, hazardAktiv, sammleCollectible } from './world/map/mapEntities';
 import { createNest, pruefeEntdeckung, nestGegnerGefallen, nestGeraeumt, lebenDropAnzahl, type NestState } from './world/map/dormantNest';
 import { rampeAusgeloest, sprungBogen, sprungFertig } from './world/map/secret';
@@ -235,39 +233,21 @@ function boot(build: BuildFolge): void {
   // Endlos-Boden folgt dem Panzer-Root
   const ground = createEndlessGround(scene, tank.view.root, BIOME_ID);
 
-  // Schrott-Spielplatz-Karte (Map-Builder): generieren + laden. Seed vorerst = SEED;
-  // kuratierte Karten-Auswahl folgt in Phase 7.
-  // — Schrott-Spielplatz-Karte (Map-Builder), live neu ladbar für den Mapsmith-Debugmodus (Phase 7/8) —
-  const startKarte = waehleKarte(0); // Seed-Quelle für den Mapsmith (G = reroll)
-  const mapsmith = createMapsmith(startKarte.rezeptId, startKarte.seed);
-  // Modul-Generator (roads-first): seed -> Module SEED-abhängig platzieren -> mit Straßen
-  // verbinden -> zu Entities stempeln -> KartenDaten. Ursprung bleibt modulfrei (Spawn).
-  const STADT_OPT: StadtOpt = {
-    extents: { halfX: 400, halfZ: 320 }, cellSize: 6, module: MODUL_KATALOG,
-    clearanceCells: 2, roadBreiteZellen: 1, spawnFreiRadius: 34, biomeId: BIOME_ID,
-    // Spawnende Obstacles (Nester) bewusst RAR halten: je Nest feuert genau 1× bei Entdeckung
-    // (one-shot), aber zu viele über die Karte verteilt wirken wie Dauer-Spawn -> Deckel runter.
-    caps: { ...STANDARD_CAPS, maxNester: 3 },
-  };
-  let aktuelleRoadZellen: string[] = [];
-  let aktuelleBlockRects: BlockRect[] = [];
-  function baueStadtKarte(seed: number): KartenDaten {
-    const stadt = generiereStadt(STADT_OPT, seed);
-    aktuelleRoadZellen = stadt.roadZellen;
-    aktuelleBlockRects = stadt.blockRects;
-    return stadt;
-  }
-  let karte: KartenDaten = baueStadtKarte(mapsmith.seed);
+  // Verbindliche Kartenpipeline: Feldwelt -> validierte abstrakte Welt -> schmale Runtimeprojektion.
+  const startKarte = waehleKarte(0);
+  const mapsmith = createMapsmith('hybrid', startKarte.seed);
+  let welt = generiereWelt(DEFAULT_WORLD_OPTIONS, mapsmith.seed);
+  let karte = resolveGraybox(welt);
   let mapHandle = ladeKarte(scene, karte);
   let roadHandle: RoadMeshHandle | null = null;
   function baueRoads(): void {
     roadHandle?.dispose();
-    roadHandle = createRoadMesh(scene, aktuelleRoadZellen, STADT_OPT.cellSize, karte.extents.halfX, karte.extents.halfZ);
+    roadHandle = createRoadMesh(scene, karte.corridors, karte.traversalGrid);
   }
-  let groundHandle: GroundTilesHandle | null = null;
-  function baueGroundTiles(): void {
+  let groundHandle: RegionGroundHandle | null = null;
+  function baueRegionsboden(): void {
     groundHandle?.dispose();
-    groundHandle = createGroundTiles(scene, aktuelleBlockRects);
+    groundHandle = createRegionGround(scene, karte);
   }
   let nester: { id: string; pos: { x: number; z: number }; state: NestState; belohnt: boolean }[] = [];
   const nestGegnerVon = new Map<string, string>(); // EnemyId → NestId (Tag: droppt Leben statt Impuls)
@@ -310,23 +290,24 @@ function boot(build: BuildFolge): void {
     mapHandle.dispose();
     nestGegnerVon.clear();
     sprungT = -1;
-    karte = baueStadtKarte(mapsmith.seed);
+    welt = generiereWelt(DEFAULT_WORLD_OPTIONS, mapsmith.seed);
+    karte = resolveGraybox(welt);
     mapHandle = ladeKarte(scene, karte);
     bestueckeKarte();
     baueArenaWand(); // Wand passend zur neuen Karte/Rampe
     baueRoads(); // Straßen-Mesh passend zur neuen Karte
-    baueGroundTiles(); // Modul-Böden passend zur neuen Karte
+    baueRegionsboden();
     waypoint = null; // altes Ziel gilt nicht mehr
     overviewMap.setWaypoint(null);
     waypointMarker.verstecke();
     overviewMap.resetFog(); // neue Karte = wieder unerforscht
-    log.info('map neu geladen', { rezept: karte.rezeptId, seed: karte.seed, entities: karte.entities.length, valid: karte.valid });
+    log.info('map neu geladen', { seed: karte.seed, entities: karte.entities.length, quality: welt.debug.quality });
   }
   bestueckeKarte();
   baueArenaWand();
   baueRoads();
-  baueGroundTiles();
-  log.info('map geladen', { rezept: karte.rezeptId, seed: karte.seed, entities: karte.entities.length, valid: karte.valid });
+  baueRegionsboden();
+  log.info('map geladen', { seed: karte.seed, entities: karte.entities.length, quality: welt.debug.quality });
 
   // In-Welt-Nameplate (benennt das nächste interagierbare Prop beim Annähern)
   // + immer sichtbare Karten-Legende (Farb-/Symbol-Code passend zur Minimap).
@@ -334,9 +315,12 @@ function boot(build: BuildFolge): void {
   createMapLegend();
 
   // Mapsmith-Debug-HUD + Tasten: M Toggle, G reroll (neuer Seed), C speichern (Zeile für curatedMaps.ts).
-  const mapsmithHud = createMapsmithHud();
+  let mapsmithHud = createMapsmithHud((layer) => {
+    mapsmith.layer = layer;
+    mapsmithHud.setLayer(layer);
+  });
   const mapsmithRefresh = (): void =>
-    mapsmithHud.update({ rezeptId: karte.rezeptId, seed: karte.seed, valid: karte.valid, warnungen: karte.warnungen, entities: karte.entities.length });
+    mapsmithHud.update({ generatorId: 'hybrid', seed: karte.seed, layer: mapsmith.layer, world: welt });
   window.addEventListener('keydown', (ev) => {
     if (ev.key === 'm' || ev.key === 'M') {
       mapsmith.aktiv = !mapsmith.aktiv;
@@ -353,7 +337,7 @@ function boot(build: BuildFolge): void {
       const zeile = kuratierteZeile(mapsmith);
       try { void navigator.clipboard?.writeText(zeile); } catch { /* Clipboard evtl. blockiert */ }
       try { localStorage.setItem('mapsmith_last', zeile); } catch { /* localStorage evtl. blockiert */ }
-      log.info('mapsmith gespeichert — Zeile in curatedMaps.ts einfügen', { zeile });
+      log.info('mapsmith gespeichert — Seed-Zeile in curatedMaps.ts einfügen', { zeile });
       showToast('💾 ' + zeile, '#ffe0a8');
     }
   });

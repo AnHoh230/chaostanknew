@@ -3,21 +3,6 @@
  * Werte sind Startwerte; Feinschliff über den Mapsmith/Telemetrie.
  */
 export const MAP_TUNING = {
-  // — Platzierung / Scatter —
-  blueNoiseRadius: { breakable: 6, obstacle: 9, decor: 4, collectible: 8 } as Record<string, number>,
-  rotJitter: Math.PI, // ± um Y (rad)
-  scaleJitter: [0.85, 1.2] as [number, number],
-  pathClearance: 2, // zusätzlicher Freiraum links/rechts der Pfade
-  maxPlatzierungsVersuche: 40,
-
-  // — Zonen (Radius-Bereich [min,max] je Thema) —
-  zoneRadius: {
-    offenerHof: [80, 120],
-    wrackCluster: [70, 100],
-    pressWerk: [70, 110],
-    funkturmZone: [80, 110],
-  } as Record<string, [number, number]>,
-
   // — Gameplay-Werte (Invariante: nichts davon gibt Impulse) —
   breakableHp: { fass: 1, kiste: 1, schrotthaufen: 2, neonschild: 1 } as Record<string, number>,
   hazardDmg: { presse: 24, stachelgrube: 14, giftpfuetze: 8 } as Record<string, number>,

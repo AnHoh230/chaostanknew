@@ -6,16 +6,6 @@
 export interface Vec2 { x: number; z: number } // Babylon X/Z-Ebene, y=0
 export interface Vec3 { x: number; y: number; z: number }
 
-export type ZoneTheme = 'offenerHof' | 'wrackCluster' | 'pressWerk' | 'funkturmZone';
-
-export interface Zone {
-  id: string;
-  theme: ZoneTheme;
-  center: Vec2;
-  radiusX: number;
-  radiusZ: number;
-}
-
 export type EntityKind =
   | 'breakable'    // Fass/Kiste/Schrott — zerstörbar
   | 'obstacle'     // Cover/Block, nicht zerstörbar
@@ -39,21 +29,3 @@ export interface MapEntity {
   params?: Record<string, number | string | boolean>; // kind-spezifisch (hp, hazardDmg, nestSize, lootTableId, ...)
 }
 
-export interface MapPath {
-  id: string;
-  punkte: Vec2[]; // Polyline befahrbarer Korridor
-  breite: number;
-}
-
-export interface KartenDaten {
-  rezeptId: string;
-  seed: number;
-  biomeId: string; // z.B. 'schrottfeld'
-  extents: { halfX: number; halfZ: number };
-  spawn: Vec2;
-  zones: Zone[];
-  paths: MapPath[];
-  entities: MapEntity[];
-  valid: boolean;
-  warnungen: string[];
-}

@@ -4,10 +4,10 @@
  * die Wege „asset-generiert" aus — Geraden laufen durch, an Knicken Kurven, an Knoten T/Kreuz —
  * statt wie ein dunkler Mathe-Strich. Tiles je Art gemergt (ein Draw-Batch/Art), eingefroren.
  *
- * Zell→Welt passend zum Painter (moduleRoads): x = col*cs − halfX, z = row*cs − halfZ.
+ * Zell→Welt verwendet die Mittelpunkte des verbindlichen TraversalGrid.
  *
- * Voraussetzung: Straßen sind 1 Zelle breit (sonst erkennt die Topologie jede Zelle als T) —
- * der Aufrufer setzt roadBreiteZellen = 1.
+ * Gerendert wird die ein Zelle breite visuelle Mittellinie; die logisch freigehaltene
+ * Korridorbreite bleibt davon unberührt.
  *
  * ORIENTIERUNGS-KNÖPFE (falls im Spiel global verdreht/gespiegelt — per Auge zu fixen, da
  * WebGL-Selbstverifikation hier unzuverlässig ist):
@@ -44,23 +44,15 @@ export function corridorRenderCells(corridors: readonly RoutedCorridor[], grid: 
     .map((cell) => `${cell % grid.cols},${Math.floor(cell / grid.cols)}`);
 }
 
-export function createRoadMesh(scene: Scene, corridors: readonly RoutedCorridor[], grid: GridSpec): RoadMeshHandle;
-export function createRoadMesh(scene: Scene, roadZellen: readonly string[], cellSize: number, halfX: number, halfZ: number): RoadMeshHandle;
 export function createRoadMesh(
   scene: Scene,
-  corridorsOrCells: readonly RoutedCorridor[] | readonly string[],
-  gridOrCellSize: GridSpec | number,
-  legacyHalfX?: number,
-  legacyHalfZ?: number,
+  corridors: readonly RoutedCorridor[],
+  grid: GridSpec,
 ): RoadMeshHandle {
-  const usingGrid = typeof gridOrCellSize !== 'number';
-  const roadZellen = usingGrid
-    ? corridorRenderCells(corridorsOrCells as readonly RoutedCorridor[], gridOrCellSize)
-    : corridorsOrCells as readonly string[];
-  const cellSize = usingGrid ? gridOrCellSize.cellSize : gridOrCellSize;
-  const halfX = usingGrid ? gridOrCellSize.extents.halfX : legacyHalfX!;
-  const halfZ = usingGrid ? gridOrCellSize.extents.halfZ : legacyHalfZ!;
-  const centerOffset = usingGrid ? 0.5 : 0;
+  const roadZellen = corridorRenderCells(corridors, grid);
+  const cellSize = grid.cellSize;
+  const halfX = grid.extents.halfX;
+  const halfZ = grid.extents.halfZ;
   if (roadZellen.length === 0) return { dispose() {} };
   const set = new Set(roadZellen);
 
@@ -71,7 +63,7 @@ export function createRoadMesh(
     const row = Number(key.slice(komma + 1));
     const { kind, rot } = tileFuer(maskeFuer(set, col, row));
     const tile = MeshBuilder.CreateGround('rt', { width: cellSize * QUAD, height: cellSize * QUAD }, scene);
-    tile.position.set((col + centerOffset) * cellSize - halfX, Y, (row + centerOffset) * cellSize - halfZ);
+    tile.position.set((col + 0.5) * cellSize - halfX, Y, (row + 0.5) * cellSize - halfZ);
     tile.rotation.y = ((rot + BASIS_ROT + KIND_ROT[kind]) % 4) * (Math.PI / 2);
     tile.isPickable = false;
     proArt[kind].push(tile);

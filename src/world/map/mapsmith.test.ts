@@ -4,8 +4,8 @@ import { CURATED, waehleKarte } from './curatedMaps';
 
 describe('Mapsmith (Phase 7)', () => {
   it('createMapsmith startet inaktiv mit Rezept/Seed', () => {
-    const s = createMapsmith('schrottfeld', 1337);
-    expect(s).toEqual({ aktiv: false, rezeptId: 'schrottfeld', seed: 1337 });
+    const s = createMapsmith('hybrid', 1337);
+    expect(s).toEqual({ aktiv: false, generatorId: 'hybrid', seed: 1337, layer: 'regions' });
   });
 
   it('naechsterSeed ist deterministisch und ändert den Seed', () => {
@@ -14,8 +14,8 @@ describe('Mapsmith (Phase 7)', () => {
   });
 
   it('kuratierteZeile enthält Rezept und Seed (zum Einfügen in curatedMaps.ts)', () => {
-    const z = kuratierteZeile(createMapsmith('schrottfeld', 42));
-    expect(z).toContain('schrottfeld');
+    const z = kuratierteZeile(createMapsmith('hybrid', 42));
+    expect(z).toContain('hybrid');
     expect(z).toContain('42');
   });
 });

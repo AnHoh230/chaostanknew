@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getAsset, allAssets, assetsByThemeCategory, assertAssetFits, type AssetCategory } from './assetKit';
-import type { ZoneTheme } from './mapTypes';
+import { getAsset, allAssets, assertAssetFits, type AssetCategory } from './assetKit';
 import type { LandscapeFeature } from './worldTypes';
 
 const KATEGORIEN: AssetCategory[] = ['ground', 'obstacle', 'breakable', 'hazard', 'setpiece', 'decor'];
@@ -15,16 +14,6 @@ describe('Asset-Kit (Phase 1)', () => {
 
   it('getAsset wirft bei unbekannter Id (kein stiller Fallback)', () => {
     expect(() => getAsset('gibtsnicht')).toThrow();
-  });
-
-  it('assetsByThemeCategory filtert nach Thema UND Kategorie', () => {
-    const theme: ZoneTheme = 'wrackCluster';
-    const res = assetsByThemeCategory(theme, 'breakable');
-    expect(res.length).toBeGreaterThan(0);
-    for (const a of res) {
-      expect(a.category).toBe('breakable');
-      expect(a.themes).toContain(theme);
-    }
   });
 
   it('traegt fuer jedes Asset den vollstaendigen Generatorvertrag', () => {

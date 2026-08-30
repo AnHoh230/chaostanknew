@@ -1,5 +1,5 @@
 /**
- * Loader: instanziiert KartenDaten in die Babylon-Szene (Platzhalter-Meshes aus dem Asset-Kit)
+ * Loader: instanziiert Runtime-Entities in die Babylon-Szene (Platzhalter-Meshes aus dem Asset-Kit)
  * und hält pro Entity den Gameplay-Runtime-Zustand (Breakable-HP, Hazard-Kontakt-Takt,
  * Interaktionsradius). Die eigentlichen Gameplay-Checks laufen in main.ts über entities[].
  * Der Endlos-Boden (world/ground.ts) bleibt unberührt.
@@ -57,7 +57,7 @@ export interface MapHandle {
   dispose(): void;
 }
 
-export function ladeKarte(scene: Scene, daten: Pick<RuntimeKarte, 'entities'>): MapHandle {
+export function ladeKarte(scene: Scene, daten: RuntimeKarte): MapHandle {
   const root = new TransformNode('mapRoot', scene);
   const geladen: GeladeneEntity[] = [];
   const matCache = new Map<string, StandardMaterial>(); // gleichfarbige Teile teilen ein Material
