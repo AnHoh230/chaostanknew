@@ -49,3 +49,70 @@ export interface AssetCoverageReport {
   unknownDemandClasses: string[];
   signature: string;
 }
+
+export interface AssetPort {
+  id: string;
+  kind: 'road' | 'gate' | 'wall' | 'building' | 'pipe' | 'yard';
+  localX: number;
+  localZ: number;
+  outwardAngle: number;
+  width: number;
+  clearance: number;
+  compatibleWith: string[];
+}
+
+export interface AssetVariant {
+  id: string;
+  familyId: string;
+  footprint: Footprint;
+  allowedRotations: 'any' | number[];
+  ports: AssetPort[];
+  files: string[];
+  states: AssetState[];
+  geometryRecipe?: string;
+}
+
+export interface AssetFamily {
+  id: string;
+  styleKitId: string;
+  fulfills: DemandClassId[];
+  biomes: BiomeId[];
+  connectorProfiles: string[];
+  variants: AssetVariant[];
+}
+
+export interface GlobalStyleContract {
+  texelsPerWorldUnit: number;
+  materialFinish: string;
+  palette: Record<string, string>;
+  damageLanguage: string;
+  lightingModel: string;
+}
+
+export interface BiomeStyleKit {
+  biomeId: BiomeId;
+  groundFamilyId: string;
+  paletteSlots: string[];
+}
+
+export interface WorldStyleKit {
+  id: string;
+  version: number;
+  catalogSignature: string;
+  activation: 'preview' | 'runtime';
+  previewScope: DemandClassId[];
+  globalStyle: GlobalStyleContract;
+  biomeKits: BiomeStyleKit[];
+  families: AssetFamily[];
+}
+
+export interface WorldStyleKitValidation {
+  activation: WorldStyleKit['activation'];
+  coveredDemandClasses: string[];
+  missingDemandClasses: string[];
+}
+
+export interface ResolvedAssetChoice {
+  family: AssetFamily;
+  variant: AssetVariant;
+}
