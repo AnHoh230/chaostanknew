@@ -22,6 +22,7 @@ export interface PathRoutingOptions extends RoutingOptions {
 
 export const DEFAULT_PATH_ROUTING: PathRoutingOptions = {
   ...DEFAULT_ROUTING,
+  turnCost: 0,
   corridorWidth: 12,
   corridorClearance: 3,
 };
@@ -155,28 +156,36 @@ function targetHeuristic(grid: GridSpec, cell: number, targets: readonly number[
   for (const target of targets) {
     const targetCol = target % grid.cols;
     const targetRow = Math.floor(target / grid.cols);
-    best = Math.min(best, Math.abs(col - targetCol) + Math.abs(row - targetRow));
+    best = Math.min(best, Math.hypot(col - targetCol, row - targetRow));
   }
   return best;
 }
 
-function terrainStepCost(
-  point: Vec2,
-  previousPoint: Vec2,
+interface RoutingSurface {
+  terrainByCell: Float32Array;
+  regionByCell: Array<string | undefined>;
+}
+
+function buildRoutingSurface(
+  grid: GridSpec,
   fields: WorldFields,
   regions: RegionMap,
   options: PathRoutingOptions,
-): number {
-  const openness = sampleContinuous(fields.grid, fields.openness, point);
-  const wetness = sampleContinuous(fields.grid, fields.wetness, point);
-  const destruction = sampleContinuous(fields.grid, fields.destruction, point);
-  const region = sampleCategorical(regions.grid, regions.regionByCell, point);
-  const previousRegion = sampleCategorical(regions.grid, regions.regionByCell, previousPoint);
-  return options.baseCost
-    + (1 - openness) * options.denseWeight
-    + wetness * options.wetnessWeight
-    + destruction * options.destructionWeight
-    + (region === previousRegion ? 0 : options.regionTransitionCost);
+): RoutingSurface {
+  const terrainByCell = new Float32Array(grid.cols * grid.rows);
+  const regionByCell: Array<string | undefined> = Array(terrainByCell.length);
+  for (let cell = 0; cell < terrainByCell.length; cell++) {
+    const point = cellCenter(grid, cell);
+    const openness = sampleContinuous(fields.grid, fields.openness, point);
+    const wetness = sampleContinuous(fields.grid, fields.wetness, point);
+    const destruction = sampleContinuous(fields.grid, fields.destruction, point);
+    terrainByCell[cell] = options.baseCost
+      + (1 - openness) * options.denseWeight
+      + wetness * options.wetnessWeight
+      + destruction * options.destructionWeight;
+    regionByCell[cell] = sampleCategorical(regions.grid, regions.regionByCell, point);
+  }
+  return { terrainByCell, regionByCell };
 }
 
 function routeOne(
@@ -185,8 +194,7 @@ function routeOne(
   targets: readonly number[],
   allowed: Uint8Array,
   usage: Uint16Array,
-  fields: WorldFields,
-  regions: RegionMap,
+  surface: RoutingSurface,
   options: PathRoutingOptions,
 ): number[] {
   const directionStates = 5;
@@ -220,13 +228,10 @@ function routeOne(
       if (!allowed[neighbor]) continue;
       const direction = directionBetween(grid, current.cell, neighbor);
       const turnCost = current.direction === 4 || current.direction === direction ? 0 : options.turnCost;
-      const rawTerrain = terrainStepCost(
-        cellCenter(grid, neighbor),
-        cellCenter(grid, current.cell),
-        fields,
-        regions,
-        options,
-      );
+      const rawTerrain = surface.terrainByCell[neighbor]!
+        + (surface.regionByCell[neighbor] === surface.regionByCell[current.cell]
+          ? 0
+          : options.regionTransitionCost);
       const stepCost = rawTerrain * corridorReuseMultiplier(usage[neighbor]!) + turnCost;
       const cost = current.cost + stepCost;
       const state = neighbor * directionStates + direction;
@@ -257,15 +262,31 @@ function routeOne(
 }
 
 function simplifyCenterline(grid: GridSpec, cells: readonly number[]): Vec2[] {
-  if (cells.length <= 2) return cells.map((cell) => cellCenter(grid, cell));
-  const points: Vec2[] = [cellCenter(grid, cells[0]!)];
-  for (let index = 1; index < cells.length - 1; index++) {
-    const before = directionBetween(grid, cells[index - 1]!, cells[index]!);
-    const after = directionBetween(grid, cells[index]!, cells[index + 1]!);
-    if (before !== after) points.push(cellCenter(grid, cells[index]!));
-  }
-  points.push(cellCenter(grid, cells.at(-1)!));
-  return points;
+  const points = cells.map((cell) => cellCenter(grid, cell));
+  if (points.length <= 2) return points;
+  const distanceToSegment = (point: Vec2, a: Vec2, b: Vec2): number => {
+    const dx = b.x - a.x, dz = b.z - a.z;
+    const length2 = dx * dx + dz * dz;
+    if (length2 === 0) return Math.hypot(point.x - a.x, point.z - a.z);
+    const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.z - a.z) * dz) / length2));
+    return Math.hypot(point.x - (a.x + dx * t), point.z - (a.z + dz * t));
+  };
+  const simplify = (from: number, to: number): Vec2[] => {
+    let furthest = -1;
+    let furthestDistance = grid.cellSize * 0.9;
+    for (let index = from + 1; index < to; index++) {
+      const distance = distanceToSegment(points[index]!, points[from]!, points[to]!);
+      if (distance > furthestDistance) {
+        furthestDistance = distance;
+        furthest = index;
+      }
+    }
+    if (furthest < 0) return [points[from]!, points[to]!];
+    const left = simplify(from, furthest);
+    const right = simplify(furthest, to);
+    return [...left.slice(0, -1), ...right];
+  };
+  return simplify(0, points.length - 1);
 }
 
 export function routeCorridors(
@@ -279,6 +300,7 @@ export function routeCorridors(
   const sitesById = new Map(sites.map((site) => [site.id, site]));
   const usage = new Uint16Array(traversalGrid.cols * traversalGrid.rows);
   const corridors: RoutedCorridor[] = [];
+  const surface = buildRoutingSurface(traversalGrid, fields, regions, options);
 
   graph.edges.forEach((edge, index) => {
     const source = sitesById.get(edge.a);
@@ -315,7 +337,7 @@ export function routeCorridors(
       throw new Error(`site-access-band-unroutable:${source.id}:${target.id}`);
     }
     const start = startCellToward(traversalGrid, starts, source, target);
-    const cells = routeOne(traversalGrid, start, targets, allowed, usage, fields, regions, options);
+    const cells = routeOne(traversalGrid, start, targets, allowed, usage, surface, options);
     for (const cell of cells) usage[cell]++;
     corridors.push({
       id: `corridor_${index}_${source.id}_${target.id}`,

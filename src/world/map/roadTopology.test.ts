@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { NullEngine, Scene } from '@babylonjs/core';
 import { maskeFuer, tileFuer, type RoadKind } from './roadTopology';
-import { corridorRenderCells } from './roadMesh';
+import { corridorRenderCells, createRoadMesh } from './roadMesh';
 import { createGridSpec } from './worldGrid';
 import type { RoutedCorridor } from './worldTypes';
 
@@ -62,5 +63,22 @@ describe('corridorRenderCells', () => {
       centerline: [],
     };
     expect(corridorRenderCells([corridor], grid)).toEqual(['80,64', '81,64', '82,64']);
+  });
+
+  it('rendert geglaettete diagonale Mittellinien als breite Fahrbaender', () => {
+    const grid = createGridSpec(20, 16, 5);
+    const scene = new Scene(new NullEngine());
+    const corridor: RoutedCorridor = {
+      id: 'diagonal', fromSiteId: 'a', toSiteId: 'b', width: 12,
+      cells: [42, 43, 63, 64],
+      centerline: [{ x: -35, z: -25 }, { x: 35, z: 25 }],
+    };
+    const handle = createRoadMesh(scene, [corridor], grid);
+    const road = scene.meshes.find((mesh) => mesh.name === 'road_corridor_diagonal');
+    expect(road?.getTotalVertices()).toBeGreaterThan(4);
+    const uvs = road!.getVerticesData('uv')!;
+    const vValues = uvs.filter((_, index) => index % 2 === 1);
+    expect(Math.max(...vValues)).toBeGreaterThan(2);
+    handle.dispose();
   });
 });

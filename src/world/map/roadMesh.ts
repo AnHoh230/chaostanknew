@@ -1,39 +1,18 @@
 /**
- * Straßen-Render (topologie-gesteuert): für jede Straßenzelle wählt roadTopology anhand der 4
- * Nachbarn das passende Tile (gerade/Kurve/T/Kreuz/Ende) + Rotation aus dem Sheet-Kit. So sehen
- * die Wege „asset-generiert" aus — Geraden laufen durch, an Knicken Kurven, an Knoten T/Kreuz —
- * statt wie ein dunkler Mathe-Strich. Tiles je Art gemergt (ein Draw-Batch/Art), eingefroren.
- *
- * Zell→Welt verwendet die Mittelpunkte des verbindlichen TraversalGrid.
- *
- * Gerendert wird die ein Zelle breite visuelle Mittellinie; die logisch freigehaltene
- * Korridorbreite bleibt davon unberührt.
- *
- * ORIENTIERUNGS-KNÖPFE (falls im Spiel global verdreht/gespiegelt — per Auge zu fixen, da
- * WebGL-Selbstverifikation hier unzuverlässig ist):
- *   BASIS_ROT  0..3 = globale 90°-Drehung aller Tiles.
- *   FLIP_V     true = Textur-V spiegeln (falls Kurven/T spiegelverkehrt anschließen).
+ * Korridor-Render: Die logische Breite und Belegungszellen bleiben im Generatorergebnis.
+ * Sichtbar wird die geglaettete Centerline als breites Ribbon gerendert, damit diagonale und
+ * feldgefuehrte Wege nicht wieder in orthogonale Einzeltiles zerfallen.
  */
-import { MeshBuilder, StandardMaterial, Texture, Color3, Mesh } from '@babylonjs/core';
-import type { Scene } from '@babylonjs/core';
-import { maskeFuer, tileFuer, type RoadKind } from './roadTopology';
+import { Color3, MeshBuilder, StandardMaterial, Texture, Vector2, Vector3 } from '@babylonjs/core';
+import type { Mesh, Scene } from '@babylonjs/core';
 import { ROAD_TILE } from './tileAssets';
 import type { GridSpec, RoutedCorridor } from './worldTypes';
 
-const BASIS_ROT = 0; // globale Korrektur-Drehung (0..3)
-const FLIP_V = false; // Textur-V spiegeln
-// Pro-Tile Dreh-Korrektur: wenn ein geliefertes Tile relativ zur BASIS-Annahme verdreht gezeichnet
-// ist, hier ausgleichen (statt global, das wuerde gerade/T mitverdrehen). Per Pixel-Kantenanalyse
-// verifiziert: road_kurve.png verbindet S+W {2,3}, die BASIS-Kurve nimmt aber N+O {0,1} an -> +2.
-// (gerade verbindet N+S = BASIS [0,2], T verbindet O+S+W zu-nach-N = BASIS [1,2,3] -> beide ohne Korrektur.)
-const KIND_ROT: Record<RoadKind, number> = { gerade: 0, kurve: 2, t: 0, kreuz: 0, ende: 0 };
-const QUAD = 1.08; // Tile-Quad als Vielfaches der Zelle (leichte Überlappung kaschiert Nähte)
-const Y = 0.06; // über Modul-Boden (0.03), unter Decals (0.15)
+const Y = 0.065;
 
-export interface RoadMeshHandle {
-  dispose(): void;
-}
+export interface RoadMeshHandle { dispose(): void }
 
+/** Reine Debug-/Topologieprojektion der weiterhin autoritativen Korridorzellen. */
 export function corridorRenderCells(corridors: readonly RoutedCorridor[], grid: GridSpec): string[] {
   const cells = new Set<number>();
   corridors.forEach((corridor) => corridor.cells.forEach((cell) => {
@@ -44,68 +23,97 @@ export function corridorRenderCells(corridors: readonly RoutedCorridor[], grid: 
     .map((cell) => `${cell % grid.cols},${Math.floor(cell / grid.cols)}`);
 }
 
+function densify(corridor: RoutedCorridor, step: number): Array<{ x: number; z: number }> {
+  const source = corridor.centerline;
+  if (source.length < 2) return [];
+  const result: Array<{ x: number; z: number }> = [{ ...source[0]! }];
+  for (let index = 1; index < source.length; index++) {
+    const a = source[index - 1]!, b = source[index]!;
+    const distance = Math.hypot(b.x - a.x, b.z - a.z);
+    const subdivisions = Math.max(1, Math.ceil(distance / step));
+    for (let part = 1; part <= subdivisions; part++) {
+      const t = part / subdivisions;
+      result.push({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t });
+    }
+  }
+  return result;
+}
+
+interface RibbonGeometry {
+  sides: [Vector3[], Vector3[]];
+  uvs: Vector2[];
+}
+
+function ribbonGeometry(corridor: RoutedCorridor, grid: GridSpec): RibbonGeometry | null {
+  const points = densify(corridor, grid.cellSize);
+  if (points.length < 2) return null;
+  const left: Vector3[] = [];
+  const right: Vector3[] = [];
+  const leftUvs: Vector2[] = [];
+  const rightUvs: Vector2[] = [];
+  const halfWidth = corridor.width * 0.48;
+  let travelled = 0;
+  points.forEach((point, index) => {
+    const before = points[Math.max(0, index - 1)]!;
+    const after = points[Math.min(points.length - 1, index + 1)]!;
+    if (index > 0) travelled += Math.hypot(point.x - before.x, point.z - before.z);
+    const dx = after.x - before.x, dz = after.z - before.z;
+    const length = Math.hypot(dx, dz) || 1;
+    const nx = -dz / length, nz = dx / length;
+    left.push(new Vector3(point.x + nx * halfWidth, Y, point.z + nz * halfWidth));
+    right.push(new Vector3(point.x - nx * halfWidth, Y, point.z - nz * halfWidth));
+    const v = travelled / grid.cellSize;
+    leftUvs.push(new Vector2(0, v));
+    rightUvs.push(new Vector2(1, v));
+  });
+  return { sides: [left, right], uvs: [...leftUvs, ...rightUvs] };
+}
+
 export function createRoadMesh(
   scene: Scene,
   corridors: readonly RoutedCorridor[],
   grid: GridSpec,
 ): RoadMeshHandle {
-  const roadZellen = corridorRenderCells(corridors, grid);
-  const cellSize = grid.cellSize;
-  const halfX = grid.extents.halfX;
-  const halfZ = grid.extents.halfZ;
-  if (roadZellen.length === 0) return { dispose() {} };
-  const set = new Set(roadZellen);
+  const material = new StandardMaterial('corridor_road_material', scene);
+  const texture = new Texture(ROAD_TILE.gerade, scene);
+  texture.wrapU = Texture.WRAP_ADDRESSMODE;
+  texture.wrapV = Texture.WRAP_ADDRESSMODE;
+  texture.uScale = 1;
+  texture.vScale = 1;
+  texture.anisotropicFilteringLevel = 16;
+  texture.hasAlpha = true;
+  material.diffuseTexture = texture;
+  material.useAlphaFromDiffuseTexture = true;
+  material.specularColor = new Color3(0, 0, 0);
+  material.backFaceCulling = false;
 
-  const proArt: Record<RoadKind, Mesh[]> = { gerade: [], kurve: [], t: [], kreuz: [], ende: [] };
-  for (const key of set) {
-    const komma = key.indexOf(',');
-    const col = Number(key.slice(0, komma));
-    const row = Number(key.slice(komma + 1));
-    const { kind, rot } = tileFuer(maskeFuer(set, col, row));
-    const tile = MeshBuilder.CreateGround('rt', { width: cellSize * QUAD, height: cellSize * QUAD }, scene);
-    tile.position.set((col + 0.5) * cellSize - halfX, Y, (row + 0.5) * cellSize - halfZ);
-    tile.rotation.y = ((rot + BASIS_ROT + KIND_ROT[kind]) % 4) * (Math.PI / 2);
-    tile.isPickable = false;
-    proArt[kind].push(tile);
-  }
-
-  const matCache = new Map<RoadKind, StandardMaterial>();
-  const matFuer = (kind: RoadKind): StandardMaterial => {
-    let m = matCache.get(kind);
-    if (!m) {
-      m = new StandardMaterial('road_' + kind, scene);
-      const t = new Texture(ROAD_TILE[kind], scene);
-      t.hasAlpha = true; // Schutt-Rand ist transparent -> Boden scheint durch (organisch)
-      t.anisotropicFilteringLevel = 16; // scharf bis in die Tiefe bei flacher Kamera (s. ground.ts)
-      if (FLIP_V) t.vScale = -1;
-      m.diffuseTexture = t;
-      m.useAlphaFromDiffuseTexture = true;
-      m.specularColor = new Color3(0, 0, 0);
-      m.backFaceCulling = false;
-      matCache.set(kind, m);
-    }
-    return m;
-  };
-
-  const merged: Mesh[] = [];
-  for (const kind of Object.keys(proArt) as RoadKind[]) {
-    const parts = proArt[kind];
-    if (parts.length === 0) continue;
-    const m = parts.length === 1 ? parts[0]! : Mesh.MergeMeshes(parts, true, true, undefined, false, false);
-    if (!m) continue;
-    m.name = 'roads_' + kind;
-    m.material = matFuer(kind);
-    m.isPickable = false;
-    m.renderingGroupId = 0; // Gruppe 0 wie Panzer/Props -> Tiefentest verdeckt die Straße korrekt (NICHT Gruppe 1: deren Auto-Depth-Clear zeichnete über den Panzer)
-    m.alphaIndex = 2; // Reihenfolge der transparenten Flach-Layer: Modul-Boden (1) < Straße (2) < Decal (3)
-    m.freezeWorldMatrix();
-    merged.push(m);
+  const meshes: Mesh[] = [];
+  for (const corridor of corridors) {
+    const geometry = ribbonGeometry(corridor, grid);
+    if (!geometry) continue;
+    const mesh = MeshBuilder.CreateRibbon(
+      `road_corridor_${corridor.id}`,
+      {
+        pathArray: geometry.sides,
+        uvs: geometry.uvs,
+        closeArray: false,
+        closePath: false,
+        sideOrientation: 2,
+      },
+      scene,
+    );
+    mesh.material = material;
+    mesh.isPickable = false;
+    mesh.renderingGroupId = 0;
+    mesh.alphaIndex = 2;
+    mesh.freezeWorldMatrix();
+    meshes.push(mesh);
   }
 
   return {
     dispose(): void {
-      for (const m of merged) m.dispose();
-      for (const mt of matCache.values()) mt.dispose(false, true);
+      meshes.forEach((mesh) => mesh.dispose());
+      material.dispose(false, true);
     },
   };
 }

@@ -105,4 +105,18 @@ describe('pathRouter', () => {
     expect(first[0]!.centerline.every((point) => cellAtWorld(GRID, point) !== null)).toBe(true);
     expect(first[0]!.centerline[0]).toEqual(cellCenter(GRID, first[0]!.cells[0]!));
   });
+
+  it('glaettet diagonale Verbindungen statt sie als reine L-Strasse auszugeben', () => {
+    const sites = [site('south_west', -65, -30), site('north_east', 65, 30)];
+    const graph: TraversalGraph = {
+      siteIds: sites.map((entry) => entry.id),
+      edges: [{ a: 'south_west', b: 'north_east', estimatedCost: 1 }],
+    };
+    const [corridor] = routeCorridors(graph, sites, GRID, fields(), regions(), DEFAULT_PATH_ROUTING);
+    const hasDiagonalSegment = corridor!.centerline.slice(1).some((point, index) => {
+      const previous = corridor!.centerline[index]!;
+      return Math.abs(point.x - previous.x) > 0.1 && Math.abs(point.z - previous.z) > 0.1;
+    });
+    expect(hasDiagonalSegment).toBe(true);
+  });
 });
