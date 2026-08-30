@@ -103,8 +103,11 @@ const first = buildWorldAssetPlacementPlan(world, IRONWASTE_V1_PREVIEW_KIT, mani
 const second = buildWorldAssetPlacementPlan(world, IRONWASTE_V1_PREVIEW_KIT, manifest, 17);
 expect(first).toEqual(second);
 expect(JSON.stringify(world)).toBe(before);
+const supported = new Set(kit.previewBiomes);
+const expectedEntrances = world.corridors.flatMap((corridor) => [corridor.fromSiteId, corridor.toSiteId])
+  .filter((siteId) => supported.has(world.sites.find((site) => site.id === siteId)!.biomeId));
 expect(first.placements.filter((entry) => entry.kind === 'entrance').length)
-  .toBe(world.corridors.length * 2);
+  .toBe(expectedEntrances.length);
 expect(first.omitted.every((entry) => entry.reason === 'outside-preview-scope')).toBe(true);
 ```
 

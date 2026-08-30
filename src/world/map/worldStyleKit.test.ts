@@ -56,6 +56,21 @@ describe('worldStyleKit', () => {
     expect(first.variant.familyId).toBe(first.family.id);
   });
 
+  it('skaliert prozedurale Geometrierezepte in kleinere Generator-Footprints', () => {
+    const smallRecipeDemand: AssetDemandOccurrence = {
+      id: 'small_breakable_edge',
+      demandClass: 'industrial.breakableEdge',
+      source: 'landscape',
+      biomes: ['industrial'],
+      footprint: { halfX: 1.5, halfZ: 1.5 },
+      connectorProfiles: [],
+    };
+
+    const choice = resolveAssetFamily(IRONWASTE_V1_PREVIEW_KIT, smallRecipeDemand, 5);
+
+    expect(choice.variant.geometryRecipe).toBe('industrial-breakable-edge');
+  });
+
   it('verwirft Varianten ausserhalb der autoritativen Kataloghuelle', () => {
     const familyIndex = IRONWASTE_V1_PREVIEW_KIT.families.findIndex((family) => (
       family.fulfills.includes('industrial.linearBarrier')

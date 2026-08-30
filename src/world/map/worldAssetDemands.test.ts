@@ -2,8 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { REQUIRED_ASSET_CATALOG } from './assetDemandCompiler';
 import { DEFAULT_WORLD_OPTIONS, generiereWelt } from './worldGenerator';
 import { deriveWorldAssetDemands } from './worldAssetDemands';
+import * as demandModule from './worldAssetDemands';
 
 describe('worldAssetDemands', () => {
+  it('stellt den PlacementPlan-Compiler als getrennten Vertrag bereit', () => {
+    const exported = demandModule as unknown as Record<string, unknown>;
+
+    expect(exported.buildWorldAssetPlacementPlan).toBeTypeOf('function');
+  });
+
   it('leitet konkrete Vorkommen aus der fertigen Welt ab ohne sie zu veraendern', () => {
     const world = generiereWelt(DEFAULT_WORLD_OPTIONS, 42);
     const before = JSON.stringify(world);
@@ -30,4 +37,13 @@ describe('worldAssetDemands', () => {
         .toEqual([]);
     }
   }, 30_000);
+
+  it('emittiert fuer jedes Korridorende eine eigene Site-Einfahrt', () => {
+    const world = generiereWelt(DEFAULT_WORLD_OPTIONS, 17);
+    const entrances = deriveWorldAssetDemands(world)
+      .filter((entry) => entry.demandClass === 'site.entrance');
+
+    expect(entrances).toHaveLength(world.corridors.length * 2);
+    expect(new Set(entrances.map((entry) => entry.id)).size).toBe(entrances.length);
+  }, 20_000);
 });

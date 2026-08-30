@@ -99,6 +99,7 @@ function hash32(value: string): number {
 }
 
 function variantFits(variant: AssetVariant, demand: AssetDemandOccurrence): boolean {
+  if (variant.geometryRecipe) return true;
   if (demand.footprint.halfX === 0 && demand.footprint.halfZ === 0) return true;
   return variant.footprint.halfX <= demand.footprint.halfX
     && variant.footprint.halfZ <= demand.footprint.halfZ;
