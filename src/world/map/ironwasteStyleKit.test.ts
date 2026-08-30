@@ -2,8 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { REQUIRED_ASSET_CATALOG } from './assetDemandCompiler';
 import { IRONWASTE_V1_PREVIEW_KIT } from './ironwasteStyleKit';
 import { validateWorldStyleKit } from './worldStyleKit';
+import * as ironwasteModule from './ironwasteStyleKit';
 
 describe('IRONWASTE_V1_PREVIEW_KIT', () => {
+  it('stellt eine getrennte Geometrierezept-Fabrik bereit', () => {
+    const exported = ironwasteModule as unknown as Record<string, unknown>;
+    expect(exported.buildStyleGeometryRecipe).toBeTypeOf('function');
+  });
+
   it('besitzt eine gemeinsame Bildsprache fuer Industrie, Schrott und Strassen', () => {
     expect(IRONWASTE_V1_PREVIEW_KIT.globalStyle).toMatchObject({
       texelsPerWorldUnit: 16,

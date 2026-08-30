@@ -8,6 +8,8 @@ import type {
 } from './assetDemandTypes';
 import type { BiomeId, DemandClassId, Footprint } from './worldTypes';
 
+export { buildStyleGeometryRecipe } from './styleGeometryRecipes';
+
 const KIT_ID = 'ironwaste-v1';
 const ROOT = 'style-kits/ironwaste-v1/candidates/';
 const ALL_STATES: AssetState[] = ['intact', 'damaged', 'destroyed'];
