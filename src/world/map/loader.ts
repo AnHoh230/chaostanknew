@@ -29,6 +29,8 @@ import { getAsset, type AssetDef } from './assetKit';
 import { baueAssetMesh, baueAssetTeile } from './mapMesh';
 import { createBreakable } from './mapEntities';
 
+export { createWorldStylePreview } from './worldStylePreviewRenderer';
+
 // Kinds, die zur Laufzeit nie einzeln angefasst werden -> nach Material batchbar.
 const STATISCHE_KINDS: ReadonlySet<string> = new Set(['obstacle', 'decor', 'landmark']);
 // Chunk-Kantenlänge (Welt-Einheiten). Tunable: größer = weniger Draw-Calls jetzt (weniger

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { NullEngine, Scene } from '@babylonjs/core';
 import { ladeKarte } from './loader';
+import * as loaderModule from './loader';
 import type { MapEntity, EntityKind } from './mapTypes';
 import type { RuntimeKarte } from './runtimeMap';
 
@@ -21,6 +22,11 @@ function karte(entities: MapEntity[]): RuntimeKarte {
 }
 
 describe('ladeKarte — Material-Batching statischer Props', () => {
+  it('stellt den getrennten StyleKit-PreviewRenderer bereit', () => {
+    const exported = loaderModule as unknown as Record<string, unknown>;
+    expect(exported.createWorldStylePreview).toBeTypeOf('function');
+  });
+
   it('batcht statische Props nach Material (1 Submesh/Draw je Batch), interaktive bleiben einzeln', () => {
     const scene = new Scene(new NullEngine());
     const entities = [
