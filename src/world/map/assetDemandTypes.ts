@@ -27,3 +27,25 @@ export interface RequiredAssetCatalog {
   families: RequiredAssetFamily[];
   signature: string;
 }
+
+export interface AssetDemandOccurrence {
+  id: string;
+  demandClass: string;
+  source: AssetDemandSource;
+  biomes: BiomeId[];
+  footprint: Footprint;
+  connectorProfiles: string[];
+}
+
+export interface ObservedFootprintRange {
+  min: Footprint;
+  max: Footprint;
+}
+
+export interface AssetCoverageReport {
+  counts: Record<string, number>;
+  observedFootprints: Record<string, ObservedFootprintRange>;
+  missingCatalogClasses: string[];
+  unknownDemandClasses: string[];
+  signature: string;
+}
