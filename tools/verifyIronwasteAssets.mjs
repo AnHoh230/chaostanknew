@@ -7,6 +7,7 @@ const root = process.cwd();
 const candidateDir = path.resolve(root, 'public/style-kits/ironwaste-v1/candidates');
 const generatedDir = path.resolve(root, 'docs/generated');
 const catalog = JSON.parse(fs.readFileSync(path.join(generatedDir, 'required-asset-catalog.json'), 'utf8'));
+const seedCoverage = JSON.parse(fs.readFileSync(path.join(generatedDir, 'asset-seed-coverage.json'), 'utf8'));
 const approve = process.argv.includes('--approve');
 
 const specs = [
@@ -43,6 +44,12 @@ function sha256(buffer) {
 }
 
 const errors = [];
+if (seedCoverage.seedStart !== 1 || seedCoverage.seedEnd !== 500) errors.push('seed-coverage-range-mismatch');
+if (seedCoverage.missingCatalogClasses.length > 0) errors.push(`seed-coverage-missing:${seedCoverage.missingCatalogClasses.join(',')}`);
+if (seedCoverage.unknownDemandClasses.length > 0) errors.push(`seed-coverage-unknown:${seedCoverage.unknownDemandClasses.join(',')}`);
+for (const family of catalog.families) {
+  if (!family.reserved && !seedCoverage.counts[family.demandClass]) errors.push(`seed-coverage-unobserved:${family.demandClass}`);
+}
 const files = [];
 const checks = [];
 for (const spec of specs) {
@@ -109,6 +116,8 @@ const report = [
   'Kit version: `1`  ',
   `State: \`${manifest.state}\`  `,
   'Activation: `preview`',
+  `Seed coverage: \`${seedCoverage.seedStart}..${seedCoverage.seedEnd}\`  `,
+  `Seed coverage signature: \`${seedCoverage.signature}\``,
   '',
   '| File | X-edge RMS | Y-edge RMS | Alpha range | SHA-256 |',
   '| --- | ---: | ---: | --- | --- |',
@@ -116,6 +125,15 @@ const report = [
     const file = files.find((entry) => entry.path.endsWith(`/${check.name}`));
     return `| ${check.name} | ${check.rmsX} | ${check.rmsY} | ${check.minAlpha}–${check.maxAlpha} | \`${file.sha256}\` |`;
   }),
+  '',
+  '## Generator demand frequencies',
+  '',
+  '| Demand class | Occurrences in 500 seeds |',
+  '| --- | ---: |',
+  ...Object.entries(seedCoverage.counts).map(([demandClass, count]) => `| \`${demandClass}\` | ${count} |`),
+  '',
+  'Missing catalog classes: **0**  ',
+  'Unknown emitted classes: **0**',
   '',
   'Unrestricted runtime activation remains blocked until the complete non-reserved catalog is covered.',
   '',
