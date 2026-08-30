@@ -5,7 +5,7 @@
 - State: `approved`
 - Activation: `preview`
 - Seed coverage: `1..500`
-- Seed coverage signature: `8f92eb4c`
+- Seed coverage signature: `95f2a916`
 
 | File | X-edge RMS | Y-edge RMS | Alpha range | SHA-256 |
 | --- | ---: | ---: | --- | --- |
@@ -48,7 +48,7 @@
 | `scrap.landmarkIsland` | 880 |
 | `scrap.scrapPile` | 1218 |
 | `scrap.wreckCluster` | 918 |
-| `site.entrance` | 4509 |
+| `site.entrance` | 10010 |
 | `site.industrialYard` | 517 |
 | `site.scrapYard` | 261 |
 | `wasteland.coverCluster` | 10614 |

@@ -1,7 +1,7 @@
 {
   "seedStart": 1,
   "seedEnd": 500,
-  "signature": "8f92eb4c",
+  "signature": "95f2a916",
   "counts": {
     "corridor.edge": 5005,
     "corridor.surface": 5005,
@@ -29,7 +29,7 @@
     "scrap.landmarkIsland": 880,
     "scrap.scrapPile": 1218,
     "scrap.wreckCluster": 918,
-    "site.entrance": 4509,
+    "site.entrance": 10010,
     "site.industrialYard": 517,
     "site.scrapYard": 261,
     "wasteland.coverCluster": 10614,
