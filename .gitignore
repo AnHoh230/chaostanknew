@@ -7,3 +7,5 @@ tsconfig.tsbuildinfo
 docs/superpowers/assets/extracted/
 # Fremd-Backup
 ChaosTankNew.zip
+# Isolierte Codex-Feature-Worktrees
+.worktrees/
