@@ -9,6 +9,8 @@ import {
   VertexData,
 } from '@babylonjs/core';
 import type { Scene } from '@babylonjs/core';
+import { createTankView } from '../../tank/tankFactory';
+import type { TankComposition } from '../../tank/sockets';
 import type { WorldStyleKit } from './assetDemandTypes';
 import { buildRoadCapGeometry, buildRoadRibbonGeometry } from './styleRoadGeometry';
 import {
@@ -36,7 +38,24 @@ const HEIGHT = {
 export interface WorldStylePreviewHandle {
   root: TransformNode;
   meshCount: number;
+  playerReference?: WorldStylePlayerReference;
   dispose(): void;
+}
+
+export interface WorldStylePlayerReference {
+  root: TransformNode;
+  locator: Mesh;
+  collisionRing: Mesh;
+  collisionDiameter: number;
+  setScaleView(enabled: boolean): void;
+}
+
+export interface WorldStylePreviewOptions {
+  player?: {
+    position: { x: number; z: number };
+    collisionRadius: number;
+    composition: TankComposition;
+  };
 }
 
 function emptyGeometry(): MeshGeometryData {
@@ -77,6 +96,8 @@ class MaterialStore {
     const material = new StandardMaterial(`style_material_${this.materials.size}`, this.scene);
     material.diffuseColor = Color3.White();
     material.specularColor = new Color3(0.025, 0.025, 0.025);
+    material.disableLighting = transparent;
+    material.emissiveColor = transparent ? Color3.White() : Color3.Black();
     if (this.loadTextures) {
       const texture = new Texture(assetUrl(file), this.scene);
       texture.wrapU = Texture.WRAP_ADDRESSMODE;
@@ -127,6 +148,58 @@ class MaterialStore {
     for (const material of this.materials.values()) material.dispose(false, true);
     this.materials.clear();
   }
+}
+
+function createPlayerReference(
+  scene: Scene,
+  parent: TransformNode,
+  options: NonNullable<WorldStylePreviewOptions['player']>,
+): WorldStylePlayerReference {
+  const root = new TransformNode('asset_lab_player_reference', scene);
+  root.parent = parent;
+  root.position.set(options.position.x, 0, options.position.z);
+  const tank = createTankView(scene, options.composition);
+  tank.root.parent = root;
+
+  const locatorMaterial = new StandardMaterial('asset_lab_player_locator_material', scene);
+  locatorMaterial.diffuseColor = new Color3(0.12, 0.96, 0.92);
+  locatorMaterial.emissiveColor = new Color3(0.06, 0.72, 0.7);
+  locatorMaterial.specularColor = Color3.Black();
+  const locator = MeshBuilder.CreateTorus('asset_lab_player_locator', {
+    diameter: 12,
+    thickness: 0.32,
+    tessellation: 48,
+  }, scene);
+  locator.position.y = 0.22;
+  locator.material = locatorMaterial;
+  locator.parent = root;
+  locator.isPickable = false;
+
+  const collisionMaterial = new StandardMaterial('asset_lab_player_collision_material', scene);
+  collisionMaterial.diffuseColor = new Color3(0.28, 1, 0.82);
+  collisionMaterial.emissiveColor = new Color3(0.08, 0.5, 0.38);
+  collisionMaterial.specularColor = Color3.Black();
+  const collisionRing = MeshBuilder.CreateTorus('asset_lab_player_collision', {
+    diameter: options.collisionRadius * 2,
+    thickness: 0.08,
+    tessellation: 40,
+  }, scene);
+  collisionRing.position.y = 0.12;
+  collisionRing.material = collisionMaterial;
+  collisionRing.parent = root;
+  collisionRing.isPickable = false;
+  collisionRing.isVisible = false;
+
+  return {
+    root,
+    locator,
+    collisionRing,
+    collisionDiameter: options.collisionRadius * 2,
+    setScaleView(enabled: boolean): void {
+      locator.isVisible = !enabled;
+      collisionRing.isVisible = enabled;
+    },
+  };
 }
 
 function requiredFile(files: readonly string[], placementId: string): string {
@@ -281,12 +354,27 @@ function renderMissingPlacement(
     return;
   }
 
+  if (placement.kind === 'site') {
+    const diameter = Math.max(2, placement.footprint.halfX * 2);
+    const mesh = MeshBuilder.CreateTorus(name, {
+      diameter,
+      thickness: 0.28,
+      tessellation: 64,
+    }, scene);
+    mesh.scaling.z = placement.footprint.halfZ / Math.max(0.001, placement.footprint.halfX);
+    mesh.position.set(placement.position.x, HEIGHT.decal + 0.14, placement.position.z);
+    mesh.material = material;
+    mesh.parent = root;
+    mesh.isPickable = false;
+    mesh.freezeWorldMatrix();
+    meshes.push(mesh);
+    return;
+  }
+
   const footprint = placement.kind === 'entrance'
     ? { halfX: Math.max(2, placement.width / 2 + 1), halfZ: 2.5 }
     : placement.footprint;
-  const height = placement.kind === 'site'
-    ? 6
-    : placement.kind === 'entrance'
+  const height = placement.kind === 'entrance'
       ? 1.5
       : placement.role === 'landmark'
         ? 4
@@ -309,6 +397,7 @@ export function createWorldStylePreview(
   scene: Scene,
   plan: WorldAssetPlacementPlan,
   kit: WorldStyleKit,
+  options: WorldStylePreviewOptions = {},
 ): WorldStylePreviewHandle {
   if (plan.kitId !== kit.id || plan.kitVersion !== kit.version || plan.catalogSignature !== kit.catalogSignature) {
     throw new Error(`style-preview-kit-mismatch:${plan.kitId}:${kit.id}`);
@@ -316,6 +405,7 @@ export function createWorldStylePreview(
   const root = new TransformNode('worldStylePreviewRoot', scene);
   const meshes: Mesh[] = [];
   const materials = new MaterialStore(scene, kit);
+  let playerReference: WorldStylePlayerReference | undefined;
   const groupedGeometry = new Map<string, { geometry: MeshGeometryData; file: string; height: number; name: string }>();
   const group = (key: string, file: string, height: number, name: string): MeshGeometryData => {
     const existing = groupedGeometry.get(key);
@@ -328,7 +418,7 @@ export function createWorldStylePreview(
   const cleanup = (): void => {
     for (const mesh of [...meshes]) mesh.dispose(false, false);
     meshes.length = 0;
-    root.dispose();
+    root.dispose(false, true);
     materials.dispose();
   };
 
@@ -399,6 +489,7 @@ export function createWorldStylePreview(
         entry.height,
       );
     }
+    if (options.player) playerReference = createPlayerReference(scene, root, options.player);
   } catch (error) {
     cleanup();
     throw error;
@@ -407,6 +498,7 @@ export function createWorldStylePreview(
   return {
     root,
     meshCount: meshes.length,
+    ...(playerReference ? { playerReference } : {}),
     dispose: cleanup,
   };
 }
