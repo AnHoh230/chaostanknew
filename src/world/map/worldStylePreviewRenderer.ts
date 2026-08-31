@@ -20,6 +20,7 @@ import type {
   EntranceAssetPlacement,
   LandscapeAssetPlacement,
   SiteAssetPlacement,
+  WorldAssetPlacement,
   WorldAssetPlacementPlan,
 } from './worldAssetPlacement';
 import type { Footprint } from './worldTypes';
@@ -107,6 +108,21 @@ class MaterialStore {
     return material;
   }
 
+  missing(): StandardMaterial {
+    const key = 'diagnostic:missing';
+    const existing = this.materials.get(key);
+    if (existing) return existing;
+    const material = new StandardMaterial(`style_material_${this.materials.size}`, this.scene);
+    material.diffuseColor = new Color3(1, 0.02, 0.62);
+    material.emissiveColor = new Color3(0.65, 0, 0.35);
+    material.specularColor = Color3.Black();
+    material.alpha = 0.78;
+    material.wireframe = true;
+    material.backFaceCulling = false;
+    this.materials.set(key, material);
+    return material;
+  }
+
   dispose(): void {
     for (const material of this.materials.values()) material.dispose(false, true);
     this.materials.clear();
@@ -176,6 +192,9 @@ function renderSpritePlacement(
   materials: MaterialStore,
   placement: LandscapeAssetPlacement | SiteAssetPlacement | EntranceAssetPlacement,
 ): void {
+  if (placement.asset.status !== 'resolved') {
+    throw new Error(`style-preview-unresolved-sprite:${placement.id}`);
+  }
   if (placement.asset.geometryRecipe) {
     throw new Error(`style-preview-scripted-geometry-forbidden:${placement.id}:${placement.asset.geometryRecipe}`);
   }
@@ -194,6 +213,96 @@ function renderSpritePlacement(
     footprint,
     file,
   );
+}
+
+function renderMissingPlacement(
+  scene: Scene,
+  root: TransformNode,
+  meshes: Mesh[],
+  materials: MaterialStore,
+  placement: WorldAssetPlacement,
+): void {
+  const material = materials.missing();
+  const name = `style_missing_${placement.id}`;
+  if (placement.kind === 'ground') {
+    meshFromGeometry(
+      scene,
+      root,
+      meshes,
+      name,
+      buildCellSurfaceGeometry(placement.grid, placement.cells, 16),
+      material,
+      HEIGHT.ground + 0.02,
+    );
+    return;
+  }
+  if (placement.kind === 'transition') {
+    const canonicalForward = placement.fromBiome.localeCompare(placement.toBiome) <= 0;
+    const normal = canonicalForward
+      ? placement.normal
+      : { x: -placement.normal.x, z: -placement.normal.z };
+    meshFromGeometry(
+      scene,
+      root,
+      meshes,
+      name,
+      buildTransitionGeometry({
+        center: placement.center,
+        tangent: placement.tangent,
+        normal,
+        length: placement.length,
+      }, Math.min(6, placement.length * 0.6), 16),
+      material,
+      HEIGHT.transition + 0.02,
+    );
+    return;
+  }
+  if (placement.kind === 'corridor') {
+    const width = placement.layer === 'edge' ? placement.width + 3 : placement.width;
+    const geometry = buildRoadRibbonGeometry(placement.centerline, width, 16);
+    const radius = width / 2;
+    const start = placement.centerline[0];
+    const end = placement.centerline.at(-1);
+    if (start) appendGeometry(geometry, buildRoadCapGeometry(start, radius, 16));
+    if (end) appendGeometry(geometry, buildRoadCapGeometry(end, radius, 16));
+    meshFromGeometry(scene, root, meshes, name, geometry, material, HEIGHT.roadSurface + 0.02);
+    return;
+  }
+  if (placement.kind === 'junction') {
+    meshFromGeometry(
+      scene,
+      root,
+      meshes,
+      name,
+      buildRoadCapGeometry(placement.position, placement.degree === 4 ? 10 : 9, 16),
+      material,
+      HEIGHT.roadSurface + 0.02,
+    );
+    return;
+  }
+
+  const footprint = placement.kind === 'entrance'
+    ? { halfX: Math.max(2, placement.width / 2 + 1), halfZ: 2.5 }
+    : placement.footprint;
+  const height = placement.kind === 'site'
+    ? 6
+    : placement.kind === 'entrance'
+      ? 1.5
+      : placement.role === 'landmark'
+        ? 4
+        : 2.5;
+  const mesh = MeshBuilder.CreateBox(name, {
+    width: Math.max(2, footprint.halfX * 2),
+    depth: Math.max(2, footprint.halfZ * 2),
+    height,
+  }, scene);
+  mesh.position.set(placement.position.x, height / 2 + HEIGHT.decal, placement.position.z);
+  mesh.rotation.y = placement.rotation;
+  mesh.material = material;
+  mesh.parent = root;
+  mesh.isPickable = false;
+  mesh.freezeWorldMatrix();
+  meshes.push(mesh);
 }
 
 export function createWorldStylePreview(
@@ -225,6 +334,10 @@ export function createWorldStylePreview(
 
   try {
     for (const placement of plan.placements) {
+      if (placement.asset.status === 'missing') {
+        renderMissingPlacement(scene, root, meshes, materials, placement);
+        continue;
+      }
       const file = requiredFile(placement.asset.files, placement.id);
       if (placement.kind === 'ground') {
         meshFromGeometry(

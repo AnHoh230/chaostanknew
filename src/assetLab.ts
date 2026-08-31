@@ -26,9 +26,9 @@ function querySeed(name: string, fallback: number): number {
 const canvas = requiredElement<HTMLCanvasElement>('assetLabCanvas');
 const worldInput = requiredElement<HTMLInputElement>('worldSeed');
 const visualInput = requiredElement<HTMLInputElement>('visualSeed');
-const renderedCount = requiredElement<HTMLElement>('renderedCount');
-const classCount = requiredElement<HTMLElement>('classCount');
-const omittedCount = requiredElement<HTMLElement>('omittedCount');
+const totalCount = requiredElement<HTMLElement>('totalCount');
+const resolvedCount = requiredElement<HTMLElement>('resolvedCount');
+const missingCount = requiredElement<HTMLElement>('missingCount');
 const scope = requiredElement<HTMLElement>('scope');
 const status = requiredElement<HTMLElement>('status');
 const assetFamilyGallery = requiredElement<HTMLElement>('assetFamilyGallery');
@@ -81,24 +81,26 @@ function renderPreview(): void {
       figure.append(image, caption);
       return figure;
     }));
-    renderedCount.textContent = String(model.stats.renderedPlacements);
-    classCount.textContent = String(model.stats.renderedClasses.length);
-    omittedCount.textContent = String(model.stats.omittedDemands);
-    const omittedLines = Object.entries(model.stats.omittedByClass)
+    totalCount.textContent = String(model.stats.totalPlacements);
+    resolvedCount.textContent = String(model.stats.resolvedPlacements);
+    missingCount.textContent = String(model.stats.missingPlacements);
+    const missingLines = Object.entries(model.stats.missingByClass)
       .map(([demandClass, count]) => `${demandClass.padEnd(31, ' ')} ${String(count).padStart(5, ' ')}`);
     scope.textContent = [
-      `SICHTBAR: ${model.stats.renderedClasses.join(', ')}`,
+      `ECHTE ASSETS: ${model.stats.resolvedClasses.join(', ')}`,
       '',
-      'AUSSERHALB DES PREVIEW-SCOPES:',
-      ...omittedLines,
+      'FEHLENDE ASSETFAMILIEN (MAGENTA):',
+      ...missingLines,
     ].join('\n');
-    status.dataset.state = 'ready';
-    status.textContent = `${model.plan.kitId} v${model.plan.kitVersion} · Katalog ${model.plan.catalogSignature}`;
+    status.dataset.state = model.stats.missingPlacements > 0 ? 'incomplete' : 'ready';
+    status.textContent = model.stats.missingPlacements > 0
+      ? `${model.stats.missingPlacements} Generator-Occurrences warten auf echte Assets · Katalog ${model.plan.catalogSignature}`
+      : `${model.plan.kitId} v${model.plan.kitVersion} vollständig · Katalog ${model.plan.catalogSignature}`;
   } catch (error) {
     assetFamilyGallery.replaceChildren();
-    renderedCount.textContent = '0';
-    classCount.textContent = '0';
-    omittedCount.textContent = '–';
+    totalCount.textContent = '0';
+    resolvedCount.textContent = '0';
+    missingCount.textContent = '–';
     scope.textContent = '';
     status.dataset.state = 'error';
     status.textContent = error instanceof Error ? error.message : String(error);

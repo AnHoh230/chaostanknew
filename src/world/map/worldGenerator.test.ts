@@ -30,4 +30,16 @@ describe('worldGenerator', () => {
       expect(world.debug.quality.signature).toMatch(/^[0-9a-f]{8}$/);
     }
   }, 60_000);
+
+  it('schreibt feldabgeleitete Umweltobjekte als echte Generator-Features in jede Welt', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const world = generiereWelt(DEFAULT_WORLD_OPTIONS, seed);
+      const environment = world.features.filter((feature) => feature.demandClass.startsWith('environment.'));
+
+      expect(environment.length, `Seed ${seed}`).toBeGreaterThan(0);
+      expect(environment.every((feature) => feature.id.startsWith('environment_')), `Seed ${seed}`).toBe(true);
+      expect(environment.every((feature) => world.regions.biomeByCell.includes(feature.biomeId)), `Seed ${seed}`)
+        .toBe(true);
+    }
+  }, 60_000);
 });

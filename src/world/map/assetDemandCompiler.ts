@@ -41,7 +41,7 @@ export function compileRequiredAssetCatalog(rules: readonly AssetDemandRule[]): 
   }
   const families = [...byDemandClass.values()]
     .sort((a, b) => a.demandClass.localeCompare(b.demandClass));
-  const generatorVersion = 'hybrid-asset-grammar-v1';
+  const generatorVersion = 'hybrid-asset-grammar-v2';
   return {
     schemaVersion: 1,
     generatorVersion,

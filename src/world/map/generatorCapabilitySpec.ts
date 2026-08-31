@@ -1,13 +1,22 @@
 import { LANDSCAPE_RECIPES, type LandscapePattern } from './landscapeGrammar';
+import { FIELD_ENVIRONMENT_RULES } from './fieldEnvironmentGrammar';
 import type {
   AssetDemandRule,
   AssetFamilyRole,
   AssetState,
 } from './assetDemandTypes';
-import type { BiomeId, Footprint, LandscapeSize } from './worldTypes';
+import type { BiomeId, Footprint, LandscapeSize, SiteDemandClassId } from './worldTypes';
 
 const BIOMES: BiomeId[] = ['wasteland', 'scrap', 'industrial', 'mud', 'ruins', 'crater'];
 const ZERO: Footprint = { halfX: 0, halfZ: 0 };
+export const SITE_DEMAND_BY_BIOME: Readonly<Record<BiomeId, SiteDemandClassId>> = {
+  wasteland: 'site.wastelandOutpost',
+  scrap: 'site.scrapYard',
+  industrial: 'site.industrialYard',
+  mud: 'site.mudBasin',
+  ruins: 'site.ruinsComplex',
+  crater: 'site.craterStation',
+};
 
 const SIZE_ENVELOPES: Record<LandscapeSize, { min: Footprint; max: Footprint }> = {
   small: { min: { halfX: 1.5, halfZ: 1.5 }, max: { halfX: 5.5, halfZ: 5.5 } },
@@ -43,6 +52,22 @@ const landscapeRules: AssetDemandRule[] = Object.values(LANDSCAPE_RECIPES).flatM
     reserved: false,
   }))
 ));
+
+const environmentRules: AssetDemandRule[] = FIELD_ENVIRONMENT_RULES.map((rule) => ({
+  demandClass: rule.demandClass,
+  source: 'environment',
+  familyRole: rule.placementMode === 'cluster' ? 'cluster' : 'obstacle',
+  geometryMode: 'bounded',
+  biomes: [...rule.allowedBiomes],
+  minFootprint: { ...rule.minFootprint },
+  maxFootprint: { ...rule.maxFootprint },
+  connectorProfiles: [],
+  requiredVariants: 3,
+  requiredStates: rule.traversal === 'destructible'
+    ? ['intact', 'damaged', 'destroyed']
+    : ['intact'],
+  reserved: false,
+}));
 
 const groundRules: AssetDemandRule[] = BIOMES.map((biome) => ({
   demandClass: `ground.${biome}`,
@@ -98,12 +123,12 @@ const structuralRules: AssetDemandRule[] = [
     requiredStates: ['intact' as const],
     reserved: false,
   })),
-  ...(['site.industrialYard', 'site.scrapYard'] as const).map((demandClass) => ({
-    demandClass,
+  ...BIOMES.map((biome) => ({
+    demandClass: SITE_DEMAND_BY_BIOME[biome],
     source: 'site' as const,
     familyRole: 'site' as const,
     geometryMode: 'bounded' as const,
-    biomes: [demandClass === 'site.industrialYard' ? 'industrial' as const : 'scrap' as const],
+    biomes: [biome],
     minFootprint: { halfX: 10, halfZ: 10 },
     maxFootprint: { halfX: 40, halfZ: 40 },
     connectorProfiles: ['yard-road-v1'],
@@ -128,6 +153,7 @@ const structuralRules: AssetDemandRule[] = [
 
 export const GENERATOR_CAPABILITY_SPEC: readonly AssetDemandRule[] = [
   ...landscapeRules,
+  ...environmentRules,
   ...groundRules,
   ...structuralRules,
 ];

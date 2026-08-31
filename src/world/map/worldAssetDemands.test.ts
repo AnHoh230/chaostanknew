@@ -19,7 +19,8 @@ describe('worldAssetDemands', () => {
       .map((biome) => `ground.${biome}`)
       .sort();
 
-    expect(demands.filter((entry) => entry.source === 'landscape')).toHaveLength(world.features.length);
+    expect(demands.filter((entry) => entry.source === 'landscape' || entry.source === 'environment'))
+      .toHaveLength(world.features.length);
     expect(demands.filter((entry) => entry.source === 'ground').map((entry) => entry.demandClass).sort())
       .toEqual(activeGround);
     expect(demands.filter((entry) => entry.demandClass === 'corridor.surface'))
@@ -46,4 +47,31 @@ describe('worldAssetDemands', () => {
     expect(entrances).toHaveLength(world.corridors.length * 2);
     expect(new Set(entrances.map((entry) => entry.id)).size).toBe(entrances.length);
   }, 20_000);
+
+  it('emittiert fuer jede Site genau einen biomabhaengigen Site-Demand', () => {
+    const expectedByBiome = {
+      wasteland: 'site.wastelandOutpost',
+      scrap: 'site.scrapYard',
+      industrial: 'site.industrialYard',
+      mud: 'site.mudBasin',
+      ruins: 'site.ruinsComplex',
+      crater: 'site.craterStation',
+    } as const;
+
+    for (let seed = 1; seed <= 20; seed++) {
+      const world = generiereWelt(DEFAULT_WORLD_OPTIONS, seed);
+      const siteDemands = deriveWorldAssetDemands(world).filter((entry) => (
+        entry.source === 'site' && entry.demandClass !== 'site.entrance'
+      ));
+
+      expect(siteDemands, `Seed ${seed}`).toHaveLength(world.sites.length);
+      for (const site of world.sites) {
+        expect(siteDemands.filter((entry) => entry.id.endsWith(`_${site.id}`)), `Seed ${seed} / ${site.id}`)
+          .toEqual([expect.objectContaining({
+            demandClass: expectedByBiome[site.biomeId],
+            biomes: [site.biomeId],
+          })]);
+      }
+    }
+  }, 60_000);
 });

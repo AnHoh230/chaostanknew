@@ -29,7 +29,14 @@ describe('assetDemandCompiler', () => {
       geometryMode: 'parametric',
     });
     expect(byClass.get('ground.transition')?.connectorProfiles).toEqual(['biome-boundary-v1']);
-    expect(REQUIRED_ASSET_CATALOG.families).toHaveLength(32);
+    expect(byClass.get('site.wastelandOutpost')).toMatchObject({ source: 'site', biomes: ['wasteland'] });
+    expect(byClass.get('site.mudBasin')).toMatchObject({ source: 'site', biomes: ['mud'] });
+    expect(byClass.get('site.ruinsComplex')).toMatchObject({ source: 'site', biomes: ['ruins'] });
+    expect(byClass.get('site.craterStation')).toMatchObject({ source: 'site', biomes: ['crater'] });
+    expect(byClass.get('environment.dryBrush')).toMatchObject({ source: 'environment', biomes: ['ruins', 'scrap', 'wasteland'] });
+    expect(byClass.get('environment.wetBrush')).toMatchObject({ source: 'environment', biomes: ['mud', 'wasteland'] });
+    expect(byClass.get('environment.rockOutcrop')).toMatchObject({ source: 'environment', geometryMode: 'bounded' });
+    expect(REQUIRED_ASSET_CATALOG.families).toHaveLength(39);
   });
 
   it('verwirft widerspruechliche Regeln fuer dieselbe Demand-Class', () => {

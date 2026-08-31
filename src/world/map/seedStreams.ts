@@ -9,6 +9,7 @@ export type SeedStreamLabel =
   | 'graph'
   | 'routing'
   | 'landscape'
+  | 'environment'
   | 'visuals';
 
 export function seedForStream(seed: number, label: SeedStreamLabel): number {

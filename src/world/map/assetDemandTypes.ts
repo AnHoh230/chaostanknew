@@ -1,6 +1,6 @@
 import type { BiomeId, DemandClassId, Footprint } from './worldTypes';
 
-export type AssetDemandSource = 'landscape' | 'ground' | 'transition' | 'corridor' | 'junction' | 'site';
+export type AssetDemandSource = 'landscape' | 'environment' | 'ground' | 'transition' | 'corridor' | 'junction' | 'site';
 export type AssetFamilyRole = 'surface' | 'edge' | 'structure' | 'obstacle' | 'cluster' | 'decal' | 'site';
 export type AssetGeometryMode = 'bounded' | 'tileable' | 'parametric';
 export type AssetState = 'intact' | 'damaged' | 'destroyed';

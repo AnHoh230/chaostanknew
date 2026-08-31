@@ -1,3 +1,4 @@
+import { generateFieldEnvironment } from './fieldEnvironmentGenerator';
 import { generateLandscape } from './landscapeGenerator';
 import { generateMacroStructure } from './macroStructure';
 import { DEFAULT_PATH_ROUTING, routeCorridors } from './pathRouter';
@@ -128,6 +129,13 @@ export function generiereWelt(options: WorldGenerationOptions, seed: number): Ge
     corridors,
     reservations: baseReservations,
   }, createSeedStream(seed, 'landscape')));
+  const environment = runStage(seed, 'fieldEnvironmentGenerator', () => generateFieldEnvironment({
+    grid: options.traversalGrid,
+    fields,
+    regions,
+    reservations: [...baseReservations, ...landscape.negativeSpace],
+    occupied: landscape.features,
+  }, dna.structuralDensity, createSeedStream(seed, 'environment')));
 
   const world: GenerierteWelt = {
     seed,
@@ -143,7 +151,7 @@ export function generiereWelt(options: WorldGenerationOptions, seed: number): Ge
     realizedGraph,
     siteTopology,
     reservations: [...baseReservations, ...landscape.negativeSpace],
-    features: landscape.features,
+    features: [...landscape.features, ...environment],
     debug: {
       validation: { hardFailures: [] },
       quality: { signature: '', composedRatio: 0, maxUncomposedArea: 0, longestCorridorWithoutNode: 0 },

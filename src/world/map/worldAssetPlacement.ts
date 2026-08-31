@@ -1,6 +1,9 @@
 import { assertApprovedCandidateManifest, type AssetCandidateManifest } from './assetCandidateManifest';
 import { REQUIRED_ASSET_CATALOG } from './assetDemandCompiler';
+import { SITE_DEMAND_BY_BIOME } from './generatorCapabilitySpec';
 import type {
+  AssetFamilyRole,
+  AssetGeometryMode,
   AssetDemandOccurrence,
   AssetDemandSource,
   AssetVariant,
@@ -21,6 +24,7 @@ import type {
 const ZERO: Footprint = { halfX: 0, halfZ: 0 };
 
 export interface ResolvedStyleAsset {
+  status: 'resolved';
   familyId: string;
   variantId: string;
   files: string[];
@@ -28,12 +32,23 @@ export interface ResolvedStyleAsset {
   geometryRecipe?: string;
 }
 
+export interface MissingStyleAsset {
+  status: 'missing';
+  demandClass: DemandClassId;
+  reason: 'outside-preview-scope' | 'no-compatible-family';
+  footprint: Footprint;
+  familyRole: AssetFamilyRole;
+  geometryMode: AssetGeometryMode;
+}
+
+export type PlacementStyleAsset = ResolvedStyleAsset | MissingStyleAsset;
+
 interface PlacementBase {
   id: string;
   demandId: string;
   demandClass: DemandClassId;
   biomes: BiomeId[];
-  asset: ResolvedStyleAsset;
+  asset: PlacementStyleAsset;
 }
 
 export interface GroundAssetPlacement extends PlacementBase {
@@ -107,12 +122,6 @@ export type WorldAssetPlacement =
   | SiteAssetPlacement
   | EntranceAssetPlacement;
 
-export interface OmittedAssetDemand {
-  demandId: string;
-  demandClass: string;
-  reason: 'outside-preview-scope';
-}
-
 export interface WorldAssetPlacementPlan {
   worldSeed: number;
   visualSeed: number;
@@ -120,7 +129,6 @@ export interface WorldAssetPlacementPlan {
   kitVersion: number;
   catalogSignature: string;
   placements: WorldAssetPlacement[];
-  omitted: OmittedAssetDemand[];
 }
 
 type Unresolved<T extends WorldAssetPlacement> = T extends WorldAssetPlacement
@@ -266,7 +274,7 @@ function landscapeTargets(world: GenerierteWelt): UnresolvedPlacement[] {
     demand: occurrence(
       `landscape_${feature.id}`,
       feature.demandClass,
-      'landscape',
+      feature.demandClass.startsWith('environment.') ? 'environment' : 'landscape',
       [feature.biomeId],
       feature.footprint,
     ),
@@ -280,15 +288,10 @@ function landscapeTargets(world: GenerierteWelt): UnresolvedPlacement[] {
 }
 
 function siteTargets(world: GenerierteWelt): UnresolvedPlacement[] {
-  return world.sites.flatMap((site) => {
-    const demandClass = site.biomeId === 'industrial'
-      ? 'site.industrialYard' as const
-      : site.biomeId === 'scrap'
-        ? 'site.scrapYard' as const
-        : undefined;
-    if (!demandClass) return [];
+  return world.sites.map((site) => {
+    const demandClass = SITE_DEMAND_BY_BIOME[site.biomeId];
     const footprint = { halfX: site.radius, halfZ: site.radius };
-    return [{
+    return {
       kind: 'site' as const,
       demand: occurrence(`site_${site.biomeId}_${site.id}`, demandClass, 'site', [site.biomeId], footprint, ['yard-road-v1']),
       siteId: site.id,
@@ -296,7 +299,7 @@ function siteTargets(world: GenerierteWelt): UnresolvedPlacement[] {
       rotation: 0,
       radius: site.radius,
       footprint,
-    }];
+    };
   });
 }
 
@@ -370,11 +373,28 @@ function isInsidePreviewScope(demand: AssetDemandOccurrence, kit: WorldStyleKit)
 
 function assetFromVariant(familyId: string, variant: AssetVariant): ResolvedStyleAsset {
   return {
+    status: 'resolved',
     familyId,
     variantId: variant.id,
     files: [...variant.files],
     footprint: { ...variant.footprint },
     ...(variant.geometryRecipe ? { geometryRecipe: variant.geometryRecipe } : {}),
+  };
+}
+
+function missingAsset(
+  demand: AssetDemandOccurrence,
+  reason: MissingStyleAsset['reason'],
+): MissingStyleAsset {
+  const rule = REQUIRED_ASSET_CATALOG.families.find((entry) => entry.demandClass === demand.demandClass);
+  if (!rule) throw new Error(`missing-demand-catalog-rule:${demand.id}:${demand.demandClass}`);
+  return {
+    status: 'missing',
+    demandClass: demand.demandClass as DemandClassId,
+    reason,
+    footprint: { ...demand.footprint },
+    familyRole: rule.familyRole,
+    geometryMode: rule.geometryMode,
   };
 }
 
@@ -388,18 +408,24 @@ export function buildWorldAssetPlacementPlan(
   assertApprovedCandidateManifest(manifest, kit, REQUIRED_ASSET_CATALOG);
   const approvedFiles = new Set(manifest.files.map((file) => file.path));
   const placements: WorldAssetPlacement[] = [];
-  const omitted: OmittedAssetDemand[] = [];
   for (const target of buildTargets(world)) {
     const demand = target.demand;
+    const { demand: _demand, ...geometry } = target;
     if (!isInsidePreviewScope(demand, kit)) {
-      omitted.push({ demandId: demand.id, demandClass: demand.demandClass, reason: 'outside-preview-scope' });
+      placements.push({
+        ...geometry,
+        id: `placement_${demand.id}`,
+        demandId: demand.id,
+        demandClass: demand.demandClass as DemandClassId,
+        biomes: [...demand.biomes],
+        asset: missingAsset(demand, 'outside-preview-scope'),
+      } as WorldAssetPlacement);
       continue;
     }
     const choice = resolveAssetFamily(kit, demand, visualSeed);
     for (const file of choice.variant.files) {
       if (!approvedFiles.has(file)) throw new Error(`placement-asset-file-not-approved:${demand.id}:${file}`);
     }
-    const { demand: _demand, ...geometry } = target;
     placements.push({
       ...geometry,
       id: `placement_${demand.id}`,
@@ -416,6 +442,5 @@ export function buildWorldAssetPlacementPlan(
     kitVersion: kit.version,
     catalogSignature: kit.catalogSignature,
     placements,
-    omitted,
   };
 }

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import manifestJson from './ironwasteCandidateManifest.json';
 import type { AssetCandidateManifest } from './assetCandidateManifest';
 import { IRONWASTE_V1_PREVIEW_KIT } from './ironwasteStyleKit';
-import { buildWorldAssetPlacementPlan } from './worldAssetPlacement';
+import { buildWorldAssetPlacementPlan, deriveWorldAssetDemandsFromTargets } from './worldAssetPlacement';
 import { DEFAULT_WORLD_OPTIONS, generiereWelt } from './worldGenerator';
 
 const MANIFEST = manifestJson as AssetCandidateManifest;
@@ -18,27 +18,41 @@ describe('worldAssetPlacement', () => {
     expect(first).toEqual(second);
     expect(JSON.stringify(world)).toBe(before);
     expect(first.placements.length).toBeGreaterThan(0);
-    expect(first.placements.every((placement) => placement.asset.familyId.startsWith(`${first.kitId}.`)))
-      .toBe(true);
+    expect(first.placements.every((placement) => (
+      placement.asset.status === 'missing'
+      || placement.asset.familyId.startsWith(`${first.kitId}.`)
+    ))).toBe(true);
   }, 20_000);
 
-  it('laesst im Preview nur explizit freigegebene Klassen und Biome durch', () => {
+  it('uebersetzt jede Generator-Anforderung genau einmal in Asset oder sichtbaren Missing-Marker', () => {
     const world = generiereWelt(DEFAULT_WORLD_OPTIONS, 17);
     const plan = buildWorldAssetPlacementPlan(world, IRONWASTE_V1_PREVIEW_KIT, MANIFEST, 3);
+    const demands = deriveWorldAssetDemandsFromTargets(world);
     const supportedBiomes = new Set(IRONWASTE_V1_PREVIEW_KIT.previewBiomes);
 
-    expect(plan.placements.every((placement) => (
+    expect(plan.placements).toHaveLength(demands.length);
+    expect(new Set(plan.placements.map((placement) => placement.demandId)).size).toBe(demands.length);
+    expect(plan.placements.map((placement) => placement.demandId).sort())
+      .toEqual(demands.map((demand) => demand.id).sort());
+    expect('omitted' in plan).toBe(false);
+    const resolved = plan.placements.filter((placement) => placement.asset.status === 'resolved');
+    const missing = plan.placements.filter((placement) => placement.asset.status === 'missing');
+    expect(resolved.every((placement) => (
       IRONWASTE_V1_PREVIEW_KIT.previewScope.includes(placement.demandClass)
       && placement.biomes.every((biome) => supportedBiomes.has(biome))
     ))).toBe(true);
-    expect(plan.omitted.length).toBeGreaterThan(0);
-    expect(plan.omitted.every((entry) => entry.reason === 'outside-preview-scope')).toBe(true);
+    expect(missing.length).toBeGreaterThan(0);
+    expect(missing.every((placement) => (
+      placement.asset.status === 'missing'
+      && placement.asset.reason === 'outside-preview-scope'
+    ))).toBe(true);
+    expect(missing.every((placement) => !('files' in placement.asset))).toBe(true);
     expect(plan.placements.some((entry) => entry.demandClass === 'ground.wasteland')).toBe(true);
     expect(plan.placements.some((entry) => entry.demandClass === 'wasteland.landmarkIsland')).toBe(true);
     expect(plan.placements.some((entry) => (
       entry.kind === 'transition' && entry.biomes.includes('wasteland')
     ))).toBe(true);
-    expect(plan.omitted.some((entry) => entry.demandClass.startsWith('wasteland.'))).toBe(false);
+    expect(missing.some((entry) => entry.demandClass.startsWith('wasteland.'))).toBe(false);
   }, 20_000);
 
   it('platziert jede unterstuetzte Site-Einfahrt am zugehoerigen Korridorende', () => {
@@ -49,7 +63,8 @@ describe('worldAssetPlacement', () => {
     const expected = world.corridors.flatMap((corridor) => [corridor.fromSiteId, corridor.toSiteId])
       .filter((siteId) => supported.has(world.sites.find((site) => site.id === siteId)!.biomeId));
 
-    expect(entrances).toHaveLength(expected.length);
+    expect(entrances).toHaveLength(world.corridors.length * 2);
+    expect(entrances.filter((entrance) => entrance.asset.status === 'resolved')).toHaveLength(expected.length);
     for (const entrance of entrances) {
       const corridor = world.corridors.find((entry) => entry.id === entrance.corridorId)!;
       const endpoints = [corridor.centerline[0]!, corridor.centerline.at(-1)!];
@@ -69,7 +84,9 @@ describe('worldAssetPlacement', () => {
         .sort();
 
       expect(renderedGrounds, `Seed ${seed}`).toEqual(generatedBiomes);
-      expect(plan.omitted.some((entry) => entry.demandClass.startsWith('ground.')), `Seed ${seed}`).toBe(false);
+      expect(plan.placements
+        .filter((entry) => entry.demandClass.startsWith('ground.'))
+        .every((entry) => entry.asset.status === 'resolved'), `Seed ${seed}`).toBe(true);
     }
   }, 60_000);
 
@@ -79,9 +96,11 @@ describe('worldAssetPlacement', () => {
     const bounded = plan.placements.filter((placement) => (
       placement.kind === 'landscape' || placement.kind === 'site' || placement.kind === 'entrance'
     ));
+    const resolvedBounded = bounded.filter((placement) => placement.asset.status === 'resolved');
 
-    expect(bounded.length).toBeGreaterThan(0);
-    for (const placement of bounded) {
+    expect(resolvedBounded.length).toBeGreaterThan(0);
+    for (const placement of resolvedBounded) {
+      if (placement.asset.status !== 'resolved') throw new Error('expected-resolved-bounded-placement');
       expect(placement.asset.geometryRecipe, placement.id).toBeUndefined();
       expect(placement.asset.files[0], placement.id).toMatch(/\/sprite_[a-z_]+\.png$/);
     }

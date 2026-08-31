@@ -36,7 +36,7 @@ interface Emission {
   negativeSpace: SpatialReservation[];
 }
 
-function rotatedEnvelope(feature: LandscapeFeature): Footprint {
+export function rotatedFeatureEnvelope(feature: LandscapeFeature): Footprint {
   const cos = Math.abs(Math.cos(feature.rotation));
   const sin = Math.abs(Math.sin(feature.rotation));
   return {
@@ -50,7 +50,7 @@ export function featureFitsReservations(
   reservations: readonly SpatialReservation[],
 ): boolean {
   if (feature.traversal === 'driveable') return true;
-  const envelope = rotatedEnvelope(feature);
+  const envelope = rotatedFeatureEnvelope(feature);
   for (const reservation of reservations) {
     if (reservation.allowedRoles.includes(feature.role)) continue;
     const halfCell = reservation.grid.cellSize / 2;
@@ -65,15 +65,15 @@ export function featureFitsReservations(
   return true;
 }
 
-function fitsBounds(feature: LandscapeFeature, grid: GridSpec): boolean {
-  const envelope = rotatedEnvelope(feature);
+export function featureFitsBounds(feature: LandscapeFeature, grid: GridSpec): boolean {
+  const envelope = rotatedFeatureEnvelope(feature);
   return Math.abs(feature.position.x) + envelope.halfX + feature.clearance <= grid.extents.halfX
     && Math.abs(feature.position.z) + envelope.halfZ + feature.clearance <= grid.extents.halfZ;
 }
 
-function overlaps(a: LandscapeFeature, b: LandscapeFeature): boolean {
+export function featuresOverlap(a: LandscapeFeature, b: LandscapeFeature): boolean {
   if (a.traversal === 'driveable' || b.traversal === 'driveable') return false;
-  const ae = rotatedEnvelope(a), be = rotatedEnvelope(b);
+  const ae = rotatedFeatureEnvelope(a), be = rotatedFeatureEnvelope(b);
   return Math.abs(a.position.x - b.position.x) < ae.halfX + be.halfX + a.clearance + b.clearance
     && Math.abs(a.position.z - b.position.z) < ae.halfZ + be.halfZ + a.clearance + b.clearance;
 }
@@ -332,9 +332,9 @@ function tryComposition(
     const anchor = cellCenter(context.regions.grid, fieldCell);
     const emission = emit(context, anchor, pattern, region, rng);
     const accepted = emission.features.every((candidate) => (
-      fitsBounds(candidate, context.grid)
+      featureFitsBounds(candidate, context.grid)
       && featureFitsReservations(candidate, reservations)
-      && occupied.every((existing) => !overlaps(candidate, existing))
+      && occupied.every((existing) => !featuresOverlap(candidate, existing))
     ));
     if (accepted) return emission;
   }

@@ -8,10 +8,11 @@ import type { GenerierteWelt } from './worldTypes';
 const IRONWASTE_MANIFEST = manifestJson as AssetCandidateManifest;
 
 export interface AssetLabStats {
-  renderedPlacements: number;
-  omittedDemands: number;
-  renderedClasses: string[];
-  omittedByClass: Record<string, number>;
+  totalPlacements: number;
+  resolvedPlacements: number;
+  missingPlacements: number;
+  resolvedClasses: string[];
+  missingByClass: Record<string, number>;
 }
 
 export interface IronwastePreviewModel {
@@ -42,10 +43,12 @@ export function buildIronwastePreview(worldSeed: number, visualSeed: number): Ir
     IRONWASTE_MANIFEST,
     normalizedVisualSeed,
   );
-  const omittedByClass: Record<string, number> = {};
-  for (const omitted of plan.omitted) {
-    omittedByClass[omitted.demandClass] = (omittedByClass[omitted.demandClass] ?? 0) + 1;
+  const missingByClass: Record<string, number> = {};
+  for (const placement of plan.placements) {
+    if (placement.asset.status !== 'missing') continue;
+    missingByClass[placement.demandClass] = (missingByClass[placement.demandClass] ?? 0) + 1;
   }
+  const resolvedPlacements = plan.placements.filter((placement) => placement.asset.status === 'resolved');
   const spriteFamilies = IRONWASTE_V1_PREVIEW_KIT.families.flatMap((family) => {
     const file = family.variants[0]?.files[0];
     if (!file || !/\/sprite_[a-z_]+\.png$/.test(file)) return [];
@@ -56,12 +59,13 @@ export function buildIronwastePreview(worldSeed: number, visualSeed: number): Ir
     plan,
     spriteFamilies,
     stats: {
-      renderedPlacements: plan.placements.length,
-      omittedDemands: plan.omitted.length,
-      renderedClasses: [...new Set(plan.placements.map((placement) => placement.demandClass))]
+      totalPlacements: plan.placements.length,
+      resolvedPlacements: resolvedPlacements.length,
+      missingPlacements: plan.placements.length - resolvedPlacements.length,
+      resolvedClasses: [...new Set(resolvedPlacements.map((placement) => placement.demandClass))]
         .sort((a, b) => a.localeCompare(b)),
-      omittedByClass: Object.fromEntries(
-        Object.entries(omittedByClass).sort(([a], [b]) => a.localeCompare(b)),
+      missingByClass: Object.fromEntries(
+        Object.entries(missingByClass).sort(([a], [b]) => a.localeCompare(b)),
       ),
     },
   };

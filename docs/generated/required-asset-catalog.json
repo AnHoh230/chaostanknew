@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatorVersion": "hybrid-asset-grammar-v1",
+  "generatorVersion": "hybrid-asset-grammar-v2",
   "families": [
     {
       "demandClass": "corridor.edge",
@@ -123,6 +123,85 @@
       "maxFootprint": {
         "halfX": 5.5,
         "halfZ": 5.5
+      },
+      "connectorProfiles": [],
+      "requiredVariants": 3,
+      "requiredStates": [
+        "damaged",
+        "destroyed",
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "environment.dryBrush",
+      "source": "environment",
+      "familyRole": "cluster",
+      "geometryMode": "bounded",
+      "biomes": [
+        "ruins",
+        "scrap",
+        "wasteland"
+      ],
+      "minFootprint": {
+        "halfX": 1.5,
+        "halfZ": 1.5
+      },
+      "maxFootprint": {
+        "halfX": 3.5,
+        "halfZ": 3
+      },
+      "connectorProfiles": [],
+      "requiredVariants": 3,
+      "requiredStates": [
+        "damaged",
+        "destroyed",
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "environment.rockOutcrop",
+      "source": "environment",
+      "familyRole": "obstacle",
+      "geometryMode": "bounded",
+      "biomes": [
+        "crater",
+        "ruins",
+        "scrap",
+        "wasteland"
+      ],
+      "minFootprint": {
+        "halfX": 3,
+        "halfZ": 3
+      },
+      "maxFootprint": {
+        "halfX": 6.5,
+        "halfZ": 5.5
+      },
+      "connectorProfiles": [],
+      "requiredVariants": 3,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": false
+    },
+    {
+      "demandClass": "environment.wetBrush",
+      "source": "environment",
+      "familyRole": "cluster",
+      "geometryMode": "bounded",
+      "biomes": [
+        "mud",
+        "wasteland"
+      ],
+      "minFootprint": {
+        "halfX": 2,
+        "halfZ": 2
+      },
+      "maxFootprint": {
+        "halfX": 4,
+        "halfZ": 3.5
       },
       "connectorProfiles": [],
       "requiredVariants": 3,
@@ -658,6 +737,31 @@
       "reserved": false
     },
     {
+      "demandClass": "site.craterStation",
+      "source": "site",
+      "familyRole": "site",
+      "geometryMode": "bounded",
+      "biomes": [
+        "crater"
+      ],
+      "minFootprint": {
+        "halfX": 10,
+        "halfZ": 10
+      },
+      "maxFootprint": {
+        "halfX": 40,
+        "halfZ": 40
+      },
+      "connectorProfiles": [
+        "yard-road-v1"
+      ],
+      "requiredVariants": 2,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": true
+    },
+    {
       "demandClass": "site.entrance",
       "source": "site",
       "familyRole": "site",
@@ -713,12 +817,87 @@
       "reserved": true
     },
     {
+      "demandClass": "site.mudBasin",
+      "source": "site",
+      "familyRole": "site",
+      "geometryMode": "bounded",
+      "biomes": [
+        "mud"
+      ],
+      "minFootprint": {
+        "halfX": 10,
+        "halfZ": 10
+      },
+      "maxFootprint": {
+        "halfX": 40,
+        "halfZ": 40
+      },
+      "connectorProfiles": [
+        "yard-road-v1"
+      ],
+      "requiredVariants": 2,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": true
+    },
+    {
+      "demandClass": "site.ruinsComplex",
+      "source": "site",
+      "familyRole": "site",
+      "geometryMode": "bounded",
+      "biomes": [
+        "ruins"
+      ],
+      "minFootprint": {
+        "halfX": 10,
+        "halfZ": 10
+      },
+      "maxFootprint": {
+        "halfX": 40,
+        "halfZ": 40
+      },
+      "connectorProfiles": [
+        "yard-road-v1"
+      ],
+      "requiredVariants": 2,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": true
+    },
+    {
       "demandClass": "site.scrapYard",
       "source": "site",
       "familyRole": "site",
       "geometryMode": "bounded",
       "biomes": [
         "scrap"
+      ],
+      "minFootprint": {
+        "halfX": 10,
+        "halfZ": 10
+      },
+      "maxFootprint": {
+        "halfX": 40,
+        "halfZ": 40
+      },
+      "connectorProfiles": [
+        "yard-road-v1"
+      ],
+      "requiredVariants": 2,
+      "requiredStates": [
+        "intact"
+      ],
+      "reserved": true
+    },
+    {
+      "demandClass": "site.wastelandOutpost",
+      "source": "site",
+      "familyRole": "site",
+      "geometryMode": "bounded",
+      "biomes": [
+        "wasteland"
       ],
       "minFootprint": {
         "halfX": 10,
@@ -811,5 +990,5 @@
       "reserved": false
     }
   ],
-  "signature": "f8386129"
+  "signature": "33e7eb55"
 }

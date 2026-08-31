@@ -1,12 +1,12 @@
 # Ironwaste v1 Asset QA
 
-- Catalog signature: `f8386129`
+- Catalog signature: `33e7eb55`
 - Kit version: `3`
 - State: `approved`
 - Activation: `preview`
 - Preview biomes: `industrial`, `scrap`, `wasteland`, `mud`, `ruins`, `crater`
 - Seed coverage: `1..500`
-- Seed coverage signature: `95f2a916`
+- Seed coverage signature: `1ceab3e9`
 - Wasteland style reference: `docs/superpowers/assets/wasteland-v1-concept.png`
 
 | File | X-edge RMS | Y-edge RMS | Alpha range | Border alpha | SHA-256 |
@@ -56,6 +56,9 @@
 | `crater.boundaryArc` | 2748 |
 | `crater.clearingIsland` | 1676 |
 | `crater.destructibleBlob` | 1870 |
+| `environment.dryBrush` | 2671 |
+| `environment.rockOutcrop` | 1489 |
+| `environment.wetBrush` | 2849 |
 | `ground.crater` | 293 |
 | `ground.industrial` | 288 |
 | `ground.mud` | 306 |
@@ -77,9 +80,13 @@
 | `scrap.landmarkIsland` | 880 |
 | `scrap.scrapPile` | 1218 |
 | `scrap.wreckCluster` | 918 |
+| `site.craterStation` | 498 |
 | `site.entrance` | 10010 |
 | `site.industrialYard` | 517 |
+| `site.mudBasin` | 609 |
+| `site.ruinsComplex` | 340 |
 | `site.scrapYard` | 261 |
+| `site.wastelandOutpost` | 2284 |
 | `wasteland.coverCluster` | 10614 |
 | `wasteland.destructibleBlob` | 6880 |
 | `wasteland.landmarkIsland` | 10688 |

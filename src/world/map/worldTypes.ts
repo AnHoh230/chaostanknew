@@ -20,15 +20,26 @@ export type LandscapeDemandClassId =
   | 'crater.clearingIsland'
   | 'crater.boundaryArc'
   | 'crater.destructibleBlob';
+export type EnvironmentDemandClassId =
+  | 'environment.dryBrush'
+  | 'environment.wetBrush'
+  | 'environment.rockOutcrop';
+export type SiteDemandClassId =
+  | 'site.wastelandOutpost'
+  | 'site.scrapYard'
+  | 'site.industrialYard'
+  | 'site.mudBasin'
+  | 'site.ruinsComplex'
+  | 'site.craterStation';
 export type DemandClassId = LandscapeDemandClassId
+  | EnvironmentDemandClassId
   | `ground.${BiomeId}`
   | 'ground.transition'
   | 'corridor.surface'
   | 'corridor.edge'
   | 'junction.degree3'
   | 'junction.degree4'
-  | 'site.industrialYard'
-  | 'site.scrapYard'
+  | SiteDemandClassId
   | 'site.entrance';
 export type RegionId = string;
 export type SiteId = string;
@@ -145,7 +156,7 @@ export type PlacementMode = 'single' | 'cluster' | 'line' | 'border' | 'site';
 export interface Footprint { halfX: number; halfZ: number }
 export interface LandscapeFeature {
   id: FeatureId;
-  demandClass: LandscapeDemandClassId;
+  demandClass: LandscapeDemandClassId | EnvironmentDemandClassId;
   biomeId: BiomeId;
   regionId: RegionId;
   shape: LandscapeShape;
