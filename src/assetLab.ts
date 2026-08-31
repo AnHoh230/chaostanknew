@@ -31,6 +31,7 @@ const classCount = requiredElement<HTMLElement>('classCount');
 const omittedCount = requiredElement<HTMLElement>('omittedCount');
 const scope = requiredElement<HTMLElement>('scope');
 const status = requiredElement<HTMLElement>('status');
+const assetFamilyGallery = requiredElement<HTMLElement>('assetFamilyGallery');
 const engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
 const scene = new Scene(engine);
 scene.clearColor = new Color4(0.055, 0.07, 0.075, 1);
@@ -67,6 +68,19 @@ function renderPreview(): void {
   try {
     const model = buildIronwastePreview(worldSeed, visualSeed);
     preview = createWorldStylePreview(scene, model.plan, IRONWASTE_V1_PREVIEW_KIT);
+    assetFamilyGallery.replaceChildren(...model.spriteFamilies.map((family) => {
+      const figure = document.createElement('figure');
+      figure.className = 'asset-family-card';
+      figure.title = `${family.demandClass} · ${family.familyId}`;
+      const image = document.createElement('img');
+      image.src = `./${family.file}`;
+      image.alt = family.demandClass;
+      image.loading = 'eager';
+      const caption = document.createElement('figcaption');
+      caption.textContent = family.demandClass;
+      figure.append(image, caption);
+      return figure;
+    }));
     renderedCount.textContent = String(model.stats.renderedPlacements);
     classCount.textContent = String(model.stats.renderedClasses.length);
     omittedCount.textContent = String(model.stats.omittedDemands);
@@ -81,6 +95,7 @@ function renderPreview(): void {
     status.dataset.state = 'ready';
     status.textContent = `${model.plan.kitId} v${model.plan.kitVersion} · Katalog ${model.plan.catalogSignature}`;
   } catch (error) {
+    assetFamilyGallery.replaceChildren();
     renderedCount.textContent = '0';
     classCount.textContent = '0';
     omittedCount.textContent = '–';

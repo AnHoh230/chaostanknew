@@ -18,6 +18,13 @@ export interface IronwastePreviewModel {
   world: GenerierteWelt;
   plan: WorldAssetPlacementPlan;
   stats: AssetLabStats;
+  spriteFamilies: SpriteFamilyPreview[];
+}
+
+export interface SpriteFamilyPreview {
+  demandClass: string;
+  familyId: string;
+  file: string;
 }
 
 function integerSeed(value: number, label: string): number {
@@ -39,9 +46,15 @@ export function buildIronwastePreview(worldSeed: number, visualSeed: number): Ir
   for (const omitted of plan.omitted) {
     omittedByClass[omitted.demandClass] = (omittedByClass[omitted.demandClass] ?? 0) + 1;
   }
+  const spriteFamilies = IRONWASTE_V1_PREVIEW_KIT.families.flatMap((family) => {
+    const file = family.variants[0]?.files[0];
+    if (!file || !/\/sprite_[a-z_]+\.png$/.test(file)) return [];
+    return family.fulfills.map((demandClass) => ({ demandClass, familyId: family.id, file }));
+  }).sort((a, b) => a.demandClass.localeCompare(b.demandClass));
   return {
     world,
     plan,
+    spriteFamilies,
     stats: {
       renderedPlacements: plan.placements.length,
       omittedDemands: plan.omitted.length,

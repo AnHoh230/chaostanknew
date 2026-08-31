@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { PNG, blit, drawText, fillRect, writePng } from './pngDrawing.mjs';
+import { PNG, blit, drawText, fillRect, readPng, writePng } from './pngDrawing.mjs';
 
 const SIZE = 256;
 const TAU = Math.PI * 2;
@@ -97,13 +97,37 @@ const wasteland = texture((x, y) => {
   return [...rgb, 255];
 });
 
-const transition = texture((x, y) => {
-  const t = x / (SIZE - 1);
-  const ragged = periodicNoise(x, y, 22) * 0.13;
-  const blend = Math.max(0, Math.min(1, t + ragged));
-  const left = [72, 79, 81], right = [104, 63, 39];
-  const alpha = Math.sin(Math.PI * t) ** 0.7 * 235;
-  return [...mix(left, right, blend), alpha];
+const mud = texture((x, y) => {
+  const broad = seamlessValueNoise(x, y, 4, 113);
+  const puddles = seamlessValueNoise(x, y, 8, 127);
+  const tracks = Math.abs(Math.sin(TAU * x / (SIZE - 1) * 2 + periodicNoise(x, y, 131))) < 0.08;
+  let rgb = mix([58, 54, 43], [104, 86, 58], broad * 0.58 + puddles * 0.16);
+  rgb = mix(rgb, [37, 43, 40], Math.max(0, 0.42 - puddles) * 1.35);
+  if (tracks) rgb = mix(rgb, [45, 40, 33], 0.38);
+  return [...rgb, 255];
+});
+
+const ruins = texture((x, y) => {
+  const broad = seamlessValueNoise(x, y, 5, 137);
+  const dust = seamlessValueNoise(x, y, 13, 139);
+  const u = TAU * x / (SIZE - 1), v = TAU * y / (SIZE - 1);
+  const blockJoint = Math.min(Math.abs(Math.sin(u * 2)), Math.abs(Math.sin(v * 2))) < 0.035;
+  const crack = Math.abs(Math.sin(u * 5 - v * 7 + broad * 2)) < 0.028;
+  let rgb = mix([82, 80, 74], [130, 122, 105], broad * 0.55 + dust * 0.18);
+  if (blockJoint) rgb = mix(rgb, [54, 55, 53], 0.55);
+  if (crack) rgb = mix(rgb, [43, 44, 42], 0.48);
+  return [...rgb, 255];
+});
+
+const crater = texture((x, y) => {
+  const broad = seamlessValueNoise(x, y, 4, 149);
+  const ashNoise = seamlessValueNoise(x, y, 11, 151);
+  const u = TAU * x / (SIZE - 1), v = TAU * y / (SIZE - 1);
+  const impactRing = Math.abs(Math.sin(u * 3 + Math.cos(v * 2) + ashNoise)) < 0.045;
+  let rgb = mix([45, 39, 36], [83, 69, 57], broad * 0.5 + ashNoise * 0.2);
+  rgb = mix(rgb, [31, 32, 31], Math.max(0, ashNoise - 0.56) * 0.75);
+  if (impactRing) rgb = mix(rgb, [112, 86, 59], 0.34);
+  return [...rgb, 255];
 });
 
 function transitionTexture(left, right, seed) {
@@ -116,9 +140,26 @@ function transitionTexture(left, right, seed) {
   });
 }
 
-const industrialWastelandTransition = transitionTexture([72, 79, 81], [98, 85, 66], 73);
-const scrapWastelandTransition = transitionTexture([104, 63, 39], [98, 85, 66], 79);
-
+const surfaces = {
+  crater: { texture: crater, color: [57, 49, 43] },
+  industrial: { texture: industrial, color: [72, 79, 81] },
+  mud: { texture: mud, color: [75, 65, 49] },
+  ruins: { texture: ruins, color: [103, 98, 87] },
+  scrap: { texture: scrap, color: [104, 63, 39] },
+  wasteland: { texture: wasteland, color: [98, 85, 66] },
+};
+const transitionTextures = new Map();
+const surfaceEntries = Object.entries(surfaces);
+for (let leftIndex = 0; leftIndex < surfaceEntries.length; leftIndex++) {
+  for (let rightIndex = leftIndex + 1; rightIndex < surfaceEntries.length; rightIndex++) {
+    const [leftId, left] = surfaceEntries[leftIndex];
+    const [rightId, right] = surfaceEntries[rightIndex];
+    transitionTextures.set(
+      `transition_${leftId}_${rightId}.png`,
+      transitionTexture(left.color, right.color, 71 + leftIndex * 17 + rightIndex * 23),
+    );
+  }
+}
 const road = texture((x, y) => {
   const u = x / (SIZE - 1);
   const v = TAU * y / (SIZE - 1);
@@ -140,131 +181,90 @@ const roadEdge = texture((x, y) => {
   return [clamp(75 + rust * 20), clamp(70 + rust * 15), clamp(58 + rust * 10), alpha];
 });
 
-const industrialCracks = texture((x, y) => {
-  const u = TAU * x / (SIZE - 1), v = TAU * y / (SIZE - 1);
-  const line = Math.abs(Math.sin(u * 3 + v * 5 + Math.sin(v * 2))) < 0.035;
-  const secondary = Math.abs(Math.cos(u * 7 - v * 4)) < 0.022;
-  return [38, 43, 45, line || secondary ? 190 : 0];
-});
-
-const scrapFragments = texture((x, y) => {
-  const value = periodicNoise(x, y, 41);
-  const shard = value > 0.62 || value < -0.72;
-  const rust = value > 0.62;
-  return rust ? [160, 76, 35, shard ? 210 : 0] : [111, 122, 124, shard ? 190 : 0];
-});
-
-const sharedGrime = texture((x, y) => {
-  const value = periodicNoise(x, y, 53);
-  const alpha = Math.max(0, Math.abs(value) - 0.28) * 190;
-  return value > 0 ? [85, 57, 38, alpha] : [28, 32, 33, alpha];
-});
-
-function transparentEdge(x, y, width = 24) {
-  return Math.max(0, Math.min(1, Math.min(x, y, SIZE - 1 - x, SIZE - 1 - y) / width));
-}
-
-const wastelandLandmark = texture((x, y) => {
-  const nx = (x - (SIZE - 1) / 2) / ((SIZE - 1) / 2);
-  const ny = (y - (SIZE - 1) / 2) / ((SIZE - 1) / 2);
-  const radius = Math.hypot(nx * 0.92, ny);
-  const noise = periodicNoise(x, y, 83) * 0.08;
-  const outer = Math.max(0, Math.min(1, (0.95 - radius + noise) * 8));
-  const ring = Math.abs(radius - 0.58 - noise * 0.4) < 0.11;
-  const rgb = ring ? [107, 99, 84] : mix([70, 62, 50], [125, 106, 78], (periodicNoise(x, y, 89) + 1) * 0.35);
-  return [...rgb, outer * transparentEdge(x, y) * 205];
-});
-
-const wastelandDebris = texture((x, y) => {
-  const nx = (x - (SIZE - 1) / 2) / ((SIZE - 1) / 2);
-  const ny = (y - (SIZE - 1) / 2) / ((SIZE - 1) / 2);
-  const radiusFade = Math.max(0, 1 - Math.hypot(nx, ny) / 0.96);
-  const value = periodicNoise(x, y, 97);
-  const shard = Math.max(0, Math.abs(value) - 0.38) * 2.3;
-  const rusted = periodicNoise(x, y, 101) > 0.08;
-  const rgb = rusted ? [145, 70, 39] : [104, 105, 97];
-  return [...rgb, Math.min(220, shard * radiusFade * transparentEdge(x, y) * 255)];
-});
-
-const wastelandCover = texture((x, y) => {
-  const u = (x - (SIZE - 1) / 2) / ((SIZE - 1) / 2);
-  const v = (y - (SIZE - 1) / 2) / ((SIZE - 1) / 2);
-  const bags = [-0.66, -0.34, 0, 0.34, 0.66].reduce((best, center) => (
-    Math.min(best, ((u - center) / 0.21) ** 2 + ((v + 0.06 * Math.cos(center * 7)) / 0.18) ** 2)
-  ), Infinity);
-  const plate = Math.abs(u + v * 0.34) < 0.12 && Math.abs(v - 0.22) < 0.22;
-  const edge = transparentEdge(x, y);
-  if (bags < 1) return [143, 125, 91, (1 - bags * 0.28) * edge * 225];
-  if (plate) return [133, 67, 39, edge * 200];
-  const pebble = periodicNoise(x, y, 107) > 0.72 && Math.hypot(u, v) < 0.92;
-  return [126, 119, 99, pebble ? edge * 150 : 0];
-});
-
 const files = new Map([
-  ['ground_industrial.png', industrial],
-  ['ground_scrap.png', scrap],
-  ['ground_wasteland.png', wasteland],
-  ['transition_industrial_scrap.png', transition],
-  ['transition_industrial_wasteland.png', industrialWastelandTransition],
-  ['transition_scrap_wasteland.png', scrapWastelandTransition],
+  ...surfaceEntries.map(([biomeId, surface]) => [`ground_${biomeId}.png`, surface.texture]),
+  ...transitionTextures.entries(),
   ['road_surface.png', road],
   ['road_edge.png', roadEdge],
-  ['decal_industrial_cracks.png', industrialCracks],
-  ['decal_scrap_fragments.png', scrapFragments],
-  ['decal_shared_grime.png', sharedGrime],
-  ['decal_wasteland_landmark.png', wastelandLandmark],
-  ['decal_wasteland_debris.png', wastelandDebris],
-  ['decal_wasteland_cover.png', wastelandCover],
 ]);
 
 for (const [name, png] of files) writePng(path.join(outputDir, name), png);
 
-function tileInto(target, source, x, y, columns, rows) {
-  for (let row = 0; row < rows; row++) {
-    for (let col = 0; col < columns; col++) blit(target, source, x + col * source.width, y + row * source.height);
+function blitScaledContain(target, source, x, y, width, height) {
+  const scale = Math.min(width / source.width, height / source.height);
+  const targetWidth = Math.max(1, Math.round(source.width * scale));
+  const targetHeight = Math.max(1, Math.round(source.height * scale));
+  const offsetX = x + Math.floor((width - targetWidth) / 2);
+  const offsetY = y + Math.floor((height - targetHeight) / 2);
+  for (let targetY = 0; targetY < targetHeight; targetY++) {
+    const sourceY = Math.min(source.height - 1, Math.floor(targetY / scale));
+    for (let targetX = 0; targetX < targetWidth; targetX++) {
+      const sourceX = Math.min(source.width - 1, Math.floor(targetX / scale));
+      const sourceIndex = (sourceY * source.width + sourceX) * 4;
+      const targetIndex = ((offsetY + targetY) * target.width + offsetX + targetX) * 4;
+      const sourceAlpha = source.data[sourceIndex + 3] / 255;
+      const inverseAlpha = 1 - sourceAlpha;
+      target.data[targetIndex] = clamp(source.data[sourceIndex] * sourceAlpha + target.data[targetIndex] * inverseAlpha);
+      target.data[targetIndex + 1] = clamp(source.data[sourceIndex + 1] * sourceAlpha + target.data[targetIndex + 1] * inverseAlpha);
+      target.data[targetIndex + 2] = clamp(source.data[sourceIndex + 2] * sourceAlpha + target.data[targetIndex + 2] * inverseAlpha);
+      target.data[targetIndex + 3] = 255;
+    }
   }
 }
 
-const sheet = new PNG({ width: 1536, height: 1100 });
+const sheet = new PNG({ width: 2048, height: 1840 });
 fillRect(sheet, 0, 0, sheet.width, sheet.height, [24, 28, 29, 255]);
 
-const groundPanels = [
-  { label: 'INDUSTRIAL TILE 2X2', texture: industrial },
-  { label: 'SCRAP TILE 2X2', texture: scrap },
-  { label: 'WASTELAND TILE 2X2', texture: wasteland },
-];
-for (let index = 0; index < groundPanels.length; index++) {
-  const panel = groundPanels[index];
-  const x = index * 512;
-  drawText(sheet, panel.label, x + 14, 8, [226, 226, 212, 255], 2);
-  tileInto(sheet, panel.texture, x, 32, 2, 2);
+drawText(sheet, 'TILEABLE BIOME GROUNDS', 16, 10, [226, 226, 212, 255], 2);
+for (let index = 0; index < surfaceEntries.length; index++) {
+  const [biomeId, surface] = surfaceEntries[index];
+  const x = 8 + index * 338;
+  drawText(sheet, biomeId.toUpperCase(), x + 6, 42, [184, 198, 193, 255], 1);
+  blit(sheet, surface.texture, x, 60);
 }
 
-const transitionPanels = [
-  { label: 'INDUSTRIAL TO SCRAP', left: industrial, right: scrap, blend: transition },
-  { label: 'INDUSTRIAL TO WASTELAND', left: industrial, right: wasteland, blend: industrialWastelandTransition },
-  { label: 'SCRAP TO WASTELAND', left: scrap, right: wasteland, blend: scrapWastelandTransition },
+drawText(sheet, 'PARAMETRIC ROADS AND EXACT BIOME TRANSITIONS', 16, 340, [226, 226, 212, 255], 2);
+const parametricFiles = [
+  ['road_surface.png', road],
+  ['road_edge.png', roadEdge],
+  ...transitionTextures.entries(),
 ];
-for (let index = 0; index < transitionPanels.length; index++) {
-  const panel = transitionPanels[index];
-  const x = index * 512;
-  drawText(sheet, panel.label, x + 14, 556, [226, 226, 212, 255], 2);
-  blit(sheet, panel.left, x, 584);
-  blit(sheet, panel.right, x + 256, 584);
-  blit(sheet, panel.blend, x + 128, 584);
-  blit(sheet, panel.left, x, 840);
-  blit(sheet, panel.right, x + 256, 840);
+for (let index = 0; index < parametricFiles.length; index++) {
+  const [name, png] = parametricFiles[index];
+  const col = index % 9;
+  const row = Math.floor(index / 9);
+  const x = 8 + col * 226;
+  const y = 374 + row * 184;
+  blitScaledContain(sheet, png, x + 28, y, 160, 150);
+  drawText(sheet, name.replace('.png', ''), x + 4, y + 154, [158, 174, 170, 255], 1);
 }
 
-blit(sheet, road, 128, 840);
-blit(sheet, roadEdge, 128, 840);
-blit(sheet, industrialCracks, 0, 840);
-blit(sheet, scrapFragments, 256, 840);
-blit(sheet, industrialCracks, 512, 840);
-blit(sheet, wastelandLandmark, 768, 840);
-blit(sheet, scrapFragments, 1024, 840);
-blit(sheet, wastelandDebris, 1280, 840);
-blit(sheet, wastelandCover, 1280, 840);
+const spriteNames = [
+  'sprite_industrial_breakable_edge.png',
+  'sprite_industrial_cover_cluster.png',
+  'sprite_industrial_linear_barrier.png',
+  'sprite_scrap_landmark.png',
+  'sprite_scrap_pile.png',
+  'sprite_scrap_wreck_cluster.png',
+  'sprite_site_entrance.png',
+  'sprite_site_industrial_yard.png',
+  'sprite_site_scrap_yard.png',
+  'sprite_wasteland_cover.png',
+  'sprite_wasteland_debris.png',
+  'sprite_wasteland_landmark.png',
+];
+drawText(sheet, 'REAL TRANSPARENT OBJECT ASSET FAMILIES', 16, 754, [226, 226, 212, 255], 2);
+for (let index = 0; index < spriteNames.length; index++) {
+  const name = spriteNames[index];
+  const col = index % 4;
+  const row = Math.floor(index / 4);
+  const x = 8 + col * 510;
+  const y = 790 + row * 342;
+  fillRect(sheet, x, y, 494, 326, [18, 23, 25, 255]);
+  const png = readPng(path.join(outputDir, name));
+  blitScaledContain(sheet, png, x + 8, y + 6, 478, 286);
+  drawText(sheet, name.replace('sprite_', '').replace('.png', ''), x + 8, y + 302, [184, 198, 193, 255], 1);
+}
 
 writePng(path.join(qaDir, 'ironwaste-v1-contact-sheet.png'), sheet);
 process.stdout.write(`ironwaste-assets:${files.size}:256x256\n`);

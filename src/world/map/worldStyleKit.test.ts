@@ -56,8 +56,8 @@ describe('worldStyleKit', () => {
     expect(first.variant.familyId).toBe(first.family.id);
   });
 
-  it('skaliert prozedurale Geometrierezepte in kleinere Generator-Footprints', () => {
-    const smallRecipeDemand: AssetDemandOccurrence = {
+  it('skaliert Spritevarianten in kleinere Generator-Footprints', () => {
+    const smallSpriteDemand: AssetDemandOccurrence = {
       id: 'small_breakable_edge',
       demandClass: 'industrial.breakableEdge',
       source: 'landscape',
@@ -66,9 +66,10 @@ describe('worldStyleKit', () => {
       connectorProfiles: [],
     };
 
-    const choice = resolveAssetFamily(IRONWASTE_V1_PREVIEW_KIT, smallRecipeDemand, 5);
+    const choice = resolveAssetFamily(IRONWASTE_V1_PREVIEW_KIT, smallSpriteDemand, 5);
 
-    expect(choice.variant.geometryRecipe).toBe('industrial-breakable-edge');
+    expect(choice.variant.geometryRecipe).toBeUndefined();
+    expect(choice.variant.files[0]).toMatch(/\/sprite_industrial_breakable_edge\.png$/);
   });
 
   it('verwirft Varianten ausserhalb der autoritativen Kataloghuelle', () => {

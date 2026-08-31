@@ -34,4 +34,26 @@ describe('AssetLab acceptance', () => {
     expect(first.plan.placements.map((placement) => placement.asset.variantId))
       .not.toEqual(second.plan.placements.map((placement) => placement.asset.variantId));
   }, 20_000);
+
+  it('liefert die echten begrenzten Assetfamilien fuer die sichtbare Lab-Galerie', () => {
+    const model = buildIronwastePreview(19, 1);
+
+    expect(model.spriteFamilies.map((family) => family.demandClass)).toEqual([
+      'industrial.breakableEdge',
+      'industrial.coverCluster',
+      'industrial.linearBarrier',
+      'scrap.landmarkIsland',
+      'scrap.scrapPile',
+      'scrap.wreckCluster',
+      'site.entrance',
+      'site.industrialYard',
+      'site.scrapYard',
+      'wasteland.coverCluster',
+      'wasteland.destructibleBlob',
+      'wasteland.landmarkIsland',
+    ]);
+    for (const family of model.spriteFamilies) {
+      expect(family.file).toMatch(/^style-kits\/ironwaste-v1\/candidates\/sprite_[a-z_]+\.png$/);
+    }
+  }, 20_000);
 });

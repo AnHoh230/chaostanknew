@@ -15,7 +15,7 @@ function planFixture(): WorldAssetPlacementPlan {
 }
 
 describe('worldStylePreviewRenderer', () => {
-  it('materialisiert den PlacementPlan ohne Graybox und entsorgt alle Meshes', () => {
+  it('materialisiert den PlacementPlan ausschliesslich aus Oberflaechen und Spritefamilien', () => {
     const engine = new NullEngine();
     const scene = new Scene(engine);
 
@@ -25,27 +25,30 @@ describe('worldStylePreviewRenderer', () => {
     expect(handle.meshCount).toBeGreaterThan(0);
     expect(scene.meshes.some((mesh) => mesh.name.startsWith('style_ground_'))).toBe(true);
     expect(scene.meshes.some((mesh) => mesh.name.startsWith('style_road_'))).toBe(true);
+    expect(scene.meshes.some((mesh) => mesh.name.startsWith('style_sprite_'))).toBe(true);
+    expect(scene.meshes.some((mesh) => mesh.name.startsWith('style_primitive_'))).toBe(false);
     expect(scene.meshes.some((mesh) => mesh.name.startsWith('map_'))).toBe(false);
     handle.dispose();
     expect(scene.meshes).toHaveLength(0);
     engine.dispose();
   }, 30_000);
 
-  it('bricht bei einem unbekannten Geometrierezept hart ab', () => {
+  it('weist sichtbare Script-Geometrie im Preview hart zurueck', () => {
     const plan = planFixture();
     const index = plan.placements.findIndex((placement) => placement.kind === 'landscape');
     const placement = plan.placements[index]!;
     const invalid: WorldAssetPlacementPlan = {
       ...plan,
       placements: plan.placements.map((entry, entryIndex) => entryIndex === index
-        ? { ...placement, asset: { ...placement.asset, geometryRecipe: 'unknown' } }
+        ? { ...placement, asset: { ...placement.asset, geometryRecipe: 'industrial-wall-and-hall-shell' } }
         : entry),
     };
     const engine = new NullEngine();
     const scene = new Scene(engine);
 
     expect(() => createWorldStylePreview(scene, invalid, IRONWASTE_V1_PREVIEW_KIT))
-      .toThrow('unsupported-style-geometry-recipe:unknown');
+      .toThrow('style-preview-scripted-geometry-forbidden');
     engine.dispose();
   }, 30_000);
+
 });

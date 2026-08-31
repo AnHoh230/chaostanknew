@@ -57,4 +57,33 @@ describe('worldAssetPlacement', () => {
       expect(Number.isFinite(entrance.rotation)).toBe(true);
     }
   }, 20_000);
+
+  it('laesst fuer kein Generatorbiom schwarze Boden- oder Uebergangsluecken', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const world = generiereWelt(DEFAULT_WORLD_OPTIONS, seed);
+      const plan = buildWorldAssetPlacementPlan(world, IRONWASTE_V1_PREVIEW_KIT, MANIFEST, 5);
+      const generatedBiomes = [...new Set(world.regions.biomeByCell)].sort();
+      const renderedGrounds = plan.placements
+        .filter((placement) => placement.kind === 'ground')
+        .map((placement) => placement.biomeId)
+        .sort();
+
+      expect(renderedGrounds, `Seed ${seed}`).toEqual(generatedBiomes);
+      expect(plan.omitted.some((entry) => entry.demandClass.startsWith('ground.')), `Seed ${seed}`).toBe(false);
+    }
+  }, 60_000);
+
+  it('reicht begrenzte Objekte als Spriteplatzierungen ohne sichtbare Graybox-Rezepte weiter', () => {
+    const world = generiereWelt(DEFAULT_WORLD_OPTIONS, 17);
+    const plan = buildWorldAssetPlacementPlan(world, IRONWASTE_V1_PREVIEW_KIT, MANIFEST, 6);
+    const bounded = plan.placements.filter((placement) => (
+      placement.kind === 'landscape' || placement.kind === 'site' || placement.kind === 'entrance'
+    ));
+
+    expect(bounded.length).toBeGreaterThan(0);
+    for (const placement of bounded) {
+      expect(placement.asset.geometryRecipe, placement.id).toBeUndefined();
+      expect(placement.asset.files[0], placement.id).toMatch(/\/sprite_[a-z_]+\.png$/);
+    }
+  }, 20_000);
 });

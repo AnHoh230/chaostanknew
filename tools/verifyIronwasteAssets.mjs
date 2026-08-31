@@ -11,21 +11,39 @@ const catalog = JSON.parse(fs.readFileSync(path.join(generatedDir, 'required-ass
 const seedCoverage = JSON.parse(fs.readFileSync(path.join(generatedDir, 'asset-seed-coverage.json'), 'utf8'));
 const approve = process.argv.includes('--approve');
 
+const BIOMES = ['crater', 'industrial', 'mud', 'ruins', 'scrap', 'wasteland'];
+const groundSpecs = BIOMES.map((biome) => ({
+  name: `ground_${biome}.png`, tileX: true, tileY: true, alphaVariation: false, width: 256, height: 256,
+}));
+const transitionSpecs = BIOMES.flatMap((left, leftIndex) => (
+  BIOMES.slice(leftIndex + 1).map((right) => ({
+    name: `transition_${left}_${right}.png`, tileX: false, tileY: true, alphaVariation: true, width: 256, height: 256,
+  }))
+));
+const spriteNames = [
+  'sprite_industrial_breakable_edge.png',
+  'sprite_industrial_cover_cluster.png',
+  'sprite_industrial_linear_barrier.png',
+  'sprite_scrap_landmark.png',
+  'sprite_scrap_pile.png',
+  'sprite_scrap_wreck_cluster.png',
+  'sprite_site_entrance.png',
+  'sprite_site_industrial_yard.png',
+  'sprite_site_scrap_yard.png',
+  'sprite_wasteland_cover.png',
+  'sprite_wasteland_debris.png',
+  'sprite_wasteland_landmark.png',
+];
+const spriteSpecs = spriteNames.map((name) => ({
+  name, tileX: false, tileY: false, alphaVariation: true, maxBorderAlpha: 4, minDimension: 1024,
+}));
+
 const specs = [
-  { name: 'ground_industrial.png', tileX: true, tileY: true, alphaVariation: false },
-  { name: 'ground_scrap.png', tileX: true, tileY: true, alphaVariation: false },
-  { name: 'ground_wasteland.png', tileX: true, tileY: true, alphaVariation: false },
-  { name: 'transition_industrial_scrap.png', tileX: false, tileY: true, alphaVariation: true },
-  { name: 'transition_industrial_wasteland.png', tileX: false, tileY: true, alphaVariation: true },
-  { name: 'transition_scrap_wasteland.png', tileX: false, tileY: true, alphaVariation: true },
+  ...groundSpecs,
+  ...transitionSpecs,
   { name: 'road_surface.png', tileX: false, tileY: true, alphaVariation: false },
   { name: 'road_edge.png', tileX: false, tileY: true, alphaVariation: true },
-  { name: 'decal_industrial_cracks.png', tileX: true, tileY: true, alphaVariation: true },
-  { name: 'decal_scrap_fragments.png', tileX: true, tileY: true, alphaVariation: true },
-  { name: 'decal_shared_grime.png', tileX: true, tileY: true, alphaVariation: true },
-  { name: 'decal_wasteland_landmark.png', tileX: false, tileY: false, alphaVariation: true, maxBorderAlpha: 0 },
-  { name: 'decal_wasteland_debris.png', tileX: false, tileY: false, alphaVariation: true, maxBorderAlpha: 0 },
-  { name: 'decal_wasteland_cover.png', tileX: false, tileY: false, alphaVariation: true, maxBorderAlpha: 0 },
+  ...spriteSpecs,
 ];
 
 function edgeRms(png, axis) {
@@ -80,7 +98,12 @@ for (const spec of specs) {
   }
   const buffer = fs.readFileSync(filePath);
   const png = readPng(filePath);
-  if (png.width !== 256 || png.height !== 256) errors.push(`candidate-invalid-dimensions:${spec.name}`);
+  if (spec.width !== undefined && (png.width !== spec.width || png.height !== spec.height)) {
+    errors.push(`candidate-invalid-dimensions:${spec.name}`);
+  }
+  if (spec.minDimension !== undefined && Math.min(png.width, png.height) < spec.minDimension) {
+    errors.push(`candidate-too-small:${spec.name}:${png.width}x${png.height}`);
+  }
   const rmsX = edgeRms(png, 'x');
   const rmsY = edgeRms(png, 'y');
   if (spec.tileX && rmsX > 1) errors.push(`candidate-x-seam:${spec.name}:${rmsX.toFixed(3)}`);
@@ -102,7 +125,7 @@ for (const spec of specs) {
 }
 
 const qaImages = [
-  { path: 'docs/superpowers/assets/ironwaste-v1-contact-sheet.png', width: 1536, height: 1100 },
+  { path: 'docs/superpowers/assets/ironwaste-v1-contact-sheet.png', width: 2048, height: 1840 },
   { path: 'docs/superpowers/assets/ironwaste-v1-seed-board.png', width: 1000, height: 840 },
   { path: 'docs/superpowers/assets/wasteland-v1-concept.png', width: 1254, height: 1254 },
 ];
@@ -127,7 +150,7 @@ if (errors.length > 0) {
 fs.mkdirSync(generatedDir, { recursive: true });
 const manifest = {
   kitId: 'ironwaste-v1',
-  kitVersion: 2,
+  kitVersion: 3,
   catalogSignature: catalog.signature,
   state: approve ? 'approved' : 'candidate',
   files,
@@ -138,10 +161,10 @@ const report = [
   '# Ironwaste v1 Asset QA',
   '',
   `- Catalog signature: \`${catalog.signature}\``,
-  '- Kit version: `2`',
+  '- Kit version: `3`',
   `- State: \`${manifest.state}\``,
   '- Activation: `preview`',
-  '- Preview biomes: `industrial`, `scrap`, `wasteland`',
+  '- Preview biomes: `industrial`, `scrap`, `wasteland`, `mud`, `ruins`, `crater`',
   `- Seed coverage: \`${seedCoverage.seedStart}..${seedCoverage.seedEnd}\``,
   `- Seed coverage signature: \`${seedCoverage.signature}\``,
   '- Wasteland style reference: `docs/superpowers/assets/wasteland-v1-concept.png`',

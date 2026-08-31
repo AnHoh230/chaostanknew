@@ -1,17 +1,16 @@
 import {
   Color3,
+  Material,
   Mesh,
   MeshBuilder,
   StandardMaterial,
   Texture,
   TransformNode,
-  Vector3,
   VertexData,
 } from '@babylonjs/core';
 import type { Scene } from '@babylonjs/core';
 import type { WorldStyleKit } from './assetDemandTypes';
 import { buildRoadCapGeometry, buildRoadRibbonGeometry } from './styleRoadGeometry';
-import { buildStyleGeometryRecipe, type StylePrimitive } from './styleGeometryRecipes';
 import {
   buildCellSurfaceGeometry,
   buildTransitionGeometry,
@@ -70,8 +69,8 @@ class MaterialStore {
     this.loadTextures = scene.getEngine().getClassName() !== 'NullEngine';
   }
 
-  texture(file: string): StandardMaterial {
-    const key = `texture:${file}`;
+  texture(file: string, transparent = false): StandardMaterial {
+    const key = `texture:${transparent ? 'alpha' : 'opaque'}:${file}`;
     const existing = this.materials.get(key);
     if (existing) return existing;
     const material = new StandardMaterial(`style_material_${this.materials.size}`, this.scene);
@@ -82,7 +81,12 @@ class MaterialStore {
       texture.wrapU = Texture.WRAP_ADDRESSMODE;
       texture.wrapV = Texture.WRAP_ADDRESSMODE;
       texture.anisotropicFilteringLevel = 16;
+      texture.hasAlpha = transparent;
       material.diffuseTexture = texture;
+      material.useAlphaFromDiffuseTexture = transparent;
+      material.transparencyMode = transparent
+        ? Material.MATERIAL_ALPHATESTANDBLEND
+        : Material.MATERIAL_OPAQUE;
     } else {
       material.diffuseColor = colorFromHex(this.kit.globalStyle.palette.concrete ?? '#596166', 'concrete');
     }
@@ -141,44 +145,7 @@ function meshFromGeometry(
   return mesh;
 }
 
-function rotatedCenter(local: StylePrimitive['center'], rotation: number): { x: number; z: number } {
-  const cosine = Math.cos(rotation);
-  const sine = Math.sin(rotation);
-  return {
-    x: local.x * cosine + local.z * sine,
-    z: -local.x * sine + local.z * cosine,
-  };
-}
-
-function primitiveMesh(
-  scene: Scene,
-  root: TransformNode,
-  meshes: Mesh[],
-  materials: MaterialStore,
-  primitive: StylePrimitive,
-  name: string,
-  origin: { x: number; z: number },
-  rotation: number,
-): void {
-  const mesh = primitive.shape === 'box'
-    ? MeshBuilder.CreateBox(name, {
-        width: primitive.size.x,
-        height: primitive.size.y,
-        depth: primitive.size.z,
-      }, scene)
-    : MeshBuilder.CreateCylinder(name, { diameter: 1, height: primitive.size.y, tessellation: 16 }, scene);
-  if (primitive.shape === 'cylinder') mesh.scaling.set(primitive.size.x, 1, primitive.size.z);
-  const local = rotatedCenter(primitive.center, rotation);
-  mesh.position = new Vector3(origin.x + local.x, primitive.center.y + HEIGHT.decal, origin.z + local.z);
-  mesh.rotation.y = rotation + primitive.rotationY;
-  mesh.material = materials.palette(primitive.paletteSlot);
-  mesh.parent = root;
-  mesh.isPickable = false;
-  mesh.freezeWorldMatrix();
-  meshes.push(mesh);
-}
-
-function decalMesh(
+function spriteMesh(
   scene: Scene,
   root: TransformNode,
   meshes: Mesh[],
@@ -195,48 +162,38 @@ function decalMesh(
   }, scene);
   mesh.position.set(position.x, HEIGHT.decal, position.z);
   mesh.rotation.y = rotation;
-  mesh.material = materials.texture(file);
+  mesh.material = materials.texture(file, true);
   mesh.parent = root;
   mesh.isPickable = false;
   mesh.freezeWorldMatrix();
   meshes.push(mesh);
 }
 
-function renderRecipePlacement(
+function renderSpritePlacement(
   scene: Scene,
   root: TransformNode,
   meshes: Mesh[],
   materials: MaterialStore,
   placement: LandscapeAssetPlacement | SiteAssetPlacement | EntranceAssetPlacement,
 ): void {
-  const recipe = placement.asset.geometryRecipe;
-  if (!recipe) throw new Error(`style-placement-has-no-recipe:${placement.id}`);
+  if (placement.asset.geometryRecipe) {
+    throw new Error(`style-preview-scripted-geometry-forbidden:${placement.id}:${placement.asset.geometryRecipe}`);
+  }
   const footprint = placement.kind === 'entrance'
     ? { halfX: Math.max(2, placement.width / 2 + 1), halfZ: 2.5 }
     : placement.footprint;
   const file = requiredFile(placement.asset.files, placement.id);
-  decalMesh(
+  spriteMesh(
     scene,
     root,
     meshes,
     materials,
-    `style_decal_${placement.id}`,
+    `style_sprite_${placement.id}`,
     placement.position,
     placement.rotation,
     footprint,
     file,
   );
-  const primitives = buildStyleGeometryRecipe(recipe, footprint, placement.asset.variantId);
-  primitives.forEach((entry, index) => primitiveMesh(
-    scene,
-    root,
-    meshes,
-    materials,
-    entry,
-    `style_primitive_${placement.id}_${index}`,
-    placement.position,
-    placement.rotation,
-  ));
 }
 
 export function createWorldStylePreview(
@@ -314,7 +271,7 @@ export function createWorldStylePreview(
           buildRoadCapGeometry(placement.position, placement.degree === 4 ? 10 : 9, 16),
         );
       } else {
-        renderRecipePlacement(scene, root, meshes, materials, placement);
+        renderSpritePlacement(scene, root, meshes, materials, placement);
       }
     }
 
@@ -325,7 +282,7 @@ export function createWorldStylePreview(
         meshes,
         entry.name,
         entry.geometry,
-        materials.texture(entry.file),
+        materials.texture(entry.file, entry.height !== HEIGHT.roadSurface),
         entry.height,
       );
     }
